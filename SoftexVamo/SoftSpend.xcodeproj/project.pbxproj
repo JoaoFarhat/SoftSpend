@@ -37,18 +37,24 @@
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
+/* Begin PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
+		F94C44CF2FB2E0A4005F77B0 /* Exceptions for "SoftexVamo" folder in "Compile Sources" phase from "SoftSpend" target */ = {
+			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
+			buildPhase = 281085822F74615600C131AB /* Sources */;
+			membershipExceptions = (
+				Config.xcconfig,
+			);
+		};
+/* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		281085882F74615600C131AB /* SoftexVamo */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				F92A31972F76D7D30061B042 /* Exceptions for "SoftexVamo" folder in "SoftSpend" target */,
+				F94C44CF2FB2E0A4005F77B0 /* Exceptions for "SoftexVamo" folder in "Compile Sources" phase from "SoftSpend" target */,
 			);
 			path = SoftexVamo;
-			sourceTree = "<group>";
-		};
-		2834257F2F857EFC00710FB7 /* SoftexWidget */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			path = SoftexWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -68,7 +74,6 @@
 			isa = PBXGroup;
 			children = (
 				281085882F74615600C131AB /* SoftexVamo */,
-				2834257F2F857EFC00710FB7 /* SoftexWidget */,
 				2834257A2F857EFB00710FB7 /* Frameworks */,
 				281085872F74615600C131AB /* Products */,
 			);
