@@ -25,9 +25,22 @@
 		2834257D2F857EFC00710FB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		281085FF2F74615600C131AB /* Exceptions for "SoftexVamo" folder in "SoftSpend" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 281085852F74615600C131AB /* SoftSpend */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		281085882F74615600C131AB /* SoftexVamo */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				281085FF2F74615600C131AB /* Exceptions for "SoftexVamo" folder in "SoftSpend" target */,
+			);
 			path = SoftexVamo;
 			sourceTree = "<group>";
 		};
