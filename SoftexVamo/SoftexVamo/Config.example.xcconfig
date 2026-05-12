@@ -1,0 +1,4 @@
+// IP do seu Mac na rede local + porta do servidor FastAPI
+// Use `ipconfig getifaddr en0` no terminal para descobrir seu IP
+// IMPORTANTE: as duas barras "//" precisam de escape com $() no xcconfig
+API_BASE_URL_LOCAL = http:/$()/192.168.128.255:8000
