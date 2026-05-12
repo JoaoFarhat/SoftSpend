@@ -25,35 +25,9 @@
 		2834257D2F857EFC00710FB7 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
-/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
-		F92A31972F76D7D30061B042 /* Exceptions for "SoftexVamo" folder in "SoftSpend" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Config.example.xcconfig,
-				Config.xcconfig,
-				Info.plist,
-			);
-			target = 281085852F74615600C131AB /* SoftSpend */;
-		};
-/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
-
-/* Begin PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
-		F94C44CF2FB2E0A4005F77B0 /* Exceptions for "SoftexVamo" folder in "Compile Sources" phase from "SoftSpend" target */ = {
-			isa = PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet;
-			buildPhase = 281085822F74615600C131AB /* Sources */;
-			membershipExceptions = (
-				Config.xcconfig,
-			);
-		};
-/* End PBXFileSystemSynchronizedGroupBuildPhaseMembershipExceptionSet section */
-
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		281085882F74615600C131AB /* SoftexVamo */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				F92A31972F76D7D30061B042 /* Exceptions for "SoftexVamo" folder in "SoftSpend" target */,
-				F94C44CF2FB2E0A4005F77B0 /* Exceptions for "SoftexVamo" folder in "Compile Sources" phase from "SoftSpend" target */,
-			);
 			path = SoftexVamo;
 			sourceTree = "<group>";
 		};
