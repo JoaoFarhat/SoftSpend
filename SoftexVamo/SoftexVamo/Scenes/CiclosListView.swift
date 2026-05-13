@@ -13,7 +13,6 @@ struct CiclosListView: View {
     @StateObject var authService = AuthService.shared
     @State private var showMenu = false
     let newCicloViewModel = NewCicloViewModel()
-    //    @StateObject var user = AuthService.shared.currentUser!
     
     private var currentUser: UserModel? {
         AuthService.shared.currentUser
@@ -65,7 +64,7 @@ struct CiclosListView: View {
                         }
                     }
                     
-                }.padding()
+                }.padding(10)
                 
                 if viewModel.isLoading {
                     CardMainView()
