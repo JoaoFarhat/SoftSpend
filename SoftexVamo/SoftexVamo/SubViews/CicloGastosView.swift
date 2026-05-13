@@ -131,7 +131,7 @@ struct CicloGastosView: View {
                 
                 
             }
-            .padding()
+            .padding(10)
             .padding(.bottom, 80)
         }
         .onTapGesture {
