@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from database import *
 from fastapi.middleware.cors import CORSMiddleware
 from controllers.ciclo_controller import router as ciclo_router
+from controllers.dia_controller import router as dia_router
 from controllers.gasto_controller import router as gasto_router
 from controllers.auth_controller import router as auth_router
 from slowapi import _rate_limit_exceeded_handler
@@ -21,6 +22,7 @@ app.add_middleware(
 )
 
 app.include_router(ciclo_router)
+app.include_router(dia_router)
 app.include_router(gasto_router)
 app.include_router(auth_router)
 

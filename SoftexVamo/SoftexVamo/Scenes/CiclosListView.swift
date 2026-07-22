@@ -74,8 +74,8 @@ struct CiclosListView: View {
                     } deleteAction: { diaId, gastoID in
                         Task { try await viewModel.deleteGasto(gastoID: gastoID) }
                     }
-                    .id(viewModel.actualCiclo.id)
-                    .environmentObject(CicloGastosViewModel(ciclo: viewModel.actualCiclo))
+                    .id(viewModel.atualCiclo.id)
+                    .environmentObject(CicloGastosViewModel(ciclo: viewModel.atualCiclo))
                 } else if viewModel.allCiclos.isEmpty || viewModel.allCiclos.allSatisfy({ $0.backendId == nil }) {
                     EmptyCicloView {
                         addNewCicloSheet.toggle()
@@ -90,8 +90,8 @@ struct CiclosListView: View {
                     } deleteAction: { diaId, gastoID in
                         Task { try await viewModel.deleteGasto(gastoID: gastoID) }
                     }
-                    .id(viewModel.actualCiclo.id)
-                    .environmentObject(CicloGastosViewModel(ciclo: viewModel.actualCiclo))
+                    .id(viewModel.atualCiclo.id)
+                    .environmentObject(CicloGastosViewModel(ciclo: viewModel.atualCiclo))
                 }
                 
                 Spacer()
@@ -120,7 +120,7 @@ struct CiclosListView: View {
 
 final class CiclosListViewModel: ObservableObject {
     @Published var allCiclos: [CicloSoftex] = []
-    @Published var actualCiclo: CicloSoftex = CicloSoftex.example
+    @Published var atualCiclo: CicloSoftex = CicloSoftex.example
     @Published var gastosInfo: GastosDia = GastosDia.example
     @Published var availableInfo: GastosDia = GastosDia.example
     @Published var isLoading: Bool = true
@@ -136,7 +136,7 @@ final class CiclosListViewModel: ObservableObject {
     @MainActor
     func reset() {
         self.allCiclos = []
-        self.actualCiclo = CicloSoftex(valor_total: 0, gasto_total: 0, periodo: "", diaria: 0, titulo: "", dias: [])
+        self.atualCiclo = CicloSoftex(valor_total: 0, gasto_total: 0, periodo: "", diaria: 0, titulo: "", dias: [])
         self.index = 0
         self.isLoading = true
         self.hasLoadedOnce = false
@@ -158,7 +158,7 @@ final class CiclosListViewModel: ObservableObject {
         if let data = cacheData {
             if let cache = try? JSONDecoder().decode(CicloSoftex.self, from: data)
             {
-                self.actualCiclo = cache
+                self.atualCiclo = cache
                 print("Cache carregado em background")
             }
         }
@@ -177,11 +177,11 @@ final class CiclosListViewModel: ObservableObject {
                     return
                 }
                 
-                self.actualCiclo = try await NetworkManager.shared.fetchCicloById(cicloId: cicloId)
+                self.atualCiclo = try await NetworkManager.shared.fetchCicloById(cicloId: cicloId)
                 self.salvarNoCache(ciclo: cicloParaSalvar)
                 
             } else {
-                self.actualCiclo = CicloSoftex(valor_total: 0, gasto_total: 0, periodo: "", diaria: 0, titulo: "", dias: [])
+                self.atualCiclo = CicloSoftex(valor_total: 0, gasto_total: 0, periodo: "", diaria: 0, titulo: "", dias: [])
                 UserDefaults.standard.removeObject(forKey: "ultimo_ciclo_cache")
             }
             
@@ -193,7 +193,7 @@ final class CiclosListViewModel: ObservableObject {
             print("Erro ao buscar ciclos:", error)
             
             self.allCiclos = []
-            self.actualCiclo = CicloSoftex(valor_total: 0, gasto_total: 0, periodo: "", diaria: 0, titulo: "", dias: [])
+            self.atualCiclo = CicloSoftex(valor_total: 0, gasto_total: 0, periodo: "", diaria: 0, titulo: "", dias: [])
             UserDefaults.standard.removeObject(forKey: "ultimo_ciclo_cache")
             self.isLoading = false
             self.hasLoadedOnce = true
@@ -202,13 +202,15 @@ final class CiclosListViewModel: ObservableObject {
     
     func createNewCiclo(startDate: Date, endDate: Date, totalValue: Float, titulo: String) async {
         let dayCount = Calendar.current.datesBetween(startDate, and: endDate)
-        let saldo = totalValue / Float(dayCount)
-        let days: [DiaSoftex] = createAllDays(dayCount: dayCount, startDate: startDate, saldo: saldo)
+        let safeDayCount = max(dayCount, 1)
+        
+        let saldo = totalValue / Float(safeDayCount)
         let periodo = createPeriodoString(from: startDate, to: endDate)
         
-        let newCiclo = CicloSoftex(valor_total: totalValue, gasto_total: 0, periodo: periodo, diaria: saldo, titulo: titulo, dias: days)
+        let newCiclo = CicloSoftex(valor_total: totalValue, gasto_total: 0, periodo: periodo, diaria: saldo, titulo: titulo, dias: nil)
+        let dias: [DiaLoteRequest] = createAllDiasLoteRequest(dayCount: dayCount, startDate: startDate)
         
-        await postToNetwork(newCiclo: newCiclo, daysCount: dayCount)
+        await postToNetwork(newCiclo: newCiclo, dias: dias)
     }
     
     private func salvarNoCache(ciclo: CicloSoftex) {
@@ -219,14 +221,16 @@ final class CiclosListViewModel: ObservableObject {
         }
     }
     
-    private func createAllDays(dayCount: Int, startDate: Date, saldo: Float) -> [DiaSoftex] {
-        var days: [DiaSoftex] = []
-        for i in 0...dayCount - 1 {
-            let time = 86400 * i
-            let date = startDate.addingTimeInterval(TimeInterval(time))
-            days.append(DiaSoftex(gastos: [], data: date, saldo: saldo))
-        }
-        return days
+    private func createAllDiasLoteRequest(dayCount: Int, startDate: Date) -> [DiaLoteRequest] {
+        var dias: [DiaLoteRequest] = []
+        let calendar = Calendar.current
+        
+        for i in 0..<dayCount {
+                if let date = calendar.date(byAdding: .day, value: i, to: startDate) {
+                    dias.append(DiaLoteRequest(data: date))
+                }
+            }
+        return dias
     }
     
     private func createPeriodoString(from: Date, to: Date) -> String {
@@ -235,11 +239,20 @@ final class CiclosListViewModel: ObservableObject {
         return "\(dateFormatter.string(from: from)) - \(dateFormatter.string(from: to))"
     }
     
-    private func postToNetwork(newCiclo: CicloSoftex, daysCount: Int) async {
+    @MainActor
+    private func postToNetwork(newCiclo: CicloSoftex, dias: [DiaLoteRequest]) async {
         do {
-            let novoCiclo = try await NetworkManager.shared.postCiclo(newCiclo: newCiclo)
+            var novoCiclo = try await NetworkManager.shared.postCiclo(newCiclo: newCiclo)
+            
+            guard let cicloId = novoCiclo.backendId else {
+                print("Erro: ciclo criado sem backendId")
+                return
+            }
+            
+            novoCiclo.dias = try await NetworkManager.shared.postDiasLote(cicloId: cicloId, dias: dias)
+            
             self.allCiclos.append(novoCiclo)
-            self.actualCiclo = novoCiclo
+            self.atualCiclo = novoCiclo
             self.index = self.allCiclos.count - 1
             
         } catch {
@@ -254,26 +267,26 @@ final class CiclosListViewModel: ObservableObject {
         let novoGasto = try await NetworkManager.shared.postGasto(newGasto: gasto, diaId: diaId)
         
         await MainActor.run {
-            guard let diaIndex = actualCiclo.dias?.firstIndex(where: { $0.backendId == dia.backendId }) else { return }
+            guard let diaIndex = atualCiclo.dias?.firstIndex(where: { $0.backendId == dia.backendId }) else { return }
             
-            self.actualCiclo.dias?[diaIndex].gastos.append(novoGasto)
-            self.actualCiclo.gasto_total += novoGasto.valor
-            self.allCiclos[index] = self.actualCiclo
+            self.atualCiclo.dias?[diaIndex].gastos.append(novoGasto)
+            self.atualCiclo.gasto_total += novoGasto.valor
+            self.allCiclos[index] = self.atualCiclo
         }
     }
     
     func deleteGasto(gastoID: Int) async throws{
-        guard let dias = actualCiclo.dias else { return }
+        guard let dias = atualCiclo.dias else { return }
         
         for diaIndex in dias.indices {
             if let gastoIndex = dias[diaIndex].gastos.firstIndex(where: { $0.backendId == gastoID }) {
                 let valorRemovido = dias[diaIndex].gastos[gastoIndex].valor
                 await MainActor.run {
-                    self.actualCiclo.dias?[diaIndex].gastos.remove(at: gastoIndex)
-                    self.actualCiclo.gasto_total -= valorRemovido
+                    self.atualCiclo.dias?[diaIndex].gastos.remove(at: gastoIndex)
+                    self.atualCiclo.gasto_total -= valorRemovido
                     
                     if self.index < self.allCiclos.count {
-                        self.allCiclos[self.index] = self.actualCiclo
+                        self.allCiclos[self.index] = self.atualCiclo
                     }
                 }
                 break

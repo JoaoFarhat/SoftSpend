@@ -22,7 +22,7 @@ struct CardCiclosView: View {
     }
     
     private var isAtual: Bool {
-        viewModel.actualCiclo.backendId == ciclo.backendId
+        viewModel.atualCiclo.backendId == ciclo.backendId
     }
     
     var body: some View {
@@ -31,7 +31,7 @@ struct CardCiclosView: View {
                     .fill(isAtual ?
                           AnyShapeStyle(corFundoTela) :
                             AnyShapeStyle(Color("cardBackground")))
-                    .id(viewModel.actualCiclo.id)
+                    .id(viewModel.atualCiclo.id)
                     .frame(maxWidth: .infinity, maxHeight: 180)
                     .shadow(radius: 10)
                 
@@ -95,7 +95,7 @@ struct CardCiclosView: View {
             }
             .padding(.horizontal)
             .onTapGesture {
-                viewModel.actualCiclo = ciclo
+                viewModel.atualCiclo = ciclo
                 presentCiclo = true
                 viewModel.selectedTab = 0
             }
