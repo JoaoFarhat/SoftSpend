@@ -25,107 +25,148 @@ struct CicloGastosView: View {
     
     var body: some View {
         ScrollView(showsIndicators: false){
-            VStack(alignment: .leading) {
-                
-                Text("Gastos Registrados")
-                    .font(.system(size: 20, weight: .bold))
-                HStack{
-                    HStack {
-                        Image(systemName: "magnifyingglass")
-                            .foregroundColor(.gray)
-                        TextField("Procurar gasto...", text: $viewModel.searchGastoText)
-                            .textFieldStyle(PlainTextFieldStyle())
-                    }
-                    .padding(12)
-                    .background(Color("cinza"))
-                    .cornerRadius(15)
-                    .shadow(
-                        color: Color.black.opacity(0.1),
-                        radius: 10,
-                    )
-                    .overlay{
-                        RoundedRectangle(cornerRadius: 15)
-                            .stroke(.gray, lineWidth: 0.2)
-                    }
+            VStack{
+                VStack(alignment: .leading) {
                     
-                    
-                    Menu {
-                        Button {
-                            viewModel.categoriaFiltro = nil
-                        } label: {
-                            HStack {
-                                Text("Todas as categorias")
-                                if viewModel.categoriaFiltro == nil {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
+                    HStack{
+                        Text("Gastos Registrados")
+                            .font(.system(size: 20, weight: .bold))
+                        
+                        Spacer()
+                    }
+                    HStack{
+                        HStack {
+                            Image(systemName: "magnifyingglass")
+                                .foregroundColor(.gray)
+                            TextField("Procurar gasto...", text: $viewModel.searchGastoText)
+                                .textFieldStyle(PlainTextFieldStyle())
+                        }
+                        .padding(12)
+                        .background(Color("cinza"))
+                        .cornerRadius(15)
+                        .shadow(
+                            color: Color.black.opacity(0.1),
+                            radius: 10,
+                        )
+                        .overlay{
+                            RoundedRectangle(cornerRadius: 15)
+                                .stroke(.gray, lineWidth: 0.2)
                         }
                         
-                        Divider()
                         
-                        ForEach(Categoria.allCases) { categoria in
+                        Menu {
                             Button {
-                                viewModel.categoriaFiltro = categoria
+                                viewModel.categoriaFiltro = nil
                             } label: {
                                 HStack {
-                                    Image(systemName: categoria.systemImageName)
-                                    Text(categoria.localizedName)
-                                    if viewModel.categoriaFiltro == categoria {
+                                    Text("Todas as categorias")
+                                    if viewModel.categoriaFiltro == nil {
                                         Image(systemName: "checkmark")
                                     }
                                 }
                             }
-                        }
-                    } label: {
-                        ZStack {
-                            Image(systemName: "line.3.horizontal.decrease")
-                                .foregroundStyle(viewModel.categoriaFiltro != nil ? Color.white : Color("textPrimary"))
-                                .padding(.vertical, 16)
-                                .padding(.horizontal, 12)
-                                .background(viewModel.categoriaFiltro != nil ? Color.appPurple : Color("cinza"))
-                                .cornerRadius(15)
-                                .shadow(color: Color.black.opacity(0.1), radius: 10)
-                                .overlay{
-                                    RoundedRectangle(cornerRadius: 15)
-                                        .stroke(.gray, lineWidth: 0.2)
-                                }
-                        }
-                    }
-                }
-                ForEach(viewModel.secoesExibidas.reversed()) { dia in
-                    if(dia.gastos.count != 0){
-                        Section(header: createSectionHeader(dia: dia)) {
-                            ZStack{
-                                RoundedRectangle(cornerRadius: 8)
-                                    .foregroundStyle(Color("cinza"))
-
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                    
-                                    .shadow(radius: 2)
-                                    
-                                VStack{
-                                    ForEach(Array(dia.gastos.enumerated()), id: \.element.id) { index, gasto in
-                                        createGastoCell(gasto: gasto) {
-                                            removerGastoEspecifico(dia: dia, index: index)
-                                        }
-                                        .padding(.horizontal)
-                                        .padding(.vertical, 8)
-                                        
-                                        if index < dia.gastos.count - 1 {
-                                            Divider()
-                                                .background(Color.gray.opacity(0.2))
-                                                .padding(.horizontal, -10)
+                            
+                            Divider()
+                            
+                            ForEach(Categoria.allCases) { categoria in
+                                Button {
+                                    viewModel.categoriaFiltro = categoria
+                                } label: {
+                                    HStack {
+                                        Image(systemName: categoria.systemImageName)
+                                        Text(categoria.localizedName)
+                                        if viewModel.categoriaFiltro == categoria {
+                                            Image(systemName: "checkmark")
                                         }
                                     }
                                 }
-                                .skeleton(isLoading: listViewModel.isLoading)
-
-                                //                            .padding()
                             }
-//                            .background(Color("cinza"))
-//                            .background(Color.cardBackground)
+                        } label: {
+                            ZStack {
+                                Image(systemName: "line.3.horizontal.decrease")
+                                    .foregroundStyle(viewModel.categoriaFiltro != nil ? Color.white : Color("textPrimary"))
+                                    .padding(.vertical, 16)
+                                    .padding(.horizontal, 12)
+                                    .background(viewModel.categoriaFiltro != nil ? Color.appPurple : Color("cinza"))
+                                    .cornerRadius(15)
+                                    .shadow(color: Color.black.opacity(0.1), radius: 10)
+                                    .overlay{
+                                        RoundedRectangle(cornerRadius: 15)
+                                            .stroke(.gray, lineWidth: 0.2)
+                                    }
+                            }
                         }
+                    }
+                }
+                if listViewModel.actualCiclo.dias?.allSatisfy({ $0.gastos.isEmpty }) ?? true {
+                    VStack(alignment: .center, spacing: 16) {
+                        Image(systemName: "receipt")
+                            .font(.system(size: 48))
+                            .foregroundStyle(Color.appPurple.opacity(0.5))
                         
+                        Text("Nenhum gasto registrado")
+                            .font(.system(size: 20, weight: .bold))
+                        
+                        Text("Toque no + para adicionar seu primeiro gasto")
+                            .font(.system(size: 14))
+                            .foregroundStyle(Color("textSecondary"))
+                            .multilineTextAlignment(.center)
+                    }
+                    //                    .frame(width: .infinity)
+                    .padding(60)
+                } else {
+                    if viewModel.secoesExibidas.isEmpty && !viewModel.searchGastoText.isEmpty {
+                        VStack(spacing: 12) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 40))
+                                .foregroundStyle(Color.appPurple.opacity(0.5))
+                            
+                            Text("Nenhum resultado para \"\(viewModel.searchGastoText)\"")
+                                .font(.system(size: 16, weight: .bold))
+                            
+                            Text("Tente buscar por outro termo")
+                                .font(.system(size: 14))
+                                .foregroundStyle(Color("textSecondary"))
+                        }
+                        .padding(.top, 60)
+                        .frame(maxWidth: .infinity)
+                    } else {
+                        ForEach(viewModel.secoesExibidas.reversed()) { dia in
+                            if(dia.gastos.count != 0){
+                                Section(header: createSectionHeader(dia: dia)) {
+                                    ZStack{
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .foregroundStyle(Color("cinza"))
+                                        
+                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                        
+                                            .shadow(radius: 2)
+                                        
+                                        VStack{
+                                            ForEach(Array(dia.gastos.enumerated()), id: \.element.id) { index, gasto in
+                                                createGastoCell(gasto: gasto) {
+                                                    removerGastoEspecifico(dia: dia, index: index)
+                                                }
+                                                .padding(.horizontal)
+                                                .padding(.vertical, 8)
+                                                
+                                                if index < dia.gastos.count - 1 {
+                                                    Divider()
+                                                        .background(Color.gray.opacity(0.2))
+                                                        .padding(.horizontal, -10)
+                                                }
+                                            }
+                                        }
+                                        .skeleton(isLoading: listViewModel.isLoading)
+                                        
+                                        //                            .padding()
+                                    }
+                                    //                            .background(Color("cinza"))
+                                    //                            .background(Color.cardBackground)
+                                }
+                                
+                            }
+                        }
                     }
                 }
                 
@@ -145,7 +186,7 @@ struct CicloGastosView: View {
                 Text("HOJE")
                     .frame(width: 90)
                     .skeleton(isLoading: listViewModel.isLoading)
-                    
+                
                 
             } else if Calendar.current.isDateInYesterday(dia.data) {
                 Text("ONTEM")
@@ -176,7 +217,7 @@ struct CicloGastosView: View {
                 .foregroundStyle(Color.white)
                 .background(gasto.categoria.color)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
-                
+            
             
             
             VStack(alignment: .leading){
@@ -212,7 +253,7 @@ struct CicloGastosView: View {
         .background(Color("cinza"))
         
         .frame(maxWidth: .infinity, maxHeight: 70)
-//
+        //
         
         
     }
@@ -233,7 +274,7 @@ final class CicloGastosViewModel: ObservableObject {
     @Published var ciclo: CicloSoftex
     @Published var searchGastoText: String = ""
     @Published var categoriaFiltro: Categoria? = nil
-
+    
     init(ciclo: CicloSoftex) {
         self.ciclo = ciclo
     }

@@ -15,7 +15,7 @@ enum APIEnvironment: String, CaseIterable {
             return Bundle.main.object(forInfoDictionaryKey: "API_BASE_URL_LOCAL") as? String
                 ?? "http://localhost:8000"
         case .production:
-            return "https://softspend-production.up.railway.app"
+            return "https://softspend.com.br"
         }
     }
     
