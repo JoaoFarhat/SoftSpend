@@ -11,6 +11,10 @@ router = APIRouter()
 def criar_gasto(dia_id: int, gasto: GastoRequest, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
     return gasto_service.criar_gasto(db, dia_id, gasto, user_id)
 
+@router.put("/gastos/{gasto_id}", response_model=GastoResponse)
+def atualizar_gasto(gasto_id: int, gasto: GastoRequest, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
+    return gasto_service.atualizar_gasto(db, gasto_id, gasto, user_id)
+
 @router.delete("/gastos/{gasto_id}", status_code = 204)
 def deletar_gasto(gasto_id: int, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
     return gasto_service.remover_gasto(db, gasto_id, user_id)

@@ -44,7 +44,7 @@ struct HistoricoView: View {
                             ForEach(viewModel.allCiclos){ ciclo in
                                 CardCiclosView(ciclo: ciclo)
                                     .environmentObject(viewModel)
-                                    .id("\(ciclo.id)-\(viewModel.actualCiclo.id)")
+                                    .id("\(ciclo.id)-\(viewModel.atualCiclo.id)")
                             }
                             
                             

@@ -25,7 +25,15 @@ def get_ciclos_resumo(db: Session = Depends(get_db), user_id: int = Depends(get_
 
 @router.get("/ciclos/{ciclo_id}", response_model=CicloResponse)
 def get_ciclo(ciclo_id: int, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
-    ciclo = ciclo_service.get_ciclo_by_id(db, ciclo_id)
-    if not ciclo or ciclo.id_usuario != user_id:
-        raise HTTPException(status_code=404, detail="Ciclo nao encontrado")
-    return ciclo
+    return ciclo_service.get_user_ciclo_by_id(db, ciclo_id, user_id)
+
+
+@router.delete("/ciclos/{ciclo_id}")
+def delete_ciclo(ciclo_id: int, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
+    ciclo_service.delete_ciclo(db, ciclo_id, user_id)
+    return None
+    
+
+@router.put("/ciclos/{ciclo_id}", response_model=CicloResponse)
+def update_ciclo(ciclo_id: int, ciclo_request: CicloRequest, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
+    return ciclo_service.update_ciclo(db, ciclo_id, user_id, ciclo_request)

@@ -16,7 +16,7 @@ struct MainView: View {
 
     
     var canAddGasto: Bool {
-        viewModel.actualCiclo.backendId != nil
+        viewModel.atualCiclo.backendId != nil
     }
     
     var body: some View {
@@ -72,7 +72,7 @@ struct MainView: View {
                 .zIndex(1)
                 .disabled(!canAddGasto)
                 .fullScreenCover(isPresented: $sheetview){
-                    AddNewGastoSheetView(dias: viewModel.actualCiclo.dias ?? [])
+                    AddNewGastoSheetView(dias: viewModel.atualCiclo.dias ?? [])
                         .environmentObject(viewModel)
                 }
                 .offset(y: -24)

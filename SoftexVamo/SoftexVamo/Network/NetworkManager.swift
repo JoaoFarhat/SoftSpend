@@ -97,6 +97,14 @@ final class NetworkManager {
         return try decoder.decode(CicloSoftex.self, from: try await execute(request))
     }
     
+    func postDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex] {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)/dias/lote") else {
+            throw URLError(.badURL)
+        }
+        let request = makeRequest(url: url, method: "POST", body: try encoder.encode(dias))
+        return try decoder.decode([DiaSoftex].self, from: try await execute(request))
+    }
+    
     func postGasto(newGasto: GastosDia, diaId: Int) async throws -> GastosDia {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/dias/\(diaId)/gastos") else {
             throw URLError(.badURL)

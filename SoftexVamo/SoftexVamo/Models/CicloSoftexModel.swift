@@ -82,6 +82,10 @@ struct CicloSoftex: Codable, Identifiable {
     static let example = CicloSoftex(valor_total: 2145, gasto_total: 214, periodo: "10/03 - 17/03", diaria: 180, titulo: "Fortaleza", dias: DiaSoftex.examples)
 }
 
+struct DiaLoteRequest: Codable {
+    let data: Date
+}
+
 struct DiaSoftex: Codable, Identifiable, Hashable {
     var id: Int { backendId ?? 0 }
     var backendId: Int?

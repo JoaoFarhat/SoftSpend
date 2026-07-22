@@ -15,8 +15,8 @@ struct CardMainView: View {
     let corFundoTela = LinearGradient.cardMain
 
     var progresso: CGFloat {
-        let percent = viewModel.actualCiclo.valor_total > 0
-            ? viewModel.actualCiclo.gasto_total / viewModel.actualCiclo.valor_total
+        let percent = viewModel.atualCiclo.valor_total > 0
+            ? viewModel.atualCiclo.gasto_total / viewModel.atualCiclo.valor_total
             : 0
         return CGFloat(min(max(percent, 0), 1))
     }
@@ -26,9 +26,9 @@ struct CardMainView: View {
     }
 
     var diasCount: Int {
-        let periodo = viewModel.actualCiclo.periodo
+        let periodo = viewModel.atualCiclo.periodo
         let parts = periodo.split(separator: "-").map { $0.trimmingCharacters(in: .whitespaces) }
-        guard parts.count == 2 else { return viewModel.actualCiclo.dias?.count ?? 0 }
+        guard parts.count == 2 else { return viewModel.atualCiclo.dias?.count ?? 0 }
 
         let formatter = DateFormatter()
         formatter.dateFormat = "dd/MM"
@@ -39,7 +39,7 @@ struct CardMainView: View {
 
         guard let from = formatter.date(from: parts[0]),
               let to = formatter.date(from: parts[1]) else {
-            return viewModel.actualCiclo.dias?.count ?? 0
+            return viewModel.atualCiclo.dias?.count ?? 0
         }
 
         return Calendar.current.datesBetween(from, and: to)
@@ -74,7 +74,7 @@ struct CardMainView: View {
                 }
 
                 Text(
-                    viewModel.actualCiclo.valor_total - viewModel.actualCiclo.gasto_total,
+                    viewModel.atualCiclo.valor_total - viewModel.atualCiclo.gasto_total,
                     format: .currency(code: "BRL").locale(Locale(identifier: "pt_BR"))
                 )
                 .font(.system(size: 36, weight: .heavy))
@@ -83,7 +83,7 @@ struct CardMainView: View {
                     .font(.system(size: 12, weight: .regular))
                     .foregroundStyle(.white.opacity(0.8))
                 + Text(
-                    viewModel.actualCiclo.valor_total,
+                    viewModel.atualCiclo.valor_total,
                     format: .currency(code: "BRL").locale(Locale(identifier: "pt_BR"))
                 )
                 .font(.system(size: 12, weight: .bold)))
@@ -98,7 +98,7 @@ struct CardMainView: View {
                         RoundedRectangle(cornerRadius: 10)
                             .fill(Color(hex: 0xA855F7))
                             .frame(width: geometry.size.width * progresso, height: 8)
-                            .animation(.spring(), value: viewModel.actualCiclo.gasto_total)
+                            .animation(.spring(), value: viewModel.atualCiclo.gasto_total)
                     }
                 }
                 .frame(height: 8)
@@ -113,7 +113,7 @@ struct CardMainView: View {
                     statItem(
                         icon: "calendar",
                         label: "Período",
-                        value: viewModel.actualCiclo.periodo,
+                        value: viewModel.atualCiclo.periodo,
                         subtitle: diasCount > 0 ? "\(diasCount) dias" : ""
                     )
                     
@@ -129,7 +129,7 @@ struct CardMainView: View {
                     statItem(
                         icon: "dollarsign.circle",
                         label: "Gasto Total",
-                        value: viewModel.actualCiclo.gasto_total,
+                        value: viewModel.atualCiclo.gasto_total,
                         format: .currency(code: "BRL").locale(Locale(identifier: "pt_BR")),
                         subtitle: "\(percentualUtilizado)% do total"
                     )
@@ -146,7 +146,7 @@ struct CardMainView: View {
                     statItem(
                         icon: "chart.line.uptrend.xyaxis",
                         label: "Média diária",
-                        value: viewModel.actualCiclo.diaria,
+                        value: viewModel.atualCiclo.diaria,
                         format: .currency(code: "BRL").locale(Locale(identifier: "pt_BR")),
                         subtitle: "por dia"
                     )

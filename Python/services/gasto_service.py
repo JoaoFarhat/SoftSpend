@@ -2,7 +2,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 import models, dtos
 from dtos.gasto import GastoRequest
-from repositories import gasto_repository, dia_repository
+from repositories import gasto_repository, dia_repository, ciclo_repository
 
 def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: int):
     dia = dia_repository.find_dia(db, dia_id)
@@ -20,13 +20,34 @@ def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: int):
         dia_id=dia_id
     )
 
-    gasto_repository.criar_gasto(db, novo_gasto)
-    dia.saldo -= gasto.valor
-    dia.ciclo.gasto_total += gasto.valor
-    db.commit()
-    db.refresh(novo_gasto)
+    dia_repository.incrementar_saldo(db, dia.id, -gasto.valor)
+    ciclo_repository.incrementar_gasto_total(db, dia.ciclo_id, gasto.valor)
 
-    return novo_gasto
+    return gasto_repository.criar_gasto(db, novo_gasto)
+
+def atualizar_gasto(db: Session, gasto_id: int, gasto_request: GastoRequest, user_id: int):
+    gasto = gasto_repository.find_gasto(db, gasto_id)
+
+    if not gasto:
+        raise HTTPException(status_code=404, detail="Gasto não encontrado")
+
+    if gasto.dia.ciclo.id_usuario != user_id:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
+    dia = gasto.dia
+    diferenca = gasto_request.valor - gasto.valor
+
+    dia_repository.incrementar_saldo(db, dia.id, -diferenca)
+    ciclo_repository.incrementar_gasto_total(db, dia.ciclo_id, diferenca)
+
+    gasto.titulo = gasto_request.titulo
+    gasto.valor = gasto_request.valor
+    gasto.categoria = gasto_request.categoria
+
+    gasto_repository.atualizar_gasto(db, gasto)
+
+    return gasto
+
 
 def remover_gasto(db: Session, gasto_id: int, user_id: int):
     gasto = gasto_repository.find_gasto(db, gasto_id)
@@ -38,13 +59,11 @@ def remover_gasto(db: Session, gasto_id: int, user_id: int):
         raise HTTPException(status_code=403, detail="Acesso negado")
 
     dia = gasto.dia
-    ciclo = dia.ciclo
 
-    dia.saldo += gasto.valor
-    ciclo.gasto_total -= gasto.valor
+    dia_repository.incrementar_saldo(db, dia.id, gasto.valor)
+    ciclo_repository.incrementar_gasto_total(db, dia.ciclo_id, -gasto.valor)
 
     gasto_repository.remover_gasto(db, gasto)
-    db.commit()
 
     return None
 

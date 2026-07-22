@@ -98,7 +98,7 @@ struct CicloGastosView: View {
                         }
                     }
                 }
-                if listViewModel.actualCiclo.dias?.allSatisfy({ $0.gastos.isEmpty }) ?? true {
+                if listViewModel.atualCiclo.dias?.allSatisfy({ $0.gastos.isEmpty }) ?? true {
                     VStack(alignment: .center, spacing: 16) {
                         Image(systemName: "receipt")
                             .font(.system(size: 48))
