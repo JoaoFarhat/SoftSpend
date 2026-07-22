@@ -111,6 +111,8 @@ struct RegisterView: View {
                         .foregroundStyle(.red)
                         .multilineTextAlignment(.center)
                         .padding(.horizontal, 25)
+                    
+                    
                 }
                 
                 Spacer()
