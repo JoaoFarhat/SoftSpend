@@ -68,6 +68,7 @@ struct CiclosListView: View {
                 
                 if viewModel.isLoading {
                     CardMainView()
+                        .skeleton(RoundedRectangle(cornerRadius: 22), isLoading: viewModel.isLoading)
                     
                     CicloGastosView() {
                         addNewGastoSheet.toggle()
@@ -120,7 +121,7 @@ struct CiclosListView: View {
 
 final class CiclosListViewModel: ObservableObject {
     @Published var allCiclos: [CicloSoftex] = []
-    @Published var atualCiclo: CicloSoftex = CicloSoftex.example
+    @Published var atualCiclo: CicloSoftex = CicloSoftex(valor_total: 0, gasto_total: 0, periodo: "30/04 - 30/04", diaria: 0, titulo: "", dias: [])
     @Published var gastosInfo: GastosDia = GastosDia.example
     @Published var availableInfo: GastosDia = GastosDia.example
     @Published var isLoading: Bool = true
@@ -148,10 +149,16 @@ final class CiclosListViewModel: ObservableObject {
         
         guard currentUser != nil else {
             print("Erro: Usuário não está logado")
+//            self.isLoading = false
             return
         }
         
+        
+        
         if hasLoadedOnce { return }
+        
+        
+        
         
         let cacheData = UserDefaults.standard.data(forKey: "ultimo_ciclo_cache")
         
@@ -163,12 +170,13 @@ final class CiclosListViewModel: ObservableObject {
             }
         }
         
+       
         do {
             let ciclos = try await NetworkManager.shared.fetchCicloResumo()
             
             self.allCiclos = ciclos
             
-            self.index = max(self.allCiclos.count - 1, 0)
+            self.index = 0
             
             if !self.allCiclos.isEmpty {
                 let cicloParaSalvar = self.allCiclos[self.index]
@@ -178,7 +186,7 @@ final class CiclosListViewModel: ObservableObject {
                 }
                 
                 self.atualCiclo = try await NetworkManager.shared.fetchCicloById(cicloId: cicloId)
-                self.salvarNoCache(ciclo: cicloParaSalvar)
+                self.salvarNoCache(ciclo: self.atualCiclo)
                 
             } else {
                 self.atualCiclo = CicloSoftex(valor_total: 0, gasto_total: 0, periodo: "", diaria: 0, titulo: "", dias: [])
@@ -213,6 +221,45 @@ final class CiclosListViewModel: ObservableObject {
         await postToNetwork(newCiclo: newCiclo, dias: dias)
     }
     
+    @MainActor
+    func editCiclo(cicloId: Int, ciclo: CicloSoftex, dias: [DiaLoteRequest]? = nil) async throws {
+        var cicloEditado = try await NetworkManager.shared.putCiclo(cicloId: cicloId, cicloEditado: ciclo)
+        
+        if let dias {
+            cicloEditado.dias = try await NetworkManager.shared.syncDiasLote(cicloId: cicloId, dias: dias)
+        }
+        
+        if let index = self.allCiclos.firstIndex(where: { $0.backendId == cicloId }) {
+            self.allCiclos[index] = cicloEditado
+        }
+        
+        if self.atualCiclo.backendId == cicloId {
+            self.atualCiclo = cicloEditado
+            self.salvarNoCache(ciclo: cicloEditado)
+        }
+    }
+    
+    @MainActor
+    func deleteCiclo(cicloId: Int) async throws {
+        _ = try await NetworkManager.shared.deleteCiclo(cicloId: cicloId)
+        
+        if let index = self.allCiclos.firstIndex(where: { $0.backendId == cicloId }){
+            self.allCiclos.remove(at: index)
+        }
+        
+        if self.atualCiclo.backendId == cicloId {
+            // Tenta pegar o primeiro ciclo da lista
+            if let primeiroCiclo = self.allCiclos.first {
+                self.atualCiclo = primeiroCiclo
+                self.salvarNoCache(ciclo: primeiroCiclo)
+            } else {
+                self.atualCiclo = CicloSoftex(valor_total: 0, gasto_total: 0, periodo: "", diaria: 0, titulo: "", dias: [])
+                self.index = 0
+                UserDefaults.standard.removeObject(forKey: "ultimo_ciclo_cache")
+            }
+        }
+    }
+    
     private func salvarNoCache(ciclo: CicloSoftex) {
         if ciclo.backendId != nil {
             if let encoded = try? JSONEncoder().encode(ciclo) {
@@ -221,7 +268,7 @@ final class CiclosListViewModel: ObservableObject {
         }
     }
     
-    private func createAllDiasLoteRequest(dayCount: Int, startDate: Date) -> [DiaLoteRequest] {
+    func createAllDiasLoteRequest(dayCount: Int, startDate: Date) -> [DiaLoteRequest] {
         var dias: [DiaLoteRequest] = []
         let calendar = Calendar.current
         
@@ -251,9 +298,9 @@ final class CiclosListViewModel: ObservableObject {
             
             novoCiclo.dias = try await NetworkManager.shared.postDiasLote(cicloId: cicloId, dias: dias)
             
-            self.allCiclos.append(novoCiclo)
+            self.allCiclos.insert(novoCiclo, at: 0)
             self.atualCiclo = novoCiclo
-            self.index = self.allCiclos.count - 1
+            self.index = 0
             
         } catch {
             print("Erro ao criar o ciclo:", error)
