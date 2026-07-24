@@ -31,3 +31,8 @@ def atualizar_dia(db: Session, dia: models.Dia):
 def remover_dia(db: Session, dia: models.Dia):
     db.delete(dia)
     db.commit()
+
+def remover_dias(db: Session, dias: list[models.Dia]):
+    for dia in dias:
+        db.delete(dia)
+    db.commit()

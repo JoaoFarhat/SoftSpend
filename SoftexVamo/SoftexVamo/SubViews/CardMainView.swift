@@ -57,7 +57,6 @@ struct CardMainView: View {
                     .frame(height: 160)
                     .opacity(0.45)
                     .frame(maxWidth: .infinity, maxHeight: 220, alignment: .bottomTrailing)
-                    .clipped()
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
@@ -78,6 +77,8 @@ struct CardMainView: View {
                     format: .currency(code: "BRL").locale(Locale(identifier: "pt_BR"))
                 )
                 .font(.system(size: 36, weight: .heavy))
+                .lineLimit(1)
+                .truncationMode(.tail)
 
                 (Text("de ")
                     .font(.system(size: 12, weight: .regular))
@@ -107,7 +108,7 @@ struct CardMainView: View {
                         .font(.system(size: 11, weight: .medium))
                         .foregroundStyle(.white.opacity(0.8))
                 }
-                .padding(.bottom)
+//                .padding(.bottom)
 
                 HStack(spacing: 0) {
                     statItem(
@@ -164,7 +165,7 @@ struct CardMainView: View {
     }
 
     @ViewBuilder
-    private func statItem(icon: String, label: String, value: String, subtitle: String = "") -> some View {
+    private func statItem(icon: String, label: String, value: Any, format: FloatingPointFormatStyle<Float>.Currency? = nil, subtitle: String = "") -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 12))
@@ -176,10 +177,17 @@ struct CardMainView: View {
                 Text(label)
                     .font(.system(size: 9, weight: .regular))
                     .foregroundStyle(.white.opacity(0.75))
-                Text(value)
-                    .font(.system(size: 11, weight: .bold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                if let format {
+                    Text(value as! Float, format: format)
+                        .font(.system(size: 11, weight: .bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                } else {
+                    Text(value as! String)
+                        .font(.system(size: 11, weight: .bold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
                 if !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.system(size: 9, weight: .regular))
@@ -189,31 +197,31 @@ struct CardMainView: View {
         }
     }
 
-    @ViewBuilder
-    private func statItem(icon: String, label: String, value: Float, format: FloatingPointFormatStyle<Float>.Currency, subtitle: String = "") -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: icon)
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.75))
-                .padding(8)
-                .background(Color.appPurpleDark)
-                .clipShape(Circle())
-            VStack(alignment: .leading, spacing: 1) {
-                Text(label)
-                    .font(.system(size: 9, weight: .regular))
-                    .foregroundStyle(.white.opacity(0.75))
-                Text(value, format: format)
-                    .font(.system(size: 11, weight: .bold))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                if !subtitle.isEmpty {
-                    Text(subtitle)
-                        .font(.system(size: 9, weight: .regular))
-                        .foregroundStyle(.white.opacity(0.6))
-                }
-            }
-        }
-    }
+//    @ViewBuilder
+//    private func statItem(icon: String, label: String, value: Float, format: FloatingPointFormatStyle<Float>.Currency, subtitle: String = "") -> some View {
+//        HStack(spacing: 6) {
+//            Image(systemName: icon)
+//                .font(.system(size: 12))
+//                .foregroundStyle(.white.opacity(0.75))
+//                .padding(8)
+//                .background(Color.appPurpleDark)
+//                .clipShape(Circle())
+//            VStack(alignment: .leading, spacing: 1) {
+//                Text(label)
+//                    .font(.system(size: 8, weight: .regular))
+//                    .foregroundStyle(.white.opacity(0.75))
+//                Text(value, format: format)
+//                    .font(.system(size: 10, weight: .bold))
+//                    .lineLimit(1)
+//                    .minimumScaleFactor(0.7)
+//                if !subtitle.isEmpty {
+//                    Text(subtitle)
+//                        .font(.system(size: 9, weight: .regular))
+//                        .foregroundStyle(.white.opacity(0.6))
+//                }
+//            }
+//        }
+//    }
 }
 
 #Preview {

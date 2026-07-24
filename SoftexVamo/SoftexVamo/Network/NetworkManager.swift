@@ -97,11 +97,35 @@ final class NetworkManager {
         return try decoder.decode(CicloSoftex.self, from: try await execute(request))
     }
     
+    func putCiclo(cicloId: Int, cicloEditado: CicloSoftex) async throws -> CicloSoftex {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)") else {
+            throw URLError(.badURL)
+        }
+        let request = makeRequest(url: url, method: "PUT", body: try encoder.encode(cicloEditado))
+        return try decoder.decode(CicloSoftex.self, from: try await execute(request))
+    }
+    
+    func deleteCiclo(cicloId: Int) async throws {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)") else {
+            throw URLError(.badURL)
+        }
+        
+        try await execute(makeRequest(url: url, method: "DELETE"))
+    }
+    
     func postDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex] {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)/dias/lote") else {
             throw URLError(.badURL)
         }
         let request = makeRequest(url: url, method: "POST", body: try encoder.encode(dias))
+        return try decoder.decode([DiaSoftex].self, from: try await execute(request))
+    }
+    
+    func syncDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex] {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)/dias/lote") else {
+            throw URLError(.badURL)
+        }
+        let request = makeRequest(url: url, method: "PUT", body: try encoder.encode(dias))
         return try decoder.decode([DiaSoftex].self, from: try await execute(request))
     }
     

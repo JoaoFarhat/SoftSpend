@@ -18,11 +18,49 @@ struct NewCicloView: View {
     
     @EnvironmentObject var cicloViewModel: CiclosListViewModel
     
-    @State private var nomeCiclo: String = ""
-    @State private var orcamentoString: String = ""
-    @State private var orcamento: Float = 0.0
-    @State private var dataInicio = Date()
-    @State private var dataFim = Date().addingTimeInterval(86400 * 7)
+    @State private var nomeCiclo: String
+    @State private var orcamentoString: String
+    @State private var orcamento: Float
+    @State private var dataInicio: Date
+    @State private var dataFim: Date
+    
+    var ciclo: CicloSoftex?
+    
+    var isEditing: Bool { ciclo != nil }
+    
+    var tituloTela: String {
+        isEditing ? "Editar Ciclo" : "Novo Ciclo"
+    }
+    
+    var textoBotaoSalvar: String {
+        isEditing ? "Salvar Alterações" : "Criar Ciclo"
+    }
+    
+    var onBack: (() -> Void)? = nil
+    
+    init(ciclo: CicloSoftex, onBack: (() -> Void)? = nil) {
+        _nomeCiclo = State(initialValue: ciclo.titulo)
+        _orcamentoString = State(initialValue: String(ciclo.valor_total))
+        _orcamento = State(initialValue: ciclo.valor_total)
+        self.onBack = onBack
+        self.ciclo = ciclo
+        
+        if let primeiraData = ciclo.dias?.first?.data, let ultimaData = ciclo.dias?.last?.data {
+            _dataInicio = State(initialValue: primeiraData)
+            _dataFim = State(initialValue: ultimaData)
+        } else {
+            _dataInicio = State(initialValue: Date())
+            _dataFim = State(initialValue: Date().addingTimeInterval(86400 * 7))
+        }
+    }
+    
+    init() {
+        _nomeCiclo = State(initialValue: "")
+        _orcamentoString = State(initialValue: "")
+        _orcamento = State(initialValue: 0.0)
+        _dataInicio = State(initialValue: Date())
+        _dataFim = State(initialValue: Date().addingTimeInterval(86400 * 7))
+    }
     
     @FocusState private var focusedField: Field?
     
@@ -34,9 +72,10 @@ struct NewCicloView: View {
                 VStack(alignment: .leading, spacing: 20) {
                     Color.clear.frame(height: 50)
                     
-                    Text("Novo Ciclo")
+                    Text(tituloTela)
                         .font(.system(size: 34, weight: .bold))
                         .padding(.bottom, 10)
+                    
                     
                     VStack(spacing: 25) {
                         InputField(title: "Nome do Ciclo", icon: "mappin.and.ellipse") {
@@ -78,7 +117,28 @@ struct NewCicloView: View {
                     
                     Button(action: {
                         Task{
-                            await cicloViewModel.createNewCiclo(startDate: dataInicio, endDate: dataFim, totalValue: Float(orcamento), titulo: nomeCiclo)
+                            if let ciclo, let cicloId = ciclo.backendId {
+                                let dayCount = Calendar.current.datesBetween(dataInicio, and: dataFim)
+                                let safeDayCount = max(dayCount, 1)
+                                
+                                var cicloEditado = ciclo
+                                cicloEditado.titulo = nomeCiclo
+                                cicloEditado.valor_total = orcamento
+                                cicloEditado.periodo = createPeriodoString(from: dataInicio, to: dataFim)
+                                cicloEditado.diaria = orcamento / Float(safeDayCount)
+                                
+                                let novosDias = cicloViewModel.createAllDiasLoteRequest(dayCount: dayCount, startDate: dataInicio)
+                                
+                                do {
+                                    try await cicloViewModel.editCiclo(cicloId: cicloId, ciclo: cicloEditado, dias: novosDias)
+                                } catch {
+                                    print("Erro ao editar ciclo:", error)
+                                    return
+                                }
+                            }
+                            else {
+                                await cicloViewModel.createNewCiclo(startDate: dataInicio, endDate: dataFim, totalValue: Float(orcamento), titulo: nomeCiclo)
+                            }
                             
                             await MainActor.run {
                                 dismiss()
@@ -87,7 +147,7 @@ struct NewCicloView: View {
                     }) {
                         HStack {
                             Image(systemName: "checkmark")
-                            Text("Criar Ciclo")
+                            Text(textoBotaoSalvar)
                         }
                         .font(.system(size: 20, weight: .bold))
                         .foregroundColor(.white)
@@ -113,7 +173,13 @@ struct NewCicloView: View {
             }
             
             HStack {
-                Button(action: { dismiss() }) {
+                Button(action: {
+                    if let onBack {
+                        onBack()
+                    } else {
+                        dismiss()
+                    }
+                }) {
                     HStack {
                         Image(systemName: "chevron.left")
                         Text("Voltar")
@@ -134,9 +200,16 @@ struct NewCicloView: View {
         .onTapGesture {
             focusedField = nil
         }
-        .background(Color("surfaceBackground"))
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color("surfaceBackground").ignoresSafeArea())
         .navigationBarHidden(true)
         
+    }
+    
+    private func createPeriodoString(from: Date, to: Date) -> String {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateFormat = "dd/MM"
+        return "\(dateFormatter.string(from: from)) - \(dateFormatter.string(from: to))"
     }
     
     func verificarNumeros(orcamento: String) -> Float{
