@@ -9,11 +9,9 @@ import SwiftUI
 
 struct HistoricoView: View {
     
-    @EnvironmentObject var viewModel: CiclosListViewModel
+    @EnvironmentObject var viewModel: CiclosViewModel
     @State var navegando = false
     @State private var showingModal = false
-    
-    let newCicloViewModel = NewCicloViewModel()
     
     var body: some View {
         NavigationStack{
@@ -79,6 +77,7 @@ struct HistoricoView: View {
                             }
                             
                         }
+                        .padding(.bottom, 80)
 //                        .padding(.top, 20)
                         
                     }
@@ -89,12 +88,11 @@ struct HistoricoView: View {
         }
         .fullScreenCover(isPresented: $showingModal) {
             NewCicloView()
-                .environmentObject(newCicloViewModel)
         }
     }
 }
 
 #Preview {
     HistoricoView()
-        .environmentObject(CiclosListViewModel())
+        .environmentObject(CiclosViewModel())
 }

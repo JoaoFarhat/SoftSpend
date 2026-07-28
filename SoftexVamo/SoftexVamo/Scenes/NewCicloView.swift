@@ -16,7 +16,7 @@ struct NewCicloView: View {
     
     @Environment(\.dismiss) var dismiss
     
-    @EnvironmentObject var cicloViewModel: CiclosListViewModel
+    @EnvironmentObject var cicloViewModel: CiclosViewModel
     
     @State private var nomeCiclo: String
     @State private var orcamentoString: String
@@ -280,11 +280,7 @@ struct DatePickerField: View {
 
 #Preview {
     NewCicloView()
-        .environmentObject(NewCicloViewModel())
-}
-
-final class NewCicloViewModel: ObservableObject {
-    @Published var textResult = ""
+        .environmentObject(CiclosViewModel())
 }
 
 struct ScrollOffsetKey: PreferenceKey {

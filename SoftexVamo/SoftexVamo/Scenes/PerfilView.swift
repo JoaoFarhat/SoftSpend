@@ -10,7 +10,7 @@ import Combine
 
 struct PerfilView: View {
     @Environment(\.dismiss) var dismiss
-    @EnvironmentObject var viewModel: CiclosListViewModel
+    @EnvironmentObject var viewModel: CiclosViewModel
     @ObservedObject private var authService = AuthService.shared
     
     private let purplePrimary = Color.appPurple
@@ -56,18 +56,14 @@ struct PerfilView: View {
             
             ScrollView() {
                 VStack(spacing: 24) {
-                    // MARK: - Header
                     headerSection
                     
-                    // MARK: - Stats Cards
                     statsGrid
                         .padding(.horizontal, 16)
                     
-                    // MARK: - Account Info
                     accountInfoSection
                         .padding(.horizontal, 16)
                     
-                    // MARK: - Preferences placeholder
                     VStack(alignment: .leading, spacing: 12) {
                         Text("PREFERÊNCIAS")
                             .font(.system(size: 13, weight: .bold))
@@ -91,10 +87,8 @@ struct PerfilView: View {
         .tint(.white)
     }
     
-    // MARK: - Header
     private var headerSection: some View {
         VStack(spacing: 14) {
-                // Avatar
                 ZStack(alignment: .bottomTrailing) {
                     Circle()
                         .fill(
@@ -159,7 +153,6 @@ struct PerfilView: View {
             }
     }
     
-    // MARK: - Stats Grid
     private var statsGrid: some View {
         LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
             StatCard(
@@ -200,7 +193,6 @@ struct PerfilView: View {
         }
     }
     
-    // MARK: - Account Info
     private var accountInfoSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("INFORMAÇÕES DA CONTA")
@@ -233,7 +225,6 @@ struct PerfilView: View {
         }
     }
     
-    // MARK: - Helpers
     private func formatCurrency(_ value: Float) -> String {
         let formatter = NumberFormatter()
         formatter.numberStyle = .currency
@@ -243,7 +234,6 @@ struct PerfilView: View {
     }
 }
 
-// MARK: - Stat Card
 private struct StatCard: View {
     let icon: String
     let value: String
@@ -289,7 +279,6 @@ private struct StatCard: View {
     }
 }
 
-// MARK: - Account Info Row
 private struct AccountInfoRow: View {
     let icon: String
     let title: String
@@ -328,5 +317,5 @@ private struct AccountInfoRow: View {
 
 #Preview {
     PerfilView()
-        .environmentObject(CiclosListViewModel())
+        .environmentObject(CiclosViewModel())
 }

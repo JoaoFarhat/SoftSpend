@@ -21,7 +21,7 @@ struct AddNewGastoSheetView: View {
         GridItem(.flexible(), spacing: 16)
     ]
     
-    @EnvironmentObject var viewModel: CiclosListViewModel
+    @EnvironmentObject var viewModel: CiclosViewModel
     
     @State var title: String = ""
     @State var valueString: String = ""

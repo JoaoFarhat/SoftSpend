@@ -9,7 +9,7 @@ import SwiftUI
 
 struct CardCiclosView: View {
     
-    @EnvironmentObject var viewModel: CiclosListViewModel
+    @EnvironmentObject var viewModel: CiclosViewModel
     
     let ciclo : CicloSoftex
     
@@ -269,5 +269,5 @@ struct SheetView : View {
 
 #Preview {
     CardCiclosView(ciclo: CicloSoftex.example)
-        .environmentObject(CiclosListViewModel())
+        .environmentObject(CiclosViewModel())
 }

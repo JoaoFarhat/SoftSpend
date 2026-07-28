@@ -9,8 +9,7 @@ import SwiftUI
 
 struct MainView: View {
     
-    @EnvironmentObject var viewModel: CiclosListViewModel
-    let newCicloViewModel = NewCicloViewModel()
+    @EnvironmentObject var viewModel: CiclosViewModel
     @State var sheetview = false
     @State private var isExpanded = true
 
@@ -110,5 +109,5 @@ struct MainView: View {
 
 #Preview {
         MainView()
-            .environmentObject(CiclosListViewModel())
+            .environmentObject(CiclosViewModel())
 }

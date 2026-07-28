@@ -10,7 +10,7 @@ import SwiftData
 
 @main
 struct SoftexVamoApp: App {
-    @StateObject var listViewModel = CiclosListViewModel()
+    @StateObject var listViewModel = CiclosViewModel()
     @StateObject var authService = AuthService.shared
     
     var body: some Scene {

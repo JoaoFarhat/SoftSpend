@@ -8,7 +8,6 @@ from services import dia_service
 
 router = APIRouter()
 
-
 @router.post("/ciclos/{ciclo_id}/dias", response_model=DiaResponse)
 def criar_dia(ciclo_id: int, dia: DiaRequest, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
     return dia_service.criar_dia(db, ciclo_id, dia, user_id)

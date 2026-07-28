@@ -9,8 +9,8 @@ import SwiftUI
 import Combine
 
 struct CicloGastosView: View {
-    @EnvironmentObject var viewModel: CicloGastosViewModel
-    @EnvironmentObject var listViewModel: CiclosListViewModel
+    @EnvironmentObject var gastosViewModel: GastosViewModel
+    @EnvironmentObject var ciclosViewModel: CiclosViewModel
     
     let action: () -> Void
     let deleteAction: (Int, Int) -> Void
@@ -18,7 +18,7 @@ struct CicloGastosView: View {
     func removerGastoEspecifico(dia: DiaSoftex, index: Int) {
         let indexSet = IndexSet(integer: index)
         
-        guard let gastoID = viewModel.deleteGasto(dia: dia, offsets: indexSet) else { return }
+        guard let gastoID = gastosViewModel.deleteGasto(dia: dia, offsets: indexSet) else { return }
         
         deleteAction(dia.id, gastoID)
     }
@@ -38,7 +38,7 @@ struct CicloGastosView: View {
                         HStack {
                             Image(systemName: "magnifyingglass")
                                 .foregroundColor(.gray)
-                            TextField("Procurar gasto...", text: $viewModel.searchGastoText)
+                            TextField("Procurar gasto...", text: $gastosViewModel.searchGastoText)
                                 .textFieldStyle(PlainTextFieldStyle())
                         }
                         .padding(12)
@@ -56,11 +56,11 @@ struct CicloGastosView: View {
                         
                         Menu {
                             Button {
-                                viewModel.categoriaFiltro = nil
+                                gastosViewModel.categoriaFiltro = nil
                             } label: {
                                 HStack {
                                     Text("Todas as categorias")
-                                    if viewModel.categoriaFiltro == nil {
+                                    if gastosViewModel.categoriaFiltro == nil {
                                         Image(systemName: "checkmark")
                                     }
                                 }
@@ -70,12 +70,12 @@ struct CicloGastosView: View {
                             
                             ForEach(Categoria.allCases) { categoria in
                                 Button {
-                                    viewModel.categoriaFiltro = categoria
+                                    gastosViewModel.categoriaFiltro = categoria
                                 } label: {
                                     HStack {
                                         Image(systemName: categoria.systemImageName)
                                         Text(categoria.localizedName)
-                                        if viewModel.categoriaFiltro == categoria {
+                                        if gastosViewModel.categoriaFiltro == categoria {
                                             Image(systemName: "checkmark")
                                         }
                                     }
@@ -84,10 +84,10 @@ struct CicloGastosView: View {
                         } label: {
                             ZStack {
                                 Image(systemName: "line.3.horizontal.decrease")
-                                    .foregroundStyle(viewModel.categoriaFiltro != nil ? Color.white : Color("textPrimary"))
+                                    .foregroundStyle(gastosViewModel.categoriaFiltro != nil ? Color.white : Color("textPrimary"))
                                     .padding(.vertical, 16)
                                     .padding(.horizontal, 12)
-                                    .background(viewModel.categoriaFiltro != nil ? Color.appPurple : Color("cinza"))
+                                    .background(gastosViewModel.categoriaFiltro != nil ? Color.appPurple : Color("cinza"))
                                     .cornerRadius(15)
                                     .shadow(color: Color.black.opacity(0.1), radius: 10)
                                     .overlay{
@@ -98,7 +98,7 @@ struct CicloGastosView: View {
                         }
                     }
                 }
-                if listViewModel.atualCiclo.dias?.allSatisfy({ $0.gastos.isEmpty }) ?? true {
+                if ciclosViewModel.atualCiclo.dias?.allSatisfy({ $0.gastos.isEmpty }) ?? true {
                     VStack(alignment: .center, spacing: 16) {
                         Image(systemName: "receipt")
                             .font(.system(size: 48))
@@ -115,13 +115,13 @@ struct CicloGastosView: View {
                     //                    .frame(width: .infinity)
                     .padding(60)
                 } else {
-                    if viewModel.secoesExibidas.isEmpty && !viewModel.searchGastoText.isEmpty {
+                    if gastosViewModel.secoesExibidas.isEmpty && !gastosViewModel.searchGastoText.isEmpty {
                         VStack(spacing: 12) {
                             Image(systemName: "magnifyingglass")
                                 .font(.system(size: 40))
                                 .foregroundStyle(Color.appPurple.opacity(0.5))
                             
-                            Text("Nenhum resultado para \"\(viewModel.searchGastoText)\"")
+                            Text("Nenhum resultado para \"\(gastosViewModel.searchGastoText)\"")
                                 .font(.system(size: 16, weight: .bold))
                             
                             Text("Tente buscar por outro termo")
@@ -131,7 +131,7 @@ struct CicloGastosView: View {
                         .padding(.top, 60)
                         .frame(maxWidth: .infinity)
                     } else {
-                        ForEach(viewModel.secoesExibidas.reversed()) { dia in
+                        ForEach(gastosViewModel.secoesExibidas.reversed()) { dia in
                             if(dia.gastos.count != 0){
                                 Section(header: createSectionHeader(dia: dia)) {
                                     ZStack{
@@ -157,7 +157,7 @@ struct CicloGastosView: View {
                                                 }
                                             }
                                         }
-                                        .skeleton(isLoading: listViewModel.isLoading)
+                                        .skeleton(isLoading: ciclosViewModel.isLoading)
                                         
                                         //                            .padding()
                                     }
@@ -185,18 +185,18 @@ struct CicloGastosView: View {
             if Calendar.current.isDateInToday(dia.data) {
                 Text("HOJE")
                     .frame(width: 90)
-                    .skeleton(isLoading: listViewModel.isLoading)
+                    .skeleton(isLoading: ciclosViewModel.isLoading)
                 
                 
             } else if Calendar.current.isDateInYesterday(dia.data) {
                 Text("ONTEM")
                     .frame(width: 90)
-                    .skeleton(isLoading: listViewModel.isLoading)
+                    .skeleton(isLoading: ciclosViewModel.isLoading)
                 
             } else {
-                Text(viewModel.dateToString(date: dia.data))
+                Text(gastosViewModel.dateToString(date: dia.data))
                     .frame(width: 90)
-                    .skeleton(isLoading: listViewModel.isLoading)
+                    .skeleton(isLoading: ciclosViewModel.isLoading)
             }
             
             Spacer()
@@ -265,61 +265,8 @@ struct CicloGastosView: View {
     } deleteAction: { _,_ in
         print("")
     }
-    .environmentObject(CicloGastosViewModel(ciclo: CicloSoftex.example))
-    .environmentObject(CiclosListViewModel())
+    .environmentObject(GastosViewModel(ciclo: CicloSoftex.example))
+    .environmentObject(CiclosViewModel())
 }
 
-final class CicloGastosViewModel: ObservableObject {
-    
-    @Published var ciclo: CicloSoftex
-    @Published var searchGastoText: String = ""
-    @Published var categoriaFiltro: Categoria? = nil
-    
-    init(ciclo: CicloSoftex) {
-        self.ciclo = ciclo
-    }
-    
-    func dateToString(date: Date) -> String {
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "dd/MM/yyyy"
-        return dateFormatter.string(from: date)
-    }
-    
-    var secoesExibidas: [DiaSoftex] {
-        guard let dias = ciclo.dias else { return []}
-        
-        return dias.compactMap { dia in
-            let gastosQueBatem = dia.gastos.filter { gasto in
-                let matchesTexto = searchGastoText.isEmpty || gasto.titulo.localizedCaseInsensitiveContains(searchGastoText)
-                let matchesCategoria = categoriaFiltro == nil || gasto.categoria == categoriaFiltro
-                return matchesTexto && matchesCategoria
-            }
-            
-            if gastosQueBatem.isEmpty { return nil }
-            
-            var diaFiltrado = dia
-            diaFiltrado.gastos = gastosQueBatem
-            return diaFiltrado
-        }
-    }
-    
-    func deleteGasto(dia: DiaSoftex, offsets: IndexSet) -> Int? {
-        let gastosExibidos = dia.gastos.filter { gasto in
-            let matchesTexto = searchGastoText.isEmpty || gasto.titulo.localizedCaseInsensitiveContains(searchGastoText)
-            let matchesCategoria = categoriaFiltro == nil || gasto.categoria == categoriaFiltro
-            return matchesTexto && matchesCategoria
-        }
-        
-        guard let firstOffset = offsets.first,
-              firstOffset < gastosExibidos.count else { return nil }
-        
-        let gastoParaRemover = gastosExibidos[firstOffset]
-        
-        guard let backendID = gastoParaRemover.backendId else { return nil }
-        
-        if let diaIndex = ciclo.dias?.firstIndex(where: { $0.id == dia.id }) {
-            ciclo.dias?[diaIndex].gastos.removeAll(where: { $0.id == gastoParaRemover.id })
-        }
-        
-        return backendID
-    }}
+

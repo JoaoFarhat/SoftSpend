@@ -9,7 +9,7 @@ import SwiftUI
 
 struct MenuView: View {
     @Binding var showMenu: Bool
-    @EnvironmentObject var viewModel: CiclosListViewModel
+    @EnvironmentObject var viewModel: CiclosViewModel
     @StateObject var authService = AuthService.shared
     @State private var selectedEnv: APIEnvironment = APIConfig.shared.current
     

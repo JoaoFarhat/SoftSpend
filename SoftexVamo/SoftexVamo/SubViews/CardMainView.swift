@@ -8,7 +8,7 @@
 import SwiftUI
 
 struct CardMainView: View {
-    @EnvironmentObject var viewModel: CiclosListViewModel
+    @EnvironmentObject var viewModel: CiclosViewModel
 
     @State var presentCiclo = false
 
@@ -226,5 +226,5 @@ struct CardMainView: View {
 
 #Preview {
     CardMainView()
-        .environmentObject(CiclosListViewModel())
+        .environmentObject(CiclosViewModel())
 }
