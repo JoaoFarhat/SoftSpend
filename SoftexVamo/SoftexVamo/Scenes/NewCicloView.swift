@@ -69,16 +69,32 @@ struct NewCicloView: View {
     var body: some View {
         ZStack(alignment: .top) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading) {
                     Color.clear.frame(height: 50)
                     
-                    Text(tituloTela)
-                        .font(.system(size: 34, weight: .bold))
-                        .padding(.bottom, 10)
+                    HStack(alignment: .center, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(tituloTela)
+                                .font(.system(size: 34, weight: .bold))
+
+                            Text("Organize sua viagem e controle seus gastos")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                        Image("bagagem")
+                            .resizable()
+                            .scaledToFill()
+                            .frame(width: 90, height: 70)
+                    }
+                    .padding(.bottom)
                     
                     
-                    VStack(spacing: 25) {
-                        InputField(title: "Nome do Ciclo", icon: "mappin.and.ellipse") {
+                    
+                    
+                    VStack(spacing: 15) {
+                        InputField(title: "Nome do Ciclo", icon: "mappin.and.ellipse", helperText: "Dê um nome para identificar sua viagem") {
                             TextField("Ex: São Paulo, SP", text: $nomeCiclo)
                                 .font(.system(size: 18, weight: .medium))
                                 .focused($focusedField, equals: .nomeCiclo)
@@ -86,7 +102,7 @@ struct NewCicloView: View {
                         
                         Divider()
                         
-                        InputField(title: "Orçamento Total", icon: "briefcase") {
+                        InputField(title: "Orçamento Total", icon: "briefcase", helperText: "Defina o valor total disponível para este ciclo") {
                             HStack {
                                 Text("R$")
                                     .foregroundStyle(Color("textSecondary").opacity(0.65))
@@ -103,13 +119,14 @@ struct NewCicloView: View {
                         
                         Divider()
                         
-                        VStack(spacing: 20) {
-                            DatePickerField(title: "Data de Início", date: $dataInicio)
-                            DatePickerField(title: "Data de Fim", date: $dataFim)
+                        VStack(spacing: 15) {
+                            TextFieldDataView(dataSelecionada: $dataInicio, title: "Data de Início", helperText: "Quando a viagem começa")
+                            Divider()
+                            TextFieldDataView(dataSelecionada: $dataFim, title: "Data Final", helperText: "Quando a viagem termina")
                         }
                     }
                     .padding(25)
-                    .background(Color("cardBackground"))
+                    .background(Color("cardBackground").opacity(0.5))
                     .cornerRadius(30)
                     .shadow(color: .black.opacity(0.05), radius: 15, x: 0, y: 10)
                     
@@ -153,7 +170,7 @@ struct NewCicloView: View {
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .frame(height: 65)
-                        .background(Color(red: 0.65, green: 0.55, blue: 1.0))
+                        .background(Color.roxoFinal)
                         .cornerRadius(20)
                     }
                 }
@@ -229,26 +246,109 @@ struct NewCicloView: View {
 struct InputField<Content: View>: View {
     let title: String
     let icon: String
+    let helperText: String
     let content: Content
-    
-    init(title: String, icon: String, @ViewBuilder content: () -> Content) {
+
+    init(
+        title: String,
+        icon: String,
+        helperText: String,
+        @ViewBuilder content: () -> Content
+    ) {
         self.title = title
         self.icon = icon
+        self.helperText = helperText
         self.content = content()
     }
-    
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 14, weight: .bold))
-                .foregroundColor(Color("textPrimary"))
-            
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .foregroundColor(.gray)
+        HStack {
+            Image(systemName: icon)
+                .foregroundColor(Color.roxoInicial)
+                .padding(15)
+                .background(
+                    Circle()
+                        .fill(Color.purplePrimary.opacity(0.3))
+                )
+
+            VStack(alignment: .leading) {
+                Text(title)
+                    .font(.system(size: 14, weight: .bold))
+
                 content
-                    .font(.system(size: 16))
+                    .padding()
+                    .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .strokeBorder(Color.gray, lineWidth: 1)
+                        )
+
+                Text(helperText)
+                    .font(.system(size: 10))
+                    .foregroundColor(Color.textSecondary)
             }
+        }
+    }
+}
+
+struct TextFieldDataView: View {
+    @Binding var dataSelecionada: Date
+    let title: String
+    let helperText: String
+    
+    init(dataSelecionada: Binding<Date>, title: String, helperText: String) {
+        self._dataSelecionada = dataSelecionada
+        self.title = title
+        self.helperText = helperText
+        
+    }
+    
+    var dataFormatada: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.locale = Locale(identifier: "pt_BR")
+        return formatter.string(from: dataSelecionada)
+    }
+
+    var body: some View {
+        HStack{
+            Image(systemName: "calendar")
+                .foregroundColor(Color.roxoInicial)
+                .padding(15)
+                .background(
+                    Circle()
+                        .fill(Color.purplePrimary.opacity(0.3))
+                )
+            
+            VStack(alignment: .leading) {
+                Text(title)
+                    .font(.system(size: 14, weight: .bold))
+                
+                HStack {
+                    Text(dataFormatada)
+                        .foregroundColor(.primary)
+                    Spacer()
+                    Image(systemName: "calendar")
+                        .foregroundColor(.gray)
+                }
+                .padding()
+//                .background(Color(.gray))
+                .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .strokeBorder(Color.gray, lineWidth: 1)
+                )
+                .overlay(
+                    DatePicker("", selection: $dataSelecionada, displayedComponents: .date)
+                        .datePickerStyle(.compact)
+                        .labelsHidden()
+                        .colorMultiply(.clear)
+                )
+                
+                Text(helperText)
+                    .font(.system(size: 10))
+                    .foregroundColor(Color.textSecondary)
+            }
+
         }
     }
 }
@@ -259,21 +359,28 @@ struct DatePickerField: View {
     @Binding var date: Date
     
     var body: some View {
+        HStack {
+            Image(systemName: "calendar")
+                .foregroundColor(Color.roxoInicial)
+                .padding(15)
+                .background(
+                    Circle()
+                        .fill(Color.purplePrimary.opacity(0.3))
+                )
+            
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.system(size: 14, weight: .bold))
-            
-            HStack {
-                Image(systemName: "calendar")
-                    .foregroundColor(.gray)
-                
+
                 DatePicker("", selection: $date, displayedComponents: .date)
                     .labelsHidden()
                     .environment(\.locale, Locale(identifier: "pt_BR"))
-                //                    .colorMultiply(.clear)
+                    .datePickerStyle(.compact)
                 
                 Spacer()
             }
+            
+            Spacer()
         }
     }
 }

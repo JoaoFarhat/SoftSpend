@@ -19,7 +19,7 @@ from enums.categoria_enum import Categoria
 
 # Chave da API lida do ambiente (nunca commitar no codigo)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-3.5-flash-lite"
 
 # Limite maximo de dimensao da imagem (maior lado). Imagens maiores sao redimensionadas.
 # 1280px e suficiente para OCR de comprovantes mantendo legibilidade.

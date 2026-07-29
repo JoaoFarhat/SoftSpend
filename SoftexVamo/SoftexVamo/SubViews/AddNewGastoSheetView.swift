@@ -101,7 +101,7 @@ struct AddNewGastoSheetView: View {
                                 .onChange(of: valueString) { _, newValue in
                                     value = verificarNumeros(orcamento: newValue)
                                 }
-                                
+                            
                         }
                         Text("Toque para digitar um valor")
                             .foregroundStyle(Color.white.opacity(0.60))
@@ -170,23 +170,30 @@ struct AddNewGastoSheetView: View {
                             .foregroundStyle(.red)
                             .padding(.horizontal, 8)
                     }
-                VStack(alignment: .leading) {
-                    InputField(title: "Descrição", icon: "") {
-                        TextField("Ex: Almoço, Uber...", text: $title)
-                            .font(.system(size: 18, weight: .medium))
-                            .focused($focusedField, equals: .title)
+                    VStack(alignment: .leading) {
+                        VStack(alignment: .leading){
+                            Text("Descrição")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(Color("textPrimary"))
+                            TextField("Ex: Almoço, Uber...", text: $title)
+                                .font(.system(size: 18, weight: .medium))
+                                .focused($focusedField, equals: .title)
+                            
+                            
+                            
+                        }
+                        
+                        
+                        Divider()
+                        
+                        DatePickerFieldLimitado(title: "Data", diaSelecionado: $selectedDia, diasPermitidos: dias)
+                        
+                        
                     }
-                    
-                    Divider()
-                    
-                    DatePickerFieldLimitado(title: "Data", diaSelecionado: $selectedDia, diasPermitidos: dias)
-                    
-                    
-                }
-                .padding()
-                .background(Color("cinza"))
-                .cornerRadius(20)
-                .shadow(color: .black.opacity(0.05), radius: 15, x: 0, y: 10)
+                    .padding()
+                    .background(Color("cinza"))
+                    .cornerRadius(20)
+                    .shadow(color: .black.opacity(0.05), radius: 15, x: 0, y: 10)
                     
                     Text("Categoria")
                         .font(.system(size: 14, weight: .bold))
@@ -238,30 +245,30 @@ struct AddNewGastoSheetView: View {
                         }
                     }
                     .frame(minHeight: 150)
-                
-                Button(action: {
-                    Task {
-                        try await viewModel.createNewGasto(title: title, value: value, dia: selectedDia, categoria: selectedCategoria)
-                        await MainActor.run { dismiss() }
+                    
+                    Button(action: {
+                        Task {
+                            try await viewModel.createNewGasto(title: title, value: value, dia: selectedDia, categoria: selectedCategoria)
+                            await MainActor.run { dismiss() }
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: "checkmark")
+                            Text("Salvar Gasto")
+                        }
+                        .font(.system(size: 20, weight: .bold))
+                        .foregroundColor(.white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 65)
+                        .background(LinearGradient(
+                            colors: [purplePrimary, .appPurpleDark],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                        .cornerRadius(20)
                     }
-                }) {
-                    HStack {
-                        Image(systemName: "checkmark")
-                        Text("Salvar Gasto")
-                    }
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(.white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 65)
-                    .background(LinearGradient(
-                        colors: [purplePrimary, .appPurpleDark],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ))
-                    .cornerRadius(20)
+                    .padding(.top, 10)
                 }
-                .padding(.top, 10)
-            }
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
                 .padding(.bottom, 50)
@@ -279,24 +286,24 @@ struct AddNewGastoSheetView: View {
                 }
             }
             
-//            HStack {
-//                Button(action: { dismiss() }) {
-//                    HStack {
-//                        Image(systemName: "chevron.left")
-//                        Text("Voltar")
-//                    }
-//                    .foregroundColor(.purple)
-//                    .font(.system(size: 18, weight: .medium))
-//                }
-//                Spacer()
-//            }
-//            .padding(.horizontal, 25)
-//            .padding(.vertical, 12)
-//            .background {
-//                Rectangle()
-//                    .fill(hasScrolled ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Color("surfaceBackground")))
-//                    .ignoresSafeArea(edges: .top)
-//            }
+            //            HStack {
+            //                Button(action: { dismiss() }) {
+            //                    HStack {
+            //                        Image(systemName: "chevron.left")
+            //                        Text("Voltar")
+            //                    }
+            //                    .foregroundColor(.purple)
+            //                    .font(.system(size: 18, weight: .medium))
+            //                }
+            //                Spacer()
+            //            }
+            //            .padding(.horizontal, 25)
+            //            .padding(.vertical, 12)
+            //            .background {
+            //                Rectangle()
+            //                    .fill(hasScrolled ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Color("surfaceBackground")))
+            //                    .ignoresSafeArea(edges: .top)
+            //            }
         }
         .background(Color("surfaceBackground").ignoresSafeArea())
         .ignoresSafeArea(edges: .top)
@@ -378,6 +385,42 @@ struct AddNewGastoSheetView: View {
         }
     }
 }
+
+struct InputFieldLimitado<Content: View>: View {
+    let title: String
+    let icon: String
+    let content: Content
+    
+    init(title: String, icon: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.icon = icon
+        self.content = content()
+    }
+    
+    var body: some View {
+        
+        HStack{
+            Image(systemName: icon)
+                .foregroundColor(Color.roxoInicial)
+                .padding(15)
+                .background(
+                    Circle()
+                        .fill(Color.purplePrimary.opacity(0.3))
+                )
+            VStack(alignment: .leading){
+                Text(title)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(Color("textPrimary"))
+                content
+                    .font(.system(size: 16))
+                
+                
+                
+            }
+        }
+    }
+}
+
 
 struct DatePickerFieldLimitado: View {
     let title: String
