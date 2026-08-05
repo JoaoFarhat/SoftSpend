@@ -64,6 +64,20 @@ final class AuthService: ObservableObject {
         isLoading = false
     }
     
+    func deleteAccount() async {
+        isLoading = true
+        errorMessage = nil
+        
+        do {
+            try await NetworkManager.shared.deleteAccount()
+            logout()
+        } catch {
+            errorMessage = "Não foi possível excluir a conta. Tente novamente."
+        }
+        
+        isLoading = false
+    }
+    
     func logout() {
         KeychainManager.deleteToken()
         UserDefaults.standard.removeObject(forKey: userKey)

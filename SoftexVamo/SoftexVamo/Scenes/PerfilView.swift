@@ -12,10 +12,11 @@ struct PerfilView: View {
     @Environment(\.dismiss) var dismiss
     @EnvironmentObject var viewModel: CiclosViewModel
     @ObservedObject private var authService = AuthService.shared
+    @State private var showConfiguracoes = false
     
     private let purplePrimary = Color.appPurple
-    private let cardBackground = Color(red: 0.12, green: 0.11, blue: 0.18)
-    private let screenBackground = Color(red: 0.06, green: 0.05, blue: 0.10)
+    private let cardBackground = Color("cardBackground")
+    private let screenBackground = Color("backgroundCor")
     
     private var user: UserModel? { authService.currentUser }
     
@@ -63,28 +64,28 @@ struct PerfilView: View {
                     
                     accountInfoSection
                         .padding(.horizontal, 16)
-                    
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("PREFERÊNCIAS")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(.white.opacity(0.5))
-                            .padding(.horizontal, 16)
-                    }
-                    .padding(.bottom, 40)
                 }
+                .padding(.bottom, 80)
             }
             .scrollIndicators(.hidden)
         }
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                Image(systemName: "gearshape.fill")
-                    .foregroundColor(.white.opacity(0.6))
-                    .font(.system(size: 18))
+                Button {
+                    showConfiguracoes = true
+                } label: {
+                    Image(systemName: "gearshape.fill")
+                        .foregroundColor(Color("textSecondary"))
+                        .font(.system(size: 18))
+                }
             }
         }
         .toolbarBackground(.hidden, for: .navigationBar)
-        .tint(.white)
+        .tint(Color("textPrimary"))
+        .sheet(isPresented: $showConfiguracoes) {
+            ConfiguracoesView()
+        }
     }
     
     private var headerSection: some View {
@@ -117,12 +118,12 @@ struct PerfilView: View {
                         )
                     
                     Circle()
-                        .fill(Color(red: 0.18, green: 0.16, blue: 0.25))
+                        .fill(Color("cardBackground"))
                         .frame(width: 28, height: 28)
                         .overlay(
                             Image(systemName: "camera.fill")
                                 .font(.system(size: 12))
-                                .foregroundColor(.white.opacity(0.8))
+                                .foregroundColor(Color("textSecondary"))
                         )
                         .offset(x: -2, y: -2)
                 }
@@ -131,7 +132,7 @@ struct PerfilView: View {
                 VStack(spacing: 6) {
                     Text(user?.nome ?? "Usuário")
                         .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(.white)
+                        .foregroundColor(Color("textPrimary"))
                     
                     HStack(spacing: 4) {
                         Image(systemName: "star.fill")
@@ -148,9 +149,10 @@ struct PerfilView: View {
                     
                     Text(user?.email ?? "email@exemplo.com")
                         .font(.system(size: 14))
-                        .foregroundColor(.white.opacity(0.5))
+                        .foregroundColor(Color("textSecondary"))
                 }
             }
+        
     }
     
     private var statsGrid: some View {
@@ -197,7 +199,7 @@ struct PerfilView: View {
         VStack(alignment: .leading, spacing: 12) {
             Text("INFORMAÇÕES DA CONTA")
                 .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(Color("textSecondary"))
                 .padding(.bottom, 4)
             
             VStack(spacing: 0) {
@@ -208,7 +210,7 @@ struct PerfilView: View {
                 )
                 
                 Divider()
-                    .background(Color.white.opacity(0.08))
+                    .background(Color("textPrimary").opacity(0.08))
                 
                 AccountInfoRow(
                     icon: "envelope.fill",
@@ -220,7 +222,7 @@ struct PerfilView: View {
             .cornerRadius(16)
             .overlay(
                 RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                    .stroke(Color("textPrimary").opacity(0.08), lineWidth: 1)
             )
         }
     }
@@ -242,7 +244,7 @@ private struct StatCard: View {
     let subtitleColor: Color
     let accentColor: Color
     
-    private let cardBg = Color(red: 0.12, green: 0.11, blue: 0.18)
+    private let cardBg = Color("cardBackground")
     
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -255,13 +257,13 @@ private struct StatCard: View {
             
             Text(value)
                 .font(.system(size: 20, weight: .bold))
-                .foregroundColor(.white)
+                .foregroundColor(Color("textPrimary"))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
             
             Text(label)
                 .font(.system(size: 11, weight: .bold))
-                .foregroundColor(.white.opacity(0.45))
+                .foregroundColor(Color("textSecondary"))
             
             Text(subtitle ?? " ")
                 .font(.system(size: 11, weight: .medium))
@@ -273,9 +275,9 @@ private struct StatCard: View {
         .cornerRadius(18)
         .overlay(
             RoundedRectangle(cornerRadius: 18)
-                .stroke(Color.white.opacity(0.06), lineWidth: 1)
+                .stroke(Color("textPrimary").opacity(0.08), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.2), radius: 8, y: 4)
+        .shadow(color: .black.opacity(0.1), radius: 8, y: 4)
     }
 }
 
@@ -298,17 +300,17 @@ private struct AccountInfoRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
                     .font(.system(size: 12))
-                    .foregroundColor(.white.opacity(0.45))
+                    .foregroundColor(Color("textSecondary"))
                 Text(value)
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.white)
+                    .foregroundColor(Color("textPrimary"))
             }
             
             Spacer()
             
             Image(systemName: "chevron.right")
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white.opacity(0.3))
+                .foregroundColor(Color("textSecondary"))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 14)

@@ -22,16 +22,97 @@ struct CiclosListView: View {
     @State var addNewGastoSheet: Bool = false
     @State var addNewCicloSheet: Bool = false
     
+    private var saudacao: String {
+        let nome = authService.currentUser?.nome ?? ""
+        let saudacao: String
+        let hora = Calendar.current.component(.hour, from: Date())
+        
+        switch hora {
+        case 5..<12:
+            saudacao = "Bom dia"
+        case 12..<18:
+            saudacao = "Boa tarde"
+        default:
+            saudacao = "Boa noite"
+        }
+        
+        return nome.isEmpty ? saudacao : "\(saudacao), \(nome)"
+    }
+    
+    private var infoPeriodo: String {
+        let dias = viewModel.atualCiclo.dias?.count ?? 0
+        let hoje = Calendar.current.startOfDay(for: Date())
+        let diaAtual = viewModel.atualCiclo.dias?.firstIndex(where: {
+            Calendar.current.isDate(Calendar.current.startOfDay(for: $0.data), inSameDayAs: hoje)
+        }).map { $0 + 1 }
+        
+        if let diaAtual = diaAtual, dias > 0 {
+            return "\(viewModel.atualCiclo.periodo) · Dia \(diaAtual) de \(dias)"
+        }
+        return viewModel.atualCiclo.periodo
+    }
+    
+    private var resumoDiaSection: some View {
+        let hoje = Calendar.current.startOfDay(for: Date())
+        let diaHoje = viewModel.atualCiclo.dias?.first(where: {
+            Calendar.current.isDate(Calendar.current.startOfDay(for: $0.data), inSameDayAs: hoje)
+        })
+        let gastoHoje = diaHoje?.gastos.reduce(0) { $0 + $1.valor } ?? 0
+        let orcamentoDiario = viewModel.atualCiclo.diaria
+        let restanteHoje = orcamentoDiario - gastoHoje
+        
+        return HStack(spacing: 8) {
+            resumoItem(icon: "wallet.bifold", title: "Orçamento diário", value: orcamentoDiario, color: .appPurple)
+            resumoItem(icon: "arrow.down", title: "Gasto hoje", value: gastoHoje, color: .green)
+            resumoItem(icon: "chart.line.uptrend.xyaxis", title: "Restam hoje", value: restanteHoje, color: .appPurple)
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 12)
+    }
+    
+    private func resumoItem(icon: String, title: String, value: Float, color: Color) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(color)
+                    .frame(width: 28, height: 28)
+                    .background(color.opacity(0.15))
+                    .cornerRadius(8)
+                Spacer()
+            }
+            Text(title)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(Color("textSecondary"))
+            Text(value, format: .currency(code: "BRL").locale(Locale(identifier: "pt_BR")))
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(Color("textPrimary"))
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color("cardBackground"))
+        .cornerRadius(18)
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(Color("textPrimary").opacity(0.08), lineWidth: 1)
+        )
+    }
+    
     var body: some View {
-        NavigationStack{
-            VStack(alignment: .leading, spacing: 0) {
+        
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView() {
                 HStack{
-                    VStack(alignment: .leading){
-                        Text("Controle Financeiro")
+                    VStack(alignment: .leading, spacing: 4){
+                        Text(saudacao)
                             .foregroundStyle(Color("textSecondary"))
-                        Text("Seus Gastos")
+                            .font(.system(size: 14))
+                        Text(viewModel.atualCiclo.titulo.isEmpty ? "Viagem" : viewModel.atualCiclo.titulo)
                             .bold()
                             .font(.title)
+                        Text(infoPeriodo)
+                            .foregroundStyle(Color("textSecondary"))
+                            .font(.system(size: 13))
                     }
                     
                     Spacer()
@@ -63,7 +144,7 @@ struct CiclosListView: View {
                         }
                     }
                     
-                }.padding(10)
+                }.padding(.horizontal, 10)
                 
                 if viewModel.isLoading {
                     CardMainView()
@@ -80,10 +161,10 @@ struct CiclosListView: View {
                     EmptyCicloView {
                         addNewCicloSheet.toggle()
                     }
-                    
-                    Spacer()
                 } else {
                     CardMainView()
+                    
+                    resumoDiaSection
                     
                     CicloGastosView() {
                         addNewGastoSheet.toggle()
@@ -93,31 +174,34 @@ struct CiclosListView: View {
                     .id(viewModel.atualCiclo.id)
                     .environmentObject(GastosViewModel(ciclo: viewModel.atualCiclo))
                 }
-                
-                Spacer()
-            }
-            .task {
-                await viewModel.fetchCiclosResumo()
-            }
-            .navigationBarBackButtonHidden(true)
-            .toolbar(.hidden)
-            .background(.backgroundCor)
-            .overlay(alignment: .topTrailing) {
-                if showMenu {
-                    MenuView(showMenu: $showMenu)
-                        .environmentObject(viewModel)
-                        .offset(x: -16, y: 70)
-                }
-            }
-            .fullScreenCover(isPresented: $addNewCicloSheet) {
-                NewCicloView()
             }
         }
-        
+        .padding(.bottom, 30)
+        .task {
+            await viewModel.fetchCiclosResumo()
+        }
+        .background(.backgroundCor)
+        .overlay(alignment: .topTrailing) {
+            if showMenu {
+                MenuView(showMenu: $showMenu)
+                    .environmentObject(viewModel)
+                    .offset(x: -16, y: 70)
+            }
+        }
+        .fullScreenCover(isPresented: $addNewCicloSheet) {
+            NewCicloView()
+        }
     }
 }
 
 #Preview {
-    CiclosListView()
-        .environmentObject(CiclosViewModel())
+    let viewModel = CiclosViewModel()
+    var ciclo = CicloSoftex.example
+    ciclo.backendId = 1
+    viewModel.atualCiclo = ciclo
+    viewModel.allCiclos = [ciclo]
+    viewModel.isLoading = false
+
+    return CiclosListView()
+        .environmentObject(viewModel)
 }

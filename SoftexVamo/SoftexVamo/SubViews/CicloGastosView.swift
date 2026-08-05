@@ -15,22 +15,14 @@ struct CicloGastosView: View {
     let action: () -> Void
     let deleteAction: (Int, Int) -> Void
     
-    func removerGastoEspecifico(dia: DiaSoftex, index: Int) {
-        let indexSet = IndexSet(integer: index)
-        
-        guard let gastoID = gastosViewModel.deleteGasto(dia: dia, offsets: indexSet) else { return }
-        
-        deleteAction(dia.id, gastoID)
-    }
-    
     var body: some View {
-        ScrollView(showsIndicators: false){
-            VStack{
+        VStack{
                 VStack(alignment: .leading) {
                     
                     HStack{
-                        Text("Gastos Registrados")
-                            .font(.system(size: 20, weight: .bold))
+                        Text("Gastos registrados")
+                            .font(.system(size: 18, weight: .bold))
+                            .foregroundStyle(Color("textPrimary"))
                         
                         Spacer()
                     }
@@ -38,7 +30,7 @@ struct CicloGastosView: View {
                         HStack {
                             Image(systemName: "magnifyingglass")
                                 .foregroundColor(.gray)
-                            TextField("Procurar gasto...", text: $gastosViewModel.searchGastoText)
+                            TextField("Buscar gasto, loja, categoria...", text: $gastosViewModel.searchGastoText)
                                 .textFieldStyle(PlainTextFieldStyle())
                         }
                         .padding(12)
@@ -134,35 +126,22 @@ struct CicloGastosView: View {
                         ForEach(gastosViewModel.secoesExibidas.reversed()) { dia in
                             if(dia.gastos.count != 0){
                                 Section(header: createSectionHeader(dia: dia)) {
-                                    ZStack{
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .foregroundStyle(Color("cinza"))
-                                        
-                                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                        
-                                            .shadow(radius: 2)
-                                        
-                                        VStack{
-                                            ForEach(Array(dia.gastos.enumerated()), id: \.element.id) { index, gasto in
-                                                createGastoCell(gasto: gasto) {
-                                                    removerGastoEspecifico(dia: dia, index: index)
-                                                }
-                                                .padding(.horizontal)
-                                                .padding(.vertical, 8)
-                                                
-                                                if index < dia.gastos.count - 1 {
-                                                    Divider()
-                                                        .background(Color.gray.opacity(0.2))
-                                                        .padding(.horizontal, -10)
-                                                }
+                                    VStack(spacing: 0) {
+                                        ForEach(Array(dia.gastos.enumerated()), id: \.element.id) { index, gasto in
+                                            createGastoCell(gasto: gasto)
+                                            
+                                            if index < dia.gastos.count - 1 {
+                                                Divider()
+                                                    .background(Color("textPrimary").opacity(0.08))
+                                                    .padding(.horizontal, 16)
                                             }
                                         }
-                                        .skeleton(isLoading: ciclosViewModel.isLoading)
-                                        
-                                        //                            .padding()
                                     }
-                                    //                            .background(Color("cinza"))
-                                    //                            .background(Color.cardBackground)
+                                    .padding(.vertical, 8)
+                                    .background(Color("cinza"))
+                                    .cornerRadius(18)
+                                    .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
+                                    .skeleton(isLoading: ciclosViewModel.isLoading)
                                 }
                                 
                             }
@@ -174,10 +153,9 @@ struct CicloGastosView: View {
             }
             .padding(10)
             .padding(.bottom, 80)
-        }
-        .onTapGesture {
-            UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        }
+            .onTapGesture {
+                UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+            }
     }
     
     @ViewBuilder func createSectionHeader(dia: DiaSoftex) -> some View {
@@ -207,55 +185,44 @@ struct CicloGastosView: View {
         
     }
     
-    @ViewBuilder func createGastoCell(gasto: GastosDia, onDelete: @escaping () -> Void) -> some View {
-        HStack {
-            
+    @ViewBuilder func createGastoCell(gasto: GastosDia) -> some View {
+        HStack(spacing: 14) {
             Image(systemName: gasto.categoria.systemImageName)
-                .font(.system(size: 25, weight: .bold))
-                .frame(width: 30, height: 30)
-                .padding()
-                .foregroundStyle(Color.white)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 44, height: 44)
                 .background(gasto.categoria.color)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .cornerRadius(12)
             
-            
-            
-            VStack(alignment: .leading){
+            VStack(alignment: .leading, spacing: 6) {
                 Text(gasto.titulo)
-                    .font(.system(size: 18, weight: .bold))
-                    .padding(.bottom, 10)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(Color("textPrimary"))
                 
                 Text(gasto.categoria.localizedName)
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(Color("textSecondary").opacity(0.7))
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(gasto.categoria.color)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(gasto.categoria.color.opacity(0.15))
+                    .cornerRadius(6)
             }
-            .padding(6)
             
             Spacer()
-            VStack(alignment:.trailing){
+            
+            HStack(spacing: 8) {
                 Text(gasto.valor, format: .currency(code: "BRL"))
-                    .font(.system(size: 18, weight: .bold))
-                Button {
-                    onDelete()
-                } label: {
-                    Image(systemName: "trash")
-                        .font(.system(size: 10, weight: .light))
-                    
-                        .frame(width: 20, height: 20)
-                        .padding(2)
-                        .background(Color.red.opacity(0.05))
-                        .cornerRadius(10)
-                        .foregroundStyle(.red)
-                }
-                .buttonStyle(.plain)
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(Color("textPrimary"))
+                
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(Color("textSecondary"))
             }
         }
-        .background(Color("cinza"))
-        
-        .frame(maxWidth: .infinity, maxHeight: 70)
-        //
-        
-        
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .frame(maxWidth: .infinity)
     }
 }
 

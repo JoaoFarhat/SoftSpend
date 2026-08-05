@@ -7,6 +7,7 @@ brasileiras usando o modelo Gemini 2.5 Flash da Google (multimodal).
 
 """
 
+import json
 import os
 from io import BytesIO
 
@@ -19,7 +20,9 @@ from enums.categoria_enum import Categoria
 
 # Chave da API lida do ambiente (nunca commitar no codigo)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-MODEL_NAME = "gemini-3.5-flash-lite"
+# Modelo configurável; gemini-2.5-flash é amplamente compatível com AI Studio.
+# Para usar outro (ex: gemini-3.5-flash-lite), defina GEMINI_MODEL_NAME no .env.
+GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
 
 # Limite maximo de dimensao da imagem (maior lado). Imagens maiores sao redimensionadas.
 # 1280px e suficiente para OCR de comprovantes mantendo legibilidade.
@@ -31,7 +34,17 @@ JPEG_QUALITY = 85
 # Cliente Gemini criado uma unica vez (singleton no escopo do modulo).
 # Se a API key nao estiver configurada, o cliente e None e o servico falha de
 # forma controlada na primeira chamada de extracao.
-_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+_client = (
+    genai.Client(
+        api_key=GEMINI_API_KEY,
+        http_options=types.HttpOptions(
+            timeout=30000,  # 30 segundos
+            retry_options=types.HttpRetryOptions(attempts=1),  # sem retries com backoff longo
+        ),
+    )
+    if GEMINI_API_KEY
+    else None
+)
 
 
 class GastoExtraido(BaseModel):
@@ -167,19 +180,23 @@ def extrair_gasto_da_imagem(image_bytes: bytes) -> dict:
     imagem_part = types.Part.from_bytes(data=imagem_otimizada, mime_type="image/jpeg")
 
     response = _client.models.generate_content(
-        model=MODEL_NAME,
-        contents=[PROMPT, imagem_part],
+        model=GEMINI_MODEL_NAME,
+        contents=[types.Part.from_text(text=PROMPT), imagem_part],
         config=types.GenerateContentConfig(
             temperature=0.0,
             response_mime_type="application/json",
             response_schema=GastoExtraido,
-            thinking_config=types.ThinkingConfig(thinking_budget=0),
         ),
     )
 
-    dados: GastoExtraido = response.parsed
+    dados = response.parsed
     if dados is None:
-        raise ValueError(f"Modelo nao retornou dados estruturados: {response.text}")
+        if not response.text:
+            raise ValueError("Modelo nao retornou dados estruturados")
+        try:
+            dados = GastoExtraido(**json.loads(response.text))
+        except (json.JSONDecodeError, Exception) as e:
+            raise ValueError(f"Modelo retornou resposta inesperada: {response.text[:200]} ({e})")
 
     return {
         "titulo": dados.titulo[:40],

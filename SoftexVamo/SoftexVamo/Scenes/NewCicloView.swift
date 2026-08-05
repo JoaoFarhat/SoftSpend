@@ -70,7 +70,7 @@ struct NewCicloView: View {
         ZStack(alignment: .top) {
             ScrollView {
                 VStack(alignment: .leading) {
-                    Color.clear.frame(height: 50)
+                    Color.clear.frame(height: 30)
                     
                     HStack(alignment: .center, spacing: 12) {
                         VStack(alignment: .leading, spacing: 4) {
@@ -89,9 +89,6 @@ struct NewCicloView: View {
                             .frame(width: 90, height: 70)
                     }
                     .padding(.bottom)
-                    
-                    
-                    
                     
                     VStack(spacing: 15) {
                         InputField(title: "Nome do Ciclo", icon: "mappin.and.ellipse", helperText: "Dê um nome para identificar sua viagem") {
@@ -129,8 +126,9 @@ struct NewCicloView: View {
                     .background(Color("cardBackground").opacity(0.5))
                     .cornerRadius(30)
                     .shadow(color: .black.opacity(0.05), radius: 15, x: 0, y: 10)
+                    .padding(.bottom, 10)
                     
-                    Spacer()
+//                    Spacer()
                     
                     Button(action: {
                         Task{
@@ -181,6 +179,7 @@ struct NewCicloView: View {
                             .preference(key: ScrollOffsetKey.self, value: geo.frame(in: .named("scroll")).minY)
                     }
                 )
+                
             }
             .coordinateSpace(name: "scroll")
             .onPreferenceChange(ScrollOffsetKey.self) { value in
@@ -196,7 +195,8 @@ struct NewCicloView: View {
                     } else {
                         dismiss()
                     }
-                }) {
+                })
+                {
                     HStack {
                         Image(systemName: "chevron.left")
                         Text("Voltar")

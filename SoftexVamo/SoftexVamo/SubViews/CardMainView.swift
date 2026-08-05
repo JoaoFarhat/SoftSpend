@@ -66,7 +66,7 @@ struct CardMainView: View {
                         .padding(7)
                         .background(Color.appPurpleDark)
                         .clipShape(Circle())
-                    Text("Saldo disponível")
+                    Text("Orçamento restante")
                         .font(.system(size: 13, weight: .regular))
                     Image(systemName: "eye")
                         .font(.system(size: 13, weight: .regular))
@@ -168,9 +168,9 @@ struct CardMainView: View {
     private func statItem(icon: String, label: String, value: Any, format: FloatingPointFormatStyle<Float>.Currency? = nil, subtitle: String = "") -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
-                .font(.system(size: 12))
-                .foregroundStyle(.white.opacity(0.75))
-                .padding(8)
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.8))
+                .padding(7)
                 .background(Color.appPurpleDark)
                 .clipShape(Circle())
             VStack(alignment: .leading, spacing: 1) {
@@ -179,18 +179,18 @@ struct CardMainView: View {
                     .foregroundStyle(.white.opacity(0.75))
                 if let format {
                     Text(value as! Float, format: format)
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 10, weight: .bold))
                         .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                        .minimumScaleFactor(0.75)
                 } else {
                     Text(value as! String)
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: 10, weight: .bold))
                         .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                        .minimumScaleFactor(0.75)
                 }
                 if !subtitle.isEmpty {
                     Text(subtitle)
-                        .font(.system(size: 9, weight: .regular))
+                        .font(.system(size: 8, weight: .regular))
                         .foregroundStyle(.white.opacity(0.6))
                 }
             }

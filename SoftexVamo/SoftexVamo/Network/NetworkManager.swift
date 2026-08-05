@@ -178,6 +178,13 @@ final class NetworkManager {
         let request = makeRequest(url: url, method: "POST", body: try encoder.encode(dados))
         return try decoder.decode(AuthResponse.self, from: try await execute(request, logout401: false))
     }
+    
+    func deleteAccount() async throws {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/conta") else {
+            throw URLError(.badURL)
+        }
+        try await execute(makeRequest(url: url, method: "DELETE"))
+    }
 }
 
 final class InsecureSessionDelegate: NSObject, URLSessionDelegate, Sendable {

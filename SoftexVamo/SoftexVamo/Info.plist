@@ -6,8 +6,18 @@
 	<string>$(API_BASE_URL_LOCAL)</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
+<key>NSExceptionDomains</key>
+<dict>
+    <key>softspend.com.br</key>
+    <dict>
+        <key>NSIncludesSubdomains</key>
+        <true/>
+        <key>NSExceptionAllowsInsecureHTTPLoads</key>
+        <false/>
+        <key>NSExceptionRequiresForwardSecrecy</key>
+        <true/>
+    </dict>
+</dict>
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>

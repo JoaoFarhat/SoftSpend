@@ -73,3 +73,7 @@ def validar_token(token: str) -> int | None:
         return user_id
     except JWTError:
         return None
+
+
+def excluir_conta(db: Session, user_id: int) -> None:
+    auth_repository.excluir_usuario_por_id(db, user_id)

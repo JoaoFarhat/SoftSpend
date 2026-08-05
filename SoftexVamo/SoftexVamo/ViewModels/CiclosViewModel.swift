@@ -10,7 +10,7 @@ import Combine
 
 final class CiclosViewModel: ObservableObject {
     @Published var allCiclos: [CicloSoftex] = []
-    @Published var atualCiclo: CicloSoftex = CicloSoftex(valor_total: 0, gasto_total: 0, periodo: "30/04 - 30/04", diaria: 0, titulo: "", dias: [])
+    @Published var atualCiclo: CicloSoftex = CicloSoftex.example
     @Published var gastosInfo: GastosDia = GastosDia.example
     @Published var availableInfo: GastosDia = GastosDia.example
     @Published var isLoading: Bool = true

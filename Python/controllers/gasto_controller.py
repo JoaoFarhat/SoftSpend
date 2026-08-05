@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import get_current_user_id
@@ -30,7 +31,7 @@ async def extrair_gasto_de_imagem(imagem: UploadFile = File(...), user_id: int =
         raise HTTPException(status_code=413, detail="Imagem muito grande (max 10MB)")
     
     try:
-        dados = ocr_service.extrair_gasto_da_imagem(conteudo)
+        dados = await run_in_threadpool(ocr_service.extrair_gasto_da_imagem, conteudo)
         return dados
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

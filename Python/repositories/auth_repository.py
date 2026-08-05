@@ -20,3 +20,11 @@ def criar_usuario(db: Session, usuario: models.User) -> models.User:
     db.commit()
     db.refresh(usuario)
     return usuario
+
+
+def excluir_usuario_por_id(db: Session, user_id: int) -> None:
+    usuario = buscar_por_id(db, user_id)
+    if not usuario:
+        raise ValueError("Usuario nao encontrado")
+    db.delete(usuario)
+    db.commit()

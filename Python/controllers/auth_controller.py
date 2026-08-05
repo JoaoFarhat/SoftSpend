@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 from database import get_db
+from dependencies import get_current_user_id
 from dtos.auth import RegisterRequest, LoginRequest, AuthResponse
 from services import auth_service
 from limiter import limiter
@@ -38,4 +39,14 @@ def login(request: Request, dados: LoginRequest, db: Session = Depends(get_db)):
         )
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e))
+
+
+@router.delete("/conta")
+@limiter.limit("10/minute")
+def excluir_conta(request: Request, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
+    try:
+        auth_service.excluir_conta(db, user_id)
+        return {"detail": "Conta excluida com sucesso"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 

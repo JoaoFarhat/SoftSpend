@@ -15,4 +15,5 @@ class Ciclo(Base):
 
     id_usuario = Column(Integer, ForeignKey("users.id"))
 
+    usuario = relationship("User", back_populates="ciclos")
     dias = relationship("Dia", back_populates="ciclo", cascade="all, delete-orphan")

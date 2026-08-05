@@ -45,6 +45,7 @@ struct AddNewGastoSheetView: View {
     
     @FocusState private var focusedField: Field?
     @State private var hasScrolled: Bool = false
+    @State private var scrollOffset: CGFloat = 0
     
     @State private var photoItem: PhotosPickerItem?
     @State private var isExtraindo: Bool = false
@@ -58,111 +59,15 @@ struct AddNewGastoSheetView: View {
         let topInset = (UIApplication.shared.connectedScenes
             .compactMap { ($0 as? UIWindowScene)?.windows.first?.safeAreaInsets.top }
             .first) ?? 0
+        let bottomInset = (UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.windows.first?.safeAreaInsets.bottom }
+            .first) ?? 0
         
-        VStack(spacing: 0) {
-            ZStack(alignment: .top){
-                LinearGradient(
-                    colors: [purplePrimary.opacity(0.9), Color.appPurpleDark.opacity(0.9)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .clipShape(BottomCurveShape())
-                .ignoresSafeArea(edges: .top)
-                .shadow(color: .black.opacity(0.15), radius: 20, y: 10)
-                
-                VStack(alignment: .leading){
-                    HStack{
-                        Button(action: { dismiss() }) {
-                            HStack {
-                                Image(systemName: "chevron.left")
-                                Text("Voltar")
-                            }
-                            .foregroundColor(.white)
-                            .font(.system(size: 18, weight: .bold))
-                        }
-                        Spacer()
-                    }
-                    .padding(.bottom, 10)
-                    
-                    Text("NOVO GASTO")
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(Color.white.opacity(0.60))
-                    
-                    VStack{
-                        HStack{
-                            Text("R$")
-                                .font(.system(size: 20, weight: .bold))
-                                .foregroundStyle(Color.white.opacity(0.60))
-                            Spacer()
-                            TextField("", text: $valueString, prompt: Text("0,00").foregroundColor(.white.opacity(0.70)))
-                                .font(.system(size: 40, weight: .bold))
-                                .keyboardType(.decimalPad)
-                                .focused($focusedField, equals: .value)
-                                .onChange(of: valueString) { _, newValue in
-                                    value = verificarNumeros(orcamento: newValue)
-                                }
-                            
-                        }
-                        Text("Toque para digitar um valor")
-                            .foregroundStyle(Color.white.opacity(0.60))
-                            .font(.system(size: 12, weight: .bold))
-                    }
-                    .multilineTextAlignment(.center)
-                    
-                    Button(action: {
-                        showSourceDialog = true
-                    }) {
-                        HStack(spacing: 12) {
-                            if isExtraindo {
-                                ProgressView()
-                                    .tint(.white)
-                            } else {
-                                Image(systemName: "doc.viewfinder.fill")
-                                    .font(.system(size: 22, weight: .semibold))
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(isExtraindo ? "Analisando comprovante..." : "Escanear comprovante")
-                                    .font(.system(size: 16, weight: .bold))
-                                Text(isExtraindo ? "Aguarde alguns segundos" : "Preencha automaticamente com IA")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .opacity(0.85)
-                            }
-                            
-                            Spacer()
-                            
-                            if !isExtraindo {
-                                Image(systemName: "sparkles")
-                                    .font(.system(size: 18, weight: .semibold))
-                            }
-                        }
-                        .foregroundStyle(.white)
-                        .padding(18)
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            LinearGradient(
-                                colors: [purplePrimary.opacity(0.9), .purple],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .cornerRadius(20)
-                        .shadow(color: purplePrimary.opacity(0.3), radius: 10, x: 0, y: 5)
-                    }
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 20)
-                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
-                    )
-                    .padding(.top, 10)
-                    .shadow(color: Color.appPurple.opacity(0.4), radius: 20, y: 10)
-                    .disabled(isExtraindo)
-                }
-                .padding()
-                .padding(.top, topInset)
-            }
-            .frame(height: 280 + topInset)
-            
-            ScrollView {
+        let headerHeight = 280 + topInset
+
+        ZStack(alignment: .top) {
+            GeometryReader { scrollProxy in
+                ScrollView {
                 VStack(alignment: .leading, spacing: 20){
                     if let erro = erroExtracao {
                         Text(erro)
@@ -246,6 +151,8 @@ struct AddNewGastoSheetView: View {
                     }
                     .frame(minHeight: 150)
                     
+                    Spacer()
+                    
                     Button(action: {
                         Task {
                             try await viewModel.createNewGasto(title: title, value: value, dia: selectedDia, categoria: selectedCategoria)
@@ -268,23 +175,137 @@ struct AddNewGastoSheetView: View {
                         .cornerRadius(20)
                     }
                     .padding(.top, 10)
+                    .padding(.bottom, bottomInset + 8)
                 }
                 .padding(.horizontal, 16)
-                .padding(.top, 16)
-                .padding(.bottom, 50)
+                .padding(.top, headerHeight + 16)
+                .frame(minHeight: max(scrollProxy.size.height - headerHeight, 0))
                 .background(
                     GeometryReader { geo in
                         Color.clear
                             .preference(key: ScrollOffsetKey.self, value: geo.frame(in: .named("gastoScroll")).minY)
                     }
                 )
-            }
-            .coordinateSpace(name: "gastoScroll")
-            .onPreferenceChange(ScrollOffsetKey.self) { value in
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    hasScrolled = value < -5
+                }
+                .coordinateSpace(name: "gastoScroll")
+                .onPreferenceChange(ScrollOffsetKey.self) { value in
+                    scrollOffset = value
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        hasScrolled = value < -5
+                    }
                 }
             }
+
+            let clampedOffset = min(0, scrollOffset)
+
+            ZStack(alignment: .top){
+                LinearGradient(
+                    colors: [purplePrimary, Color.appPurpleDark],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+                .clipShape(BottomCurveShape())
+                .ignoresSafeArea(edges: .top)
+                .shadow(color: .black.opacity(0.15), radius: 20, y: 10)
+                
+                VStack(alignment: .leading){
+                    HStack{
+                        Button(action: { dismiss() }) {
+                            HStack {
+                                Image(systemName: "chevron.left")
+                                Text("Voltar")
+                            }
+                            .foregroundColor(.white)
+                            .font(.system(size: 18, weight: .bold))
+                        }
+                        Spacer()
+                    }
+                    .padding(.bottom, 10)
+                    
+                    Text("NOVO GASTO")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(Color.white.opacity(0.60))
+                    
+                    VStack{
+                        
+                            ZStack{
+                                HStack{
+                                    Text("R$")
+                                        .font(.system(size: 20, weight: .bold))
+                                        .foregroundStyle(Color.white.opacity(0.60))
+                                    Spacer()
+                                }
+                                TextField("", text: $valueString, prompt: Text("0,00").foregroundColor(.white.opacity(0.70)))
+                                    .font(.system(size: 40, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .keyboardType(.decimalPad)
+                                    .focused($focusedField, equals: .value)
+                                    .onChange(of: valueString) { _, newValue in
+                                        value = verificarNumeros(orcamento: newValue)
+                                    }
+                                    .multilineTextAlignment(.center)
+                            
+                        }
+                        Text("Toque para digitar um valor")
+                            .foregroundStyle(Color.white.opacity(0.60))
+                            .font(.system(size: 12, weight: .bold))
+                    }
+                    
+                    
+                    Button(action: {
+                        showSourceDialog = true
+                    }) {
+                        HStack(spacing: 12) {
+                            if isExtraindo {
+                                ProgressView()
+                                    .tint(.white)
+                            } else {
+                                Image(systemName: "doc.viewfinder.fill")
+                                    .font(.system(size: 22, weight: .semibold))
+                            }
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(isExtraindo ? "Analisando comprovante..." : "Escanear comprovante")
+                                    .font(.system(size: 16, weight: .bold))
+                                Text(isExtraindo ? "Aguarde alguns segundos" : "Preencha automaticamente com IA")
+                                    .font(.system(size: 12, weight: .medium))
+                                    .opacity(0.85)
+                            }
+                            
+                            Spacer()
+                            
+                            if !isExtraindo {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 18, weight: .semibold))
+                            }
+                        }
+                        .foregroundStyle(.white)
+                        .padding(18)
+                        .frame(maxWidth: .infinity)
+                        .background(
+                            LinearGradient(
+                                colors: [purplePrimary.opacity(0.9), .purple],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .cornerRadius(20)
+                        .shadow(color: purplePrimary.opacity(0.3), radius: 10, x: 0, y: 5)
+                    }
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                    )
+                    .padding(.top, 10)
+                    .shadow(color: Color.appPurple.opacity(0.4), radius: 20, y: 10)
+                    .disabled(isExtraindo)
+                }
+                .padding()
+                .padding(.top, topInset)
+            }
+            .frame(height: headerHeight)
+            .offset(y: clampedOffset * 0.4)
+            .scaleEffect(1 + clampedOffset * 0.0006, anchor: .top)
             
             //            HStack {
             //                Button(action: { dismiss() }) {
@@ -305,7 +326,8 @@ struct AddNewGastoSheetView: View {
             //                    .ignoresSafeArea(edges: .top)
             //            }
         }
-        .background(Color("surfaceBackground").ignoresSafeArea())
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color("surfaceBackground"), ignoresSafeAreaEdges: .all)
         .ignoresSafeArea(edges: .top)
         .onTapGesture { focusedField = nil }
         .confirmationDialog("Escanear comprovante", isPresented: $showSourceDialog, titleVisibility: .visible) {
@@ -489,7 +511,7 @@ struct BottomCurveShape: Shape {
         // curva pra baixo (dentro do shape)
         path.addQuadCurve(
             to: CGPoint(x: 0, y: rect.height),
-            control: CGPoint(x: rect.width / 2, y: rect.height - 30)
+            control: CGPoint(x: rect.width / 2, y: rect.height - 50)
         )
         
         // lado esquerdo
