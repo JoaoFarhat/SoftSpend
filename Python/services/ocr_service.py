@@ -20,16 +20,25 @@ from enums.categoria_enum import Categoria
 
 # Chave da API lida do ambiente (nunca commitar no codigo)
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-# Modelo configurável; gemini-2.5-flash é amplamente compatível com AI Studio.
-# Para usar outro (ex: gemini-3.5-flash-lite), defina GEMINI_MODEL_NAME no .env.
-GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
+# Modelo configurável. O *-flash-lite e o mais rapido da familia e suficiente
+# para OCR estruturado de comprovantes. Para trocar, defina GEMINI_MODEL_NAME.
+GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-3.5-flash-lite")
 
 # Limite maximo de dimensao da imagem (maior lado). Imagens maiores sao redimensionadas.
-# 1280px e suficiente para OCR de comprovantes mantendo legibilidade.
-MAX_IMAGE_SIZE = 1280
+# 1280px e o menor tamanho que ainda mantem texto de cupom legivel; abaixo disso
+# a acuracia do OCR cai sem ganho relevante de latencia.
+MAX_IMAGE_SIZE = int(os.getenv("OCR_MAX_IMAGE_SIZE", "1280"))
 
-# Qualidade JPEG no recompactamento (85 mantem texto legivel com boa compressao).
-JPEG_QUALITY = 85
+# Qualidade JPEG no recompactamento (80 mantem texto legivel com payload menor).
+JPEG_QUALITY = int(os.getenv("OCR_JPEG_QUALITY", "80"))
+
+# Teto de tokens de saida: o JSON esperado tem ~60 tokens, o cap evita
+# geracao desnecessaria e encurta o tempo de resposta.
+MAX_OUTPUT_TOKENS = 256
+
+# Alternado para False em runtime se o modelo configurado rejeitar a config de
+# thinking minimo, evitando pagar o custo do erro em toda requisicao.
+_suporta_thinking_minimo = True
 
 # Cliente Gemini criado uma unica vez (singleton no escopo do modulo).
 # Se a API key nao estiver configurada, o cliente e None e o servico falha de
@@ -38,8 +47,10 @@ _client = (
     genai.Client(
         api_key=GEMINI_API_KEY,
         http_options=types.HttpOptions(
-            timeout=30000,  # 30 segundos
-            retry_options=types.HttpRetryOptions(attempts=1),  # sem retries com backoff longo
+            # A chamada tipica leva ~1.5s. Um teto curto com 1 retry recupera de
+            # travadas transitorias mais rapido do que esperar um timeout longo.
+            timeout=12000,  # 12 segundos por tentativa
+            retry_options=types.HttpRetryOptions(attempts=2, initial_delay=0.5),
         ),
     )
     if GEMINI_API_KEY
@@ -65,38 +76,52 @@ class GastoExtraido(BaseModel):
     categoria: Categoria
 
 
-PROMPT = """Voce e um sistema fintech especializado em extrair dados de comprovantes, notas fiscais e cupons fiscais brasileiros com precisao maxima.
+PROMPT = """Extraia dados de comprovantes/notas fiscais brasileiros.
 
-REGRAS DE EXTRACAO:
+titulo (max 40, Title Case): nome do estabelecimento. Apps de entrega: "iFood - Restaurante". Transporte: "Uber - Viagem".
+valor: TOTAL pago apos descontos e taxas (rotulos TOTAL / VALOR PAGO / VLR PAGO). Nunca subtotal, troco ou item isolado. Ponto decimal (45.90).
+categoria:
+- ALIMENTACAO: restaurante, lanchonete, mercado, padaria, iFood, Rappi, acougue
+- TRANSPORTE: Uber, 99, taxi, combustivel, posto, onibus, metro, estacionamento, pedagio, mecanica
+- LAZER: cinema, show, parque, jogos, streaming, boate, bar
+- COMPRAS: roupa, calcado, eletronico, livro, farmacia, perfumaria, movel, e-commerce
+- OUTROS: contas, saude, educacao, demais casos
 
-1. TITULO (max 40 caracteres):
-   - Use o NOME do estabelecimento quando visivel (razao social ou nome fantasia)
-   - Se houver descricao do servico/produto principal, prefixe (ex: "Almoco - Restaurante X")
-   - Para apps de entrega (iFood, Rappi), use "<App> - <Restaurante>"
-   - Para transporte (Uber, 99), use o nome do app + tipo se possivel (ex: "Uber - UberX")
-   - Capitalize corretamente (Title Case), nunca tudo maiusculo
-
-2. VALOR (em BRL):
-   - Extraia o VALOR TOTAL pago (apos descontos, com taxas)
-   - Procure rotulos: "TOTAL", "VALOR TOTAL", "VALOR PAGO", "VLR PAGO", "TOTAL R$"
-   - NUNCA confunda com subtotal, troco, ou valor de itens individuais
-   - Use ponto como separador decimal (ex: 45.90, nao 45,90)
-   - Se houver multiplos valores, use o MAIOR que aparece como total final
-
-3. CATEGORIA (escolha UMA):
-   - ALIMENTACAO: restaurantes, lanchonetes, supermercados, padarias, iFood, Rappi, mercados, acougues, hortifruti, bares (foco comida)
-   - TRANSPORTE: Uber, 99, taxi, gasolina/combustivel, posto, onibus, metro, estacionamento, pedagio, lavagem de carro, mecanica
-   - LAZER: cinema, teatro, shows, parques, jogos, streaming (Netflix, Spotify), boates, bares (foco bebida/festa)
-   - COMPRAS: roupas, calcados, eletronicos, livros, farmacias, perfumarias, moveis, lojas de departamento, e-commerce (Amazon, Mercado Livre)
-   - OUTROS: contas (luz, agua, internet), saude, educacao, qualquer outro
-
-EXEMPLOS:
-- Cupom "BURGER KING - TOTAL R$ 35,90" -> {"titulo": "Burger King", "valor": 35.90, "categoria": "ALIMENTACAO"}
-- Recibo "UBER - VIAGEM R$ 18,50" -> {"titulo": "Uber - Viagem", "valor": 18.50, "categoria": "TRANSPORTE"}
-- Nota "DROGARIA SAO PAULO - TOTAL 87,30" -> {"titulo": "Drogaria Sao Paulo", "valor": 87.30, "categoria": "COMPRAS"}
-
-Se a imagem estiver ilegivel ou nao for um comprovante, retorne titulo="Gasto", valor=0, categoria="OUTROS".
+Imagem ilegivel ou nao-comprovante: titulo="Gasto", valor=0, categoria="OUTROS".
+Responda apenas o JSON do schema.
 """
+
+
+def _thinking_minimo() -> types.ThinkingConfig:
+    """
+    Config de raciocinio minimo para o modelo atual.
+
+    Reduzir o thinking e a maior economia de latencia: em extracao guiada por
+    `response_schema` o raciocinio interno nao agrega qualidade. A familia 2.x
+    aceita `thinking_budget=0`; a 3.x usa `thinking_level`, onde MINIMAL e o
+    menor nivel disponivel.
+    """
+    if GEMINI_MODEL_NAME.startswith("gemini-2"):
+        return types.ThinkingConfig(thinking_budget=0)
+    return types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL)
+
+
+def _montar_config(thinking_minimo: bool) -> types.GenerateContentConfig:
+    """
+    Monta a config de geracao.
+
+    Args:
+        thinking_minimo: Se True, aplica `_thinking_minimo()`. Modelos que
+            rejeitarem essa config caem no retry sem `thinking_config`.
+    """
+    return types.GenerateContentConfig(
+        system_instruction=PROMPT,
+        temperature=0.0,
+        response_mime_type="application/json",
+        response_schema=GastoExtraido,
+        max_output_tokens=MAX_OUTPUT_TOKENS,
+        thinking_config=_thinking_minimo() if thinking_minimo else None,
+    )
 
 
 def _preprocessar_imagem(image_bytes: bytes) -> bytes:
@@ -148,15 +173,9 @@ def extrair_gasto_da_imagem(image_bytes: bytes) -> dict:
     Fluxo:
         1. Valida que o cliente Gemini esta configurado.
         2. Preprocessa a imagem (ver `_preprocessar_imagem`).
-        3. Monta a requisicao com:
-           - `temperature=0.0`: respostas deterministicas (mesma imagem -> mesmo
-             resultado), reduz alucinacoes.
-           - `response_mime_type="application/json"` + `response_schema`: forca
-             o modelo a retornar JSON valido conforme o schema, eliminando
-             parsing fragil.
-           - `thinking_budget=0`: desativa o raciocinio interno do gemini-2.5.
-             Para extracao estruturada baseada em prompt detalhado, o thinking
-             nao agrega qualidade.
+        3. Monta a requisicao (ver `_montar_config`) com o prompt em
+           `system_instruction` e apenas a imagem no `contents`, mantendo o
+           payload por requisicao minimo.
         4. Le `response.parsed` (objeto `GastoExtraido` ja validado pelo Pydantic).
         5. Trunca o titulo em 40 caracteres como camada extra de seguranca.
     
@@ -179,15 +198,22 @@ def extrair_gasto_da_imagem(image_bytes: bytes) -> dict:
     imagem_otimizada = _preprocessar_imagem(image_bytes)
     imagem_part = types.Part.from_bytes(data=imagem_otimizada, mime_type="image/jpeg")
 
-    response = _client.models.generate_content(
-        model=GEMINI_MODEL_NAME,
-        contents=[types.Part.from_text(text=PROMPT), imagem_part],
-        config=types.GenerateContentConfig(
-            temperature=0.0,
-            response_mime_type="application/json",
-            response_schema=GastoExtraido,
-        ),
-    )
+    global _suporta_thinking_minimo
+    try:
+        response = _client.models.generate_content(
+            model=GEMINI_MODEL_NAME,
+            contents=[imagem_part],
+            config=_montar_config(thinking_minimo=_suporta_thinking_minimo),
+        )
+    except Exception:
+        if not _suporta_thinking_minimo:
+            raise
+        _suporta_thinking_minimo = False
+        response = _client.models.generate_content(
+            model=GEMINI_MODEL_NAME,
+            contents=[imagem_part],
+            config=_montar_config(thinking_minimo=False),
+        )
 
     dados = response.parsed
     if dados is None:
