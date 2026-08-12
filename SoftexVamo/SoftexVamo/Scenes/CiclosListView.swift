@@ -20,6 +20,8 @@ struct CiclosListView: View {
     let corFundoTela = LinearGradient.appPurple
     
     @State var addNewGastoSheet: Bool = false
+    @State private var gastoToEdit: GastosDia? = nil
+    @State private var diaDoGasto: DiaSoftex? = nil
     @State var addNewCicloSheet: Bool = false
     
     private var saudacao: String {
@@ -152,6 +154,10 @@ struct CiclosListView: View {
                     
                     CicloGastosView() {
                         addNewGastoSheet.toggle()
+                    } editAction: { gasto, dia in
+                        gastoToEdit = gasto
+                        diaDoGasto = dia
+                        addNewGastoSheet.toggle()
                     } deleteAction: { diaId, gastoID in
                         Task { try await viewModel.deleteGasto(gastoID: gastoID) }
                     }
@@ -167,6 +173,10 @@ struct CiclosListView: View {
                     resumoDiaSection
                     
                     CicloGastosView() {
+                        addNewGastoSheet.toggle()
+                    } editAction: { gasto, dia in
+                        gastoToEdit = gasto
+                        diaDoGasto = dia
                         addNewGastoSheet.toggle()
                     } deleteAction: { diaId, gastoID in
                         Task { try await viewModel.deleteGasto(gastoID: gastoID) }
@@ -187,6 +197,17 @@ struct CiclosListView: View {
                     .environmentObject(viewModel)
                     .offset(x: -16, y: 70)
             }
+        }
+        .fullScreenCover(isPresented: $addNewGastoSheet, onDismiss: {
+            gastoToEdit = nil
+            diaDoGasto = nil
+        }) {
+            AddNewGastoSheetView(
+                dias: viewModel.atualCiclo.dias ?? [],
+                gastoToEdit: gastoToEdit,
+                diaDoGasto: diaDoGasto
+            )
+            .environmentObject(viewModel)
         }
         .fullScreenCover(isPresented: $addNewCicloSheet) {
             NewCicloView()

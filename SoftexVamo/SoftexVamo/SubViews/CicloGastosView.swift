@@ -13,6 +13,7 @@ struct CicloGastosView: View {
     @EnvironmentObject var ciclosViewModel: CiclosViewModel
     
     let action: () -> Void
+    let editAction: (GastosDia, DiaSoftex) -> Void
     let deleteAction: (Int, Int) -> Void
     
     var body: some View {
@@ -128,7 +129,7 @@ struct CicloGastosView: View {
                                 Section(header: createSectionHeader(dia: dia)) {
                                     VStack(spacing: 0) {
                                         ForEach(Array(dia.gastos.enumerated()), id: \.element.id) { index, gasto in
-                                            createGastoCell(gasto: gasto)
+                                            createGastoCell(gasto: gasto, dia: dia)
                                             
                                             if index < dia.gastos.count - 1 {
                                                 Divider()
@@ -185,7 +186,7 @@ struct CicloGastosView: View {
         
     }
     
-    @ViewBuilder func createGastoCell(gasto: GastosDia) -> some View {
+    @ViewBuilder func createGastoCell(gasto: GastosDia, dia: DiaSoftex) -> some View {
         HStack(spacing: 14) {
             Image(systemName: gasto.categoria.systemImageName)
                 .font(.system(size: 20, weight: .semibold))
@@ -223,12 +224,18 @@ struct CicloGastosView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 14)
         .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            editAction(gasto, dia)
+        }
     }
 }
 
 #Preview {
     CicloGastosView() {
         print("ok")
+    } editAction: { _, _ in
+        print("edit")
     } deleteAction: { _,_ in
         print("")
     }

@@ -29,13 +29,41 @@ struct AddNewGastoSheetView: View {
     @State private var selectedCategoria: Categoria = .ALIMENTACAO
     
     let dias: [DiaSoftex]
+    let gastoToEdit: GastosDia?
+    let diaDoGasto: DiaSoftex?
     @State var selectedDia: DiaSoftex
     
-    init(dias: [DiaSoftex]) {
+    var isEditing: Bool {
+        gastoToEdit != nil
+    }
+    
+    var canSave: Bool {
+        title.isEmpty == false &&
+        value > 0 &&
+        !dias.isEmpty &&
+        selectedDia.backendId != nil
+    }
+    
+    init(dias: [DiaSoftex], gastoToEdit: GastosDia? = nil, diaDoGasto: DiaSoftex? = nil) {
         self.dias = dias
+        self.gastoToEdit = gastoToEdit
+        self.diaDoGasto = diaDoGasto
+        
         let hoje = dias.first(where: { Calendar.current.isDateInToday($0.data) })
-        let inicial = hoje ?? dias.first ?? DiaSoftex.examples[0]
+        let inicial: DiaSoftex
+        if let gastoToEdit, let diaDoGasto {
+            inicial = diaDoGasto
+        } else {
+            inicial = hoje ?? dias.first ?? DiaSoftex.examples[0]
+        }
         _selectedDia = State(initialValue: inicial)
+        
+        if let gastoToEdit {
+            _title = State(initialValue: gastoToEdit.titulo)
+            _value = State(initialValue: gastoToEdit.valor)
+            _valueString = State(initialValue: String(format: "%.2f", gastoToEdit.valor).replacingOccurrences(of: ".", with: ","))
+            _selectedCategoria = State(initialValue: gastoToEdit.categoria)
+        }
     }
     
     let purplePrimary = Color.appPurple
@@ -155,13 +183,17 @@ struct AddNewGastoSheetView: View {
                     
                     Button(action: {
                         Task {
-                            try await viewModel.createNewGasto(title: title, value: value, dia: selectedDia, categoria: selectedCategoria)
+                            if let gastoToEdit, let backendId = gastoToEdit.backendId {
+                                try await viewModel.editGasto(gastoId: backendId, novoDia: selectedDia, titulo: title, value: value, categoria: selectedCategoria)
+                            } else {
+                                try await viewModel.createNewGasto(title: title, value: value, dia: selectedDia, categoria: selectedCategoria)
+                            }
                             await MainActor.run { dismiss() }
                         }
                     }) {
                         HStack {
                             Image(systemName: "checkmark")
-                            Text("Salvar Gasto")
+                            Text(isEditing ? "Atualizar Gasto" : "Salvar Gasto")
                         }
                         .font(.system(size: 20, weight: .bold))
                         .foregroundColor(.white)
@@ -176,6 +208,7 @@ struct AddNewGastoSheetView: View {
                     }
                     .padding(.top, 10)
                     .padding(.bottom, bottomInset + 8)
+                    .disabled(!canSave)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, headerHeight + 16)
@@ -222,7 +255,7 @@ struct AddNewGastoSheetView: View {
                     }
                     .padding(.bottom, 10)
                     
-                    Text("NOVO GASTO")
+                    Text(isEditing ? "EDITAR GASTO" : "NOVO GASTO")
                         .font(.system(size: 16, weight: .bold))
                         .foregroundStyle(Color.white.opacity(0.60))
                     

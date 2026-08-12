@@ -231,4 +231,47 @@ final class CiclosViewModel: ObservableObject {
         
             try await NetworkManager.shared.deleteGasto(gastoId: gastoID)
     }
+    
+    func editGasto(gastoId: Int, novoDia: DiaSoftex, titulo: String, value: Float, categoria: Categoria) async throws {
+        guard let diaBackendId = novoDia.backendId else { return }
+        
+        var gastoEditado = GastosDia(valor: value, titulo: titulo, categoria: categoria)
+        gastoEditado.diaId = diaBackendId
+        
+        var gastoAtualizado = try await NetworkManager.shared.putGasto(gastoId: gastoId, gastoEditado: gastoEditado)
+        
+        await MainActor.run {
+            guard let dias = self.atualCiclo.dias,
+                  let oldDiaIndex = dias.firstIndex(where: { $0.gastos.contains(where: { $0.backendId == gastoId }) }),
+                  let oldGastoIndex = dias[oldDiaIndex].gastos.firstIndex(where: { $0.backendId == gastoId }),
+                  let newDiaIndex = dias.firstIndex(where: { $0.backendId == diaBackendId }) else { return }
+            
+            let gastoAntigo = self.atualCiclo.dias?[oldDiaIndex].gastos[oldGastoIndex]
+            let diferenca = value - (gastoAntigo?.valor ?? 0)
+            
+            // Preserva o id local para evitar recarregamento desnecessário do ForEach
+            if let antigoId = gastoAntigo?.id {
+                gastoAtualizado.id = antigoId
+            }
+            
+            self.atualCiclo.gasto_total += diferenca
+            
+            if oldDiaIndex == newDiaIndex {
+                self.atualCiclo.dias?[oldDiaIndex].saldo -= diferenca
+                self.atualCiclo.dias?[oldDiaIndex].gastos[oldGastoIndex] = gastoAtualizado
+            } else {
+                self.atualCiclo.dias?[oldDiaIndex].saldo += (gastoAntigo?.valor ?? 0)
+                self.atualCiclo.dias?[oldDiaIndex].gastos.remove(at: oldGastoIndex)
+                
+                self.atualCiclo.dias?[newDiaIndex].saldo -= value
+                self.atualCiclo.dias?[newDiaIndex].gastos.append(gastoAtualizado)
+            }
+            
+            if self.index < self.allCiclos.count {
+                self.allCiclos[self.index] = self.atualCiclo
+            }
+            
+            self.salvarNoCache(ciclo: self.atualCiclo)
+        }
+    }
 }

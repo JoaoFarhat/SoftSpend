@@ -137,6 +137,14 @@ final class NetworkManager {
         return try decoder.decode(GastosDia.self, from: try await execute(request))
     }
     
+    func putGasto(gastoId: Int, gastoEditado: GastosDia) async throws -> GastosDia {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/\(gastoId)") else {
+            throw URLError(.badURL)
+        }
+        let request = makeRequest(url: url, method: "PUT", body: try encoder.encode(gastoEditado))
+        return try decoder.decode(GastosDia.self, from: try await execute(request))
+    }
+    
     func deleteGasto(gastoId: Int) async throws {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/\(gastoId)") else {
             throw URLError(.badURL)

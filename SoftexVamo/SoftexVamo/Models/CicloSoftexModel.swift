@@ -120,12 +120,14 @@ struct DiaSoftex: Codable, Identifiable, Hashable {
 struct GastosDia: Codable, Identifiable, Hashable  {
     var id = UUID()
     var backendId: Int?
+    var diaId: Int?
     let valor: Float
     let titulo: String
     let categoria: Categoria
     
     enum CodingKeys: String, CodingKey {
             case backendId = "id"
+            case diaId = "dia_id"
             case valor
             case titulo
             case categoria
