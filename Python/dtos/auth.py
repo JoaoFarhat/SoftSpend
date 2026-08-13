@@ -1,10 +1,10 @@
-from pydantic import BaseModel, EmailStr, field_validator
+from pydantic import BaseModel, EmailStr, field_validator, Field
 
 
 class RegisterRequest(BaseModel):
-    nome: str
-    username: str
-    email: EmailStr
+    nome: str = Field(..., min_length=1, max_length=100)
+    username: str = Field(..., min_length=3, max_length=50)
+    email: EmailStr = Field(..., max_length=255)
     senha: str
 
     @field_validator("senha")
@@ -12,6 +12,8 @@ class RegisterRequest(BaseModel):
     def senha_forte(cls, v: str) -> str:
         if len(v) < 8:
             raise ValueError("A senha deve ter no mínimo 8 caracteres")
+        if len(v) > 128:
+            raise ValueError("A senha deve ter no máximo 128 caracteres")
         if not any(c.isupper() for c in v):
             raise ValueError("A senha deve conter ao menos uma letra maiúscula")
         if not any(c.islower() for c in v):

@@ -21,12 +21,12 @@ def criar_ciclo(db: Session, ciclo: CicloRequest, user_id: int):
     return ciclo_repository.criar_ciclo(db, novo_ciclo)
     
 
-def get_all_ciclos(db: Session, user_id: int):
-    return ciclo_repository.get_all_ciclos(db, user_id)
+def get_all_ciclos(db: Session, user_id: int, skip: int = 0, limit: int = 100):
+    return ciclo_repository.get_all_ciclos(db, user_id, skip=skip, limit=limit)
 
 
-def get_ciclos_resumo(db: Session, user_id: int):
-    return ciclo_repository.get_ciclos_resumo(db, user_id)
+def get_ciclos_resumo(db: Session, user_id: int, skip: int = 0, limit: int = 1000):
+    return ciclo_repository.get_ciclos_resumo(db, user_id, skip=skip, limit=limit)
 
 
 def get_ciclo_by_id(db: Session, ciclo_id: int):

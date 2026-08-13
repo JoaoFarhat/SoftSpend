@@ -80,6 +80,7 @@ struct CicloSoftex: Codable, Identifiable {
         ]
     
     static let example = CicloSoftex(valor_total: 2145, gasto_total: 214, periodo: "10/03 - 17/03", diaria: 180, titulo: "Fortaleza", dias: DiaSoftex.examples)
+    static let vazio = CicloSoftex(valor_total: 0, gasto_total: 0, periodo: "", diaria: 0, titulo: "", dias: [])
 }
 
 struct DiaLoteRequest: Codable {

@@ -27,21 +27,27 @@ def _verificar_senha(senha: str, senha_hash: str) -> bool:
     return pwd_context.verify(senha, senha_hash)
 
 
+JWT_ISSUER = os.getenv("JWT_ISSUER", "softspend-api")
+JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "softspend-mobile")
+
+
 def criar_token(user_id: int) -> str:
-    expire = datetime.utcnow() + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
+    now = datetime.utcnow()
+    expire = now + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
     payload = {
         "sub": str(user_id),
-        "exp": expire
+        "iat": now,
+        "exp": expire,
+        "iss": JWT_ISSUER,
+        "aud": JWT_AUDIENCE,
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
 def registrar(db: Session, dados: RegisterRequest) -> models.User:
-    if auth_repository.buscar_por_email(db, dados.email):
-        raise ValueError("Email ja cadastrado")
-    
-    if auth_repository.buscar_por_username(db, dados.username):
-        raise ValueError("Username ja cadastrado")
+    if auth_repository.buscar_por_email(db, dados.email) or \
+       auth_repository.buscar_por_username(db, dados.username):
+        raise ValueError("Dados de cadastro ja em uso")
     
     novo_usuario = models.User(
         nome=dados.nome,
@@ -68,7 +74,13 @@ def login(db: Session, dados: LoginRequest) -> tuple[models.User, str]:
 
 def validar_token(token: str) -> int | None:
     try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(
+            token,
+            SECRET_KEY,
+            algorithms=[ALGORITHM],
+            issuer=JWT_ISSUER,
+            audience=JWT_AUDIENCE,
+        )
         user_id = int(payload.get("sub"))
         return user_id
     except JWTError:

@@ -104,19 +104,22 @@ struct CiclosListView: View {
         viewModel.allCiclos.isEmpty || viewModel.allCiclos.allSatisfy({ $0.backendId == nil })
     }
 
-    private func header(showTitle: Bool = true) -> some View {
+    private func header(showTitle: Bool = true, isLoading: Bool = false) -> some View {
         HStack(alignment: showTitle ? .center : .top) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(saudacao)
                     .foregroundStyle(Color("textSecondary"))
                     .font(.system(size: 14))
+                    .skeleton(isLoading: isLoading)
                 if showTitle {
                     Text(viewModel.atualCiclo.titulo.isEmpty ? "Viagem" : viewModel.atualCiclo.titulo)
                         .bold()
                         .font(.title)
+                        .skeleton(isLoading: isLoading)
                     Text(infoPeriodo)
                         .foregroundStyle(Color("textSecondary"))
                         .font(.system(size: 13))
+                        .skeleton(isLoading: isLoading)
                 }
             }
 
@@ -157,7 +160,7 @@ struct CiclosListView: View {
         VStack(alignment: .leading, spacing: 0) {
             if viewModel.isLoading || !isEmpty {
                 ScrollView() {
-                    header()
+                    header(isLoading: viewModel.isLoading)
                     
                     if viewModel.isLoading {
                         CardMainView()

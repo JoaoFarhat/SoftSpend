@@ -8,7 +8,7 @@ def criar_ciclo(db: Session, ciclo: models.Ciclo):
     db.refresh(ciclo)
     return ciclo
 
-def get_all_ciclos(db: Session, user_id: int):
+def get_all_ciclos(db: Session, user_id: int, skip: int = 0, limit: int = 100):
     return (
         db.query(models.Ciclo)
         .options(
@@ -16,14 +16,18 @@ def get_all_ciclos(db: Session, user_id: int):
             .selectinload(models.Dia.gastos)
         )
         .filter(models.Ciclo.id_usuario == user_id)
+        .offset(skip)
+        .limit(limit)
         .all()
     )
 
-def get_ciclos_resumo(db: Session, user_id: int):
+def get_ciclos_resumo(db: Session, user_id: int, skip: int = 0, limit: int = 1000):
     return (
         db.query(models.Ciclo)
         .filter(models.Ciclo.id_usuario == user_id)
         .order_by(models.Ciclo.id.desc())
+        .offset(skip)
+        .limit(limit)
         .all()
     )
 

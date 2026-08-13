@@ -81,7 +81,7 @@ AWS S3, Cloudflare R2, Supabase Storage e MinIO:
 | `S3_ENDPOINT_URL` | — | Necessária para R2/Supabase/MinIO; omitir na AWS |
 | `S3_REGION` | `auto` | Use a região real na AWS |
 | `S3_PUBLIC_BASE_URL` | — | Se definida, a URL é `{base}/{key}`; senão gera URL assinada |
-| `S3_URL_EXPIRACAO` | `604800` | Validade da URL assinada, em segundos |
+| `S3_URL_EXPIRACAO` | `3600` | Validade da URL assinada, em segundos. Recomenda-se 1h em produção |
 
 ## Notas fiscais (comprovantes)
 
@@ -106,3 +106,15 @@ SQLAlchemy registrados no import feito pelo `main.py`. O `after_delete` anota as
 keys na sessão e o `after_commit` as remove, de modo que um rollback não apaga
 arquivos. Isso cobre também os deletes por cascade (ciclo e conta do usuário),
 que não passam por `gasto_service.remover_gasto`.
+
+## Privacidade / OCR
+
+O serviço de OCR (`services/ocr_service.py`) envia a imagem da nota fiscal para a
+API do Google Gemini. Isso pode conter dados pessoais e financeiros. O app deve
+obter **consentimento explícito do usuário** antes de usar o escaneamento com IA,
+explicando que a imagem será processada por um serviço de terceiro.
+
+Recomenda-se incluir nos termos de uso uma cláusula sobre:
+- processamento de imagens por IA;
+- armazenamento de comprovantes em bucket S3/R2;
+- prazo de retenção e exclusão dos dados.

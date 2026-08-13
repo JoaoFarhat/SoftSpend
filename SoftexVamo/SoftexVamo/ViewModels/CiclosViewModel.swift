@@ -10,7 +10,7 @@ import Combine
 
 final class CiclosViewModel: ObservableObject {
     @Published var allCiclos: [CicloSoftex] = []
-    @Published var atualCiclo: CicloSoftex = CicloSoftex.example
+    @Published var atualCiclo: CicloSoftex = CicloSoftex.vazio
     @Published var gastosInfo: GastosDia = GastosDia.example
     @Published var availableInfo: GastosDia = GastosDia.example
     @Published var isLoading: Bool = true
@@ -26,7 +26,7 @@ final class CiclosViewModel: ObservableObject {
     @MainActor
     func reset() {
         self.allCiclos = []
-        self.atualCiclo = CicloSoftex(valor_total: 0, gasto_total: 0, periodo: "", diaria: 0, titulo: "", dias: [])
+        self.atualCiclo = CicloSoftex.vazio
         self.index = 0
         self.isLoading = true
         self.hasLoadedOnce = false
@@ -78,7 +78,7 @@ final class CiclosViewModel: ObservableObject {
                 self.salvarNoCache(ciclo: self.atualCiclo)
                 
             } else {
-                self.atualCiclo = CicloSoftex(valor_total: 0, gasto_total: 0, periodo: "", diaria: 0, titulo: "", dias: [])
+                self.atualCiclo = CicloSoftex.vazio
                 UserDefaults.standard.removeObject(forKey: "ultimo_ciclo_cache")
             }
             
@@ -90,7 +90,7 @@ final class CiclosViewModel: ObservableObject {
             print("Erro ao buscar ciclos:", error)
             
             self.allCiclos = []
-            self.atualCiclo = CicloSoftex(valor_total: 0, gasto_total: 0, periodo: "", diaria: 0, titulo: "", dias: [])
+            self.atualCiclo = CicloSoftex.vazio
             UserDefaults.standard.removeObject(forKey: "ultimo_ciclo_cache")
             self.isLoading = false
             self.hasLoadedOnce = true
@@ -142,7 +142,7 @@ final class CiclosViewModel: ObservableObject {
                 self.atualCiclo = primeiroCiclo
                 self.salvarNoCache(ciclo: primeiroCiclo)
             } else {
-                self.atualCiclo = CicloSoftex(valor_total: 0, gasto_total: 0, periodo: "", diaria: 0, titulo: "", dias: [])
+                self.atualCiclo = CicloSoftex.vazio
                 self.index = 0
                 UserDefaults.standard.removeObject(forKey: "ultimo_ciclo_cache")
             }

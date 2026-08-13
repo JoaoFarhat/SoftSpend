@@ -41,12 +41,9 @@ def login(request: Request, dados: LoginRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=401, detail=str(e))
 
 
-@router.delete("/conta")
+@router.delete("/conta", status_code=204)
 @limiter.limit("10/minute")
 def excluir_conta(request: Request, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
-    try:
-        auth_service.excluir_conta(db, user_id)
-        return {"detail": "Conta excluida com sucesso"}
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+    auth_service.excluir_conta(db, user_id)
+    return None
 
