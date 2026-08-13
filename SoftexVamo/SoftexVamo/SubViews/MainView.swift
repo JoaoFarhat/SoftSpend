@@ -19,7 +19,8 @@ struct MainView: View {
     }
     
     var body: some View {
-        ZStack(alignment: .bottom) {
+        NavigationStack {
+            ZStack(alignment: .bottom) {
             Group {
                 if viewModel.selectedTab == 0 {
                     CiclosListView()
@@ -104,7 +105,9 @@ struct MainView: View {
             .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: -5)
         }
         .ignoresSafeArea(.all, edges: .bottom)
+        .toolbar(.hidden, for: .navigationBar)
     }
+}
 }
 
 #Preview {

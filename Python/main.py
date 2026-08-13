@@ -1,3 +1,7 @@
+import asyncio
+import logging
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Depends
 from sqlalchemy.orm import Session
 from database import *
@@ -10,8 +14,19 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from limiter import limiter
+from services import ocr_service
 
-app = FastAPI()
+logging.basicConfig(level=logging.INFO)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    tarefa = asyncio.create_task(asyncio.to_thread(ocr_service.aquecer))
+    yield
+    tarefa.cancel()
+
+
+app = FastAPI(lifespan=lifespan)
 
 ALLOWED_ORIGINS = [
     "https://softspend.com.br"  

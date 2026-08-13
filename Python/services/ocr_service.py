@@ -8,9 +8,12 @@ brasileiras usando o modelo Gemini 2.5 Flash da Google (multimodal).
 """
 
 import json
+import logging
 import os
+import time
 from io import BytesIO
 
+import httpx
 from google import genai
 from google.genai import types
 from PIL import Image, ImageOps
@@ -18,39 +21,36 @@ from pydantic import BaseModel
 
 from enums.categoria_enum import Categoria
 
-# Chave da API lida do ambiente (nunca commitar no codigo)
+logger = logging.getLogger(__name__)
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-# Modelo configurável. O *-flash-lite e o mais rapido da familia e suficiente
-# para OCR estruturado de comprovantes. Para trocar, defina GEMINI_MODEL_NAME.
+
 GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-3.5-flash-lite")
 
 # Limite maximo de dimensao da imagem (maior lado). Imagens maiores sao redimensionadas.
 # 1280px e o menor tamanho que ainda mantem texto de cupom legivel; abaixo disso
-# a acuracia do OCR cai sem ganho relevante de latencia.
 MAX_IMAGE_SIZE = int(os.getenv("OCR_MAX_IMAGE_SIZE", "1280"))
 
 # Qualidade JPEG no recompactamento (80 mantem texto legivel com payload menor).
 JPEG_QUALITY = int(os.getenv("OCR_JPEG_QUALITY", "80"))
 
-# Teto de tokens de saida: o JSON esperado tem ~60 tokens, o cap evita
-# geracao desnecessaria e encurta o tempo de resposta.
 MAX_OUTPUT_TOKENS = 256
 
-# Alternado para False em runtime se o modelo configurado rejeitar a config de
-# thinking minimo, evitando pagar o custo do erro em toda requisicao.
 _suporta_thinking_minimo = True
 
-# Cliente Gemini criado uma unica vez (singleton no escopo do modulo).
-# Se a API key nao estiver configurada, o cliente e None e o servico falha de
-# forma controlada na primeira chamada de extracao.
 _client = (
     genai.Client(
         api_key=GEMINI_API_KEY,
         http_options=types.HttpOptions(
-            # A chamada tipica leva ~1.5s. Um teto curto com 1 retry recupera de
-            # travadas transitorias mais rapido do que esperar um timeout longo.
             timeout=12000,  # 12 segundos por tentativa
             retry_options=types.HttpRetryOptions(attempts=2, initial_delay=0.5),
+            client_args={
+                "limits": httpx.Limits(
+                    max_keepalive_connections=5,
+                    max_connections=10,
+                    keepalive_expiry=15.0,
+                )
+            },
         ),
     )
     if GEMINI_API_KEY
@@ -106,6 +106,20 @@ def _thinking_minimo() -> types.ThinkingConfig:
     return types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL)
 
 
+def _e_rejeicao_de_thinking(erro: Exception) -> bool:
+    """
+    Indica se o erro e uma rejeicao da config de thinking pelo modelo.
+
+    Precisa ser especifico: erros de rede (timeout, 5xx) NAO devem cair no
+    fallback, senao uma instabilidade transitoria dispara uma segunda
+    requisicao completa e desativa o thinking minimo para todo o processo.
+    """
+    msg = str(erro).lower()
+    return "thinking" in msg and (
+        "invalid" in msg or "not supported" in msg or "unsupported" in msg
+    )
+
+
 def _montar_config(thinking_minimo: bool) -> types.GenerateContentConfig:
     """
     Monta a config de geracao.
@@ -122,6 +136,32 @@ def _montar_config(thinking_minimo: bool) -> types.GenerateContentConfig:
         max_output_tokens=MAX_OUTPUT_TOKENS,
         thinking_config=_thinking_minimo() if thinking_minimo else None,
     )
+
+
+def aquecer() -> None:
+    """
+    Faz uma requisicao minima ao Gemini para pagar o custo de cold start.
+
+    A primeira chamada de um processo novo leva ~15-26s (handshake TLS, init do
+    SDK e warm-up do modelo), enquanto as seguintes levam ~1.2s. Sem aquecer, e
+    o primeiro escaneamento do usuario que paga essa conta.
+
+    Falhas sao apenas logadas: aquecer e uma otimizacao, nunca deve impedir o
+    servidor de subir.
+    """
+    if not _client:
+        return
+
+    inicio = time.perf_counter()
+    try:
+        _client.models.generate_content(
+            model=GEMINI_MODEL_NAME,
+            contents=[types.Part.from_text(text="ok")],
+            config=types.GenerateContentConfig(max_output_tokens=1),
+        )
+        logger.info("Gemini aquecido em %.2fs", time.perf_counter() - inicio)
+    except Exception as erro:
+        logger.warning("Falha ao aquecer o Gemini (%.2fs): %s", time.perf_counter() - inicio, erro)
 
 
 def _preprocessar_imagem(image_bytes: bytes) -> bytes:
@@ -195,9 +235,12 @@ def extrair_gasto_da_imagem(image_bytes: bytes) -> dict:
     if not _client:
         raise ValueError("GEMINI_API_KEY nao configurada no ambiente")
 
+    inicio_preproc = time.perf_counter()
     imagem_otimizada = _preprocessar_imagem(image_bytes)
+    duracao_preproc = time.perf_counter() - inicio_preproc
     imagem_part = types.Part.from_bytes(data=imagem_otimizada, mime_type="image/jpeg")
 
+    inicio_gemini = time.perf_counter()
     global _suporta_thinking_minimo
     try:
         response = _client.models.generate_content(
@@ -205,8 +248,8 @@ def extrair_gasto_da_imagem(image_bytes: bytes) -> dict:
             contents=[imagem_part],
             config=_montar_config(thinking_minimo=_suporta_thinking_minimo),
         )
-    except Exception:
-        if not _suporta_thinking_minimo:
+    except Exception as erro:
+        if not (_suporta_thinking_minimo and _e_rejeicao_de_thinking(erro)):
             raise
         _suporta_thinking_minimo = False
         response = _client.models.generate_content(
@@ -214,6 +257,15 @@ def extrair_gasto_da_imagem(image_bytes: bytes) -> dict:
             contents=[imagem_part],
             config=_montar_config(thinking_minimo=False),
         )
+
+    logger.info(
+        "OCR %s: recebido %.0fKB -> enviado %.0fKB | preproc %.2fs | gemini %.2fs",
+        GEMINI_MODEL_NAME,
+        len(image_bytes) / 1024,
+        len(imagem_otimizada) / 1024,
+        duracao_preproc,
+        time.perf_counter() - inicio_gemini,
+    )
 
     dados = response.parsed
     if dados is None:

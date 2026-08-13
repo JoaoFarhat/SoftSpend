@@ -100,93 +100,107 @@ struct CiclosListView: View {
         )
     }
     
+    private var isEmpty: Bool {
+        viewModel.allCiclos.isEmpty || viewModel.allCiclos.allSatisfy({ $0.backendId == nil })
+    }
+
+    private func header(showTitle: Bool = true) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(saudacao)
+                    .foregroundStyle(Color("textSecondary"))
+                    .font(.system(size: 14))
+                if showTitle {
+                    Text(viewModel.atualCiclo.titulo.isEmpty ? "Viagem" : viewModel.atualCiclo.titulo)
+                        .bold()
+                        .font(.title)
+                    Text(infoPeriodo)
+                        .foregroundStyle(Color("textSecondary"))
+                        .font(.system(size: 13))
+                }
+            }
+
+            Spacer()
+
+            ZStack(alignment: .topTrailing) {
+                Button {
+                    withAnimation(.spring()) {
+                        showMenu.toggle()
+                    }
+                } label: {
+                    HStack {
+                        Text(currentUser?.nome.prefix(2).uppercased() ?? "??")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundStyle(.white)
+                            .padding(10)
+                            .background(Color.appPurple)
+                            .clipShape(Circle())
+
+                        Image(systemName: "chevron.up")
+                            .font(.system(size: 12, weight: .bold))
+                            .rotationEffect(.degrees(showMenu ? 0 : 180))
+                            .foregroundStyle(Color("textPrimary"))
+                    }
+                    .padding(8)
+                    .background(Color("cardBackground"))
+                    .clipShape(Capsule())
+                    .shadow(color: .black.opacity(0.1), radius: 4)
+
+                }
+            }
+
+        }.padding(.horizontal, 10)
+    }
+
     var body: some View {
         
         VStack(alignment: .leading, spacing: 0) {
-            ScrollView() {
-                HStack{
-                    VStack(alignment: .leading, spacing: 4){
-                        Text(saudacao)
-                            .foregroundStyle(Color("textSecondary"))
-                            .font(.system(size: 14))
-                        Text(viewModel.atualCiclo.titulo.isEmpty ? "Viagem" : viewModel.atualCiclo.titulo)
-                            .bold()
-                            .font(.title)
-                        Text(infoPeriodo)
-                            .foregroundStyle(Color("textSecondary"))
-                            .font(.system(size: 13))
-                    }
+            if viewModel.isLoading || !isEmpty {
+                ScrollView() {
+                    header()
                     
-                    Spacer()
-                    
-                    ZStack(alignment: .topTrailing) {
-                        Button {
-                            withAnimation(.spring()) {
-                                showMenu.toggle()
-                            }
-                        } label: {
-                            HStack {
-                                Text(currentUser?.nome.prefix(2).uppercased() ?? "??")
-                                    .font(.system(size: 14, weight: .bold))
-                                    .foregroundStyle(.white)
-                                    .padding(10)
-                                    .background(Color.appPurple)
-                                    .clipShape(Circle())
-                                
-                                Image(systemName: "chevron.up")
-                                    .font(.system(size: 12, weight: .bold))
-                                    .rotationEffect(.degrees(showMenu ? 0 : 180))
-                                    .foregroundStyle(Color("textPrimary"))
-                            }
-                            .padding(8)
-                            .background(Color("cardBackground"))
-                            .clipShape(Capsule())
-                            .shadow(color: .black.opacity(0.1), radius: 4)
-                            
+                    if viewModel.isLoading {
+                        CardMainView()
+                            .skeleton(RoundedRectangle(cornerRadius: 22), isLoading: viewModel.isLoading)
+                        
+                        CicloGastosView() {
+                            addNewGastoSheet.toggle()
+                        } editAction: { gasto, dia in
+                            gastoToEdit = gasto
+                            diaDoGasto = dia
+                            addNewGastoSheet.toggle()
+                        } deleteAction: { diaId, gastoID in
+                            Task { try await viewModel.deleteGasto(gastoID: gastoID) }
                         }
+                        .id(viewModel.atualCiclo.id)
+                        .environmentObject(GastosViewModel(ciclo: viewModel.atualCiclo))
+                    } else {
+                        CardMainView()
+                        
+                        resumoDiaSection
+                        
+                        CicloGastosView() {
+                            addNewGastoSheet.toggle()
+                        } editAction: { gasto, dia in
+                            gastoToEdit = gasto
+                            diaDoGasto = dia
+                            addNewGastoSheet.toggle()
+                        } deleteAction: { diaId, gastoID in
+                            Task { try await viewModel.deleteGasto(gastoID: gastoID) }
+                        }
+                        .id(viewModel.atualCiclo.id)
+                        .environmentObject(GastosViewModel(ciclo: viewModel.atualCiclo))
                     }
-                    
-                }.padding(.horizontal, 10)
-                
-                if viewModel.isLoading {
-                    CardMainView()
-                        .skeleton(RoundedRectangle(cornerRadius: 22), isLoading: viewModel.isLoading)
-                    
-                    CicloGastosView() {
-                        addNewGastoSheet.toggle()
-                    } editAction: { gasto, dia in
-                        gastoToEdit = gasto
-                        diaDoGasto = dia
-                        addNewGastoSheet.toggle()
-                    } deleteAction: { diaId, gastoID in
-                        Task { try await viewModel.deleteGasto(gastoID: gastoID) }
-                    }
-                    .id(viewModel.atualCiclo.id)
-                    .environmentObject(GastosViewModel(ciclo: viewModel.atualCiclo))
-                } else if viewModel.allCiclos.isEmpty || viewModel.allCiclos.allSatisfy({ $0.backendId == nil }) {
-                    EmptyCicloView {
-                        addNewCicloSheet.toggle()
-                    }
-                } else {
-                    CardMainView()
-                    
-                    resumoDiaSection
-                    
-                    CicloGastosView() {
-                        addNewGastoSheet.toggle()
-                    } editAction: { gasto, dia in
-                        gastoToEdit = gasto
-                        diaDoGasto = dia
-                        addNewGastoSheet.toggle()
-                    } deleteAction: { diaId, gastoID in
-                        Task { try await viewModel.deleteGasto(gastoID: gastoID) }
-                    }
-                    .id(viewModel.atualCiclo.id)
-                    .environmentObject(GastosViewModel(ciclo: viewModel.atualCiclo))
                 }
+            } else {
+                header(showTitle: false)
+                EmptyCicloView {
+                    addNewCicloSheet.toggle()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .padding(.bottom, 30)
+        .padding(.bottom, viewModel.isLoading || !isEmpty ? 30 : 100)
         .task {
             await viewModel.fetchCiclosResumo()
         }

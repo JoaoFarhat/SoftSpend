@@ -13,10 +13,22 @@ struct MenuView: View {
     @StateObject var authService = AuthService.shared
     @State private var selectedEnv: APIEnvironment = APIConfig.shared.current
     
+    @State private var showPerfil = false
+
     var body: some View {
         VStack(spacing: 0) {
-            NavigationLink(destination: PerfilView()
-                                            .environmentObject(viewModel)) {
+            NavigationLink(
+                destination: PerfilView()
+                    .environmentObject(viewModel),
+                isActive: $showPerfil
+            ) {
+                EmptyView()
+            }
+
+            Button {
+                showMenu = false
+                showPerfil = true
+            } label: {
                 HStack {
                     Circle()
                         .fill(Color.white.opacity(0.3))

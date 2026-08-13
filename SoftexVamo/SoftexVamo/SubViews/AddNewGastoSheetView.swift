@@ -83,6 +83,14 @@ struct AddNewGastoSheetView: View {
     @State private var capturedImage: UIImage?
     @State private var showSourceDialog: Bool = false
     
+    @State private var tarefaRefinamento: Task<Void, Never>?
+    @State private var campoEditadoPeloUsuario: Set<Campo> = []
+    @State private var ignorarEdicaoAutomatica: Bool = false
+    
+    enum Campo: Hashable {
+        case titulo, valor, categoria
+    }
+    
     var body: some View {
         let topInset = (UIApplication.shared.connectedScenes
             .compactMap { ($0 as? UIWindowScene)?.windows.first?.safeAreaInsets.top }
@@ -111,6 +119,9 @@ struct AddNewGastoSheetView: View {
                             TextField("Ex: Almoço, Uber...", text: $title)
                                 .font(.system(size: 18, weight: .medium))
                                 .focused($focusedField, equals: .title)
+                                .onChange(of: title) { _, _ in
+                                    marcarEdicaoManual(.titulo)
+                                }
                             
                             
                             
@@ -138,6 +149,7 @@ struct AddNewGastoSheetView: View {
                             Button {
                                 withAnimation(.easeInOut(duration: 0.2)) {
                                     selectedCategoria = categoria
+                                    marcarEdicaoManual(.categoria)
                                 }
                             } label: {
                                 ZStack(alignment: .topTrailing) {
@@ -182,6 +194,7 @@ struct AddNewGastoSheetView: View {
                     Spacer()
                     
                     Button(action: {
+                        tarefaRefinamento?.cancel()
                         Task {
                             if let gastoToEdit, let backendId = gastoToEdit.backendId {
                                 try await viewModel.editGasto(gastoId: backendId, novoDia: selectedDia, titulo: title, value: value, categoria: selectedCategoria)
@@ -275,6 +288,7 @@ struct AddNewGastoSheetView: View {
                                     .focused($focusedField, equals: .value)
                                     .onChange(of: valueString) { _, newValue in
                                         value = verificarNumeros(orcamento: newValue)
+                                        marcarEdicaoManual(.valor)
                                     }
                                     .multilineTextAlignment(.center)
                             
@@ -298,9 +312,9 @@ struct AddNewGastoSheetView: View {
                             }
                             
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(isExtraindo ? "Analisando comprovante..." : "Escanear comprovante")
+                                Text(isExtraindo ? "Refinando com IA..." : "Escanear comprovante")
                                     .font(.system(size: 16, weight: .bold))
-                                Text(isExtraindo ? "Aguarde alguns segundos" : "Preencha automaticamente com IA")
+                                Text(isExtraindo ? "Os campos já foram preenchidos" : "Preencha automaticamente com IA")
                                     .font(.system(size: 12, weight: .medium))
                                     .opacity(0.85)
                             }
@@ -363,6 +377,9 @@ struct AddNewGastoSheetView: View {
         .background(Color("surfaceBackground"), ignoresSafeAreaEdges: .all)
         .ignoresSafeArea(edges: .top)
         .onTapGesture { focusedField = nil }
+        .onDisappear {
+            tarefaRefinamento?.cancel()
+        }
         .confirmationDialog("Escanear comprovante", isPresented: $showSourceDialog, titleVisibility: .visible) {
             Button("Tirar foto") {
                 showCamera = true
@@ -376,8 +393,12 @@ struct AddNewGastoSheetView: View {
         .onChange(of: photoItem) { _, newItem in
             guard let newItem else { return }
             Task {
-                if let data = try? await newItem.loadTransferable(type: Data.self) {
-                    await processarImagem(data: data)
+                if let data = try? await newItem.loadTransferable(type: Data.self),
+                   let imagem = UIImage(data: data),
+                   let comprimida = comprimirParaUpload(imagem) {
+                    await MainActor.run {
+                        processarImagem(imagem: imagem, data: comprimida)
+                    }
                 }
                 photoItem = nil
             }
@@ -387,34 +408,100 @@ struct AddNewGastoSheetView: View {
                 .ignoresSafeArea()
         }
         .onChange(of: capturedImage) { _, newImage in
-            guard let img = newImage, let data = img.jpegData(compressionQuality: 0.85) else { return }
+            guard let img = newImage, let data = comprimirParaUpload(img) else { return }
             Task {
-                await processarImagem(data: data)
-                capturedImage = nil
+                await MainActor.run {
+                    processarImagem(imagem: img, data: data)
+                    capturedImage = nil
+                }
             }
         }
     }
     
+    /// Reduz a imagem antes do upload.
+    ///
+    /// A foto original da camera tem vários MB, mas o servidor a reduz para
+    /// 1280px antes de enviar ao Gemini. Subir a resolucao total apenas gasta
+    /// tempo de rede, que domina a latencia percebida do escaneamento.
+    private func comprimirParaUpload(_ image: UIImage) -> Data? {
+        let ladoMaximo: CGFloat = 1280
+        let maiorLado = max(image.size.width, image.size.height)
+        let escala = min(1, ladoMaximo / maiorLado)
+        let novoTamanho = CGSize(
+            width: image.size.width * escala,
+            height: image.size.height * escala
+        )
+
+        let formato = UIGraphicsImageRendererFormat.default()
+        formato.scale = 1
+        let redimensionada = UIGraphicsImageRenderer(size: novoTamanho, format: formato).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: novoTamanho))
+        }
+
+        return redimensionada.jpegData(compressionQuality: 0.8)
+    }
+
+
     @MainActor
-    private func processarImagem(data: Data) async {
+    private func processarImagem(imagem: UIImage, data: Data) {
         isExtraindo = true
         erroExtracao = nil
-        
-        do {
-            let resultado = try await NetworkManager.shared.extrairGastoDeImagem(imageData: data)
-            
-            withAnimation {
-                title = resultado.titulo
-                value = resultado.valor
-                valueString = String(format: "%.2f", resultado.valor).replacingOccurrences(of: ".", with: ",")
-                selectedCategoria = resultado.categoria
+        tarefaRefinamento?.cancel()
+
+        tarefaRefinamento = Task {
+            let local = await ComprovanteOCRLocal.extrair(de: imagem)
+            let teveLeituraLocal = local.temAlgoUtil
+            if teveLeituraLocal {
+                aplicar(titulo: local.titulo, valor: local.valor, categoria: local.categoria)
             }
-        } catch {
-            erroExtracao = "Nao foi possivel extrair os dados. Preencha manualmente."
-            print("Erro ao extrair gasto:", error)
+
+            guard !Task.isCancelled else { return }
+
+            do {
+                let resultado = try await NetworkManager.shared.extrairGastoDeImagem(imageData: data)
+                guard !Task.isCancelled else { return }
+                
+                aplicar(
+                    titulo: resultado.titulo,
+                    valor: resultado.valor,
+                    categoria: resultado.categoria
+                )
+            } catch {
+                guard !Task.isCancelled else { return }
+                erroExtracao = teveLeituraLocal
+                    ? "Leitura feita no dispositivo. Confira os valores antes de salvar."
+                    : "Nao foi possivel extrair os dados. Preencha manualmente."
+                print("Erro ao extrair gasto:", error)
+            }
+
+            isExtraindo = false
         }
-        
-        isExtraindo = false
+    }
+
+    @MainActor
+    private func aplicar(titulo: String?, valor: Float?, categoria: Categoria?) {
+        ignorarEdicaoAutomatica = true
+        withAnimation {
+            if let titulo, !titulo.isEmpty, !campoEditadoPeloUsuario.contains(.titulo) {
+                self.title = titulo
+            }
+            if let valor, valor > 0, !campoEditadoPeloUsuario.contains(.valor) {
+                self.value = valor
+                self.valueString = String(format: "%.2f", valor)
+                    .replacingOccurrences(of: ".", with: ",")
+            }
+            if let categoria, !campoEditadoPeloUsuario.contains(.categoria) {
+                self.selectedCategoria = categoria
+            }
+        }
+        DispatchQueue.main.async {
+            self.ignorarEdicaoAutomatica = false
+        }
+    }
+
+    private func marcarEdicaoManual(_ campo: Campo) {
+        guard !ignorarEdicaoAutomatica else { return }
+        campoEditadoPeloUsuario.insert(campo)
     }
     
     func verificarNumeros(orcamento: String) -> Float{

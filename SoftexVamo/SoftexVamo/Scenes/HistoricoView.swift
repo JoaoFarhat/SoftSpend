@@ -28,12 +28,10 @@ struct HistoricoView: View {
                 }
                 .padding()
                 
-                if(viewModel.allCiclos.isEmpty/* || viewModel.allCiclos.allSatisfy({ $0.backendId == nil })*/) {
-                    Spacer()
-                    EmptyHistoricoView{
+                if viewModel.allCiclos.isEmpty {
+                    EmptyHistoricoView {
                         showingModal.toggle()
                     }
-                    Spacer()
                 }
                 else{
                     ScrollView{
@@ -84,6 +82,7 @@ struct HistoricoView: View {
                     
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
             
         }
         .fullScreenCover(isPresented: $showingModal) {
