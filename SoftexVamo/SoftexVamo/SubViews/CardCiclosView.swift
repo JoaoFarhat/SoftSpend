@@ -28,6 +28,7 @@ struct CardCiclosView: View {
     }
     
     @State var isPresented: Bool = false
+    @State private var falhaAoExcluir: Bool = false
     
     var body: some View {
         ZStack{
@@ -129,11 +130,19 @@ struct CardCiclosView: View {
                     do {
                         try await viewModel.deleteCiclo(cicloId: cicloId)
                     } catch {
+                        // Sem avisar, o card apenas continua na lista e o
+                        // usuário acha que o ciclo foi excluído.
+                        await MainActor.run { falhaAoExcluir = true }
                         print("Erro ao excluir ciclo:", error)
                     }
                 }
             }, ciclo: ciclo, sheetDetent: $sheetDetent)
             .presentationDetents([.height(250), .large], selection: $sheetDetent)
+        }
+        .alert("Não foi possível excluir", isPresented: $falhaAoExcluir) {
+            Button("OK", role: .cancel) { }
+        } message: {
+            Text("O ciclo \"\(ciclo.titulo)\" não foi excluído. Verifique sua conexão e tente novamente.")
         }
     }
 }

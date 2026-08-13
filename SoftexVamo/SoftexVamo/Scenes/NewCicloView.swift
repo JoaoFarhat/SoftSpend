@@ -23,6 +23,7 @@ struct NewCicloView: View {
     @State private var orcamento: Float
     @State private var dataInicio: Date
     @State private var dataFim: Date
+    @State private var erroSalvar: String?
     
     var ciclo: CicloSoftex?
     
@@ -130,7 +131,17 @@ struct NewCicloView: View {
                     
 //                    Spacer()
                     
+                    if let erroSalvar {
+                        Text(erroSalvar)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundStyle(.red)
+                            .multilineTextAlignment(.center)
+                            .frame(maxWidth: .infinity)
+                            .padding(.bottom, 8)
+                    }
+                    
                     Button(action: {
+                        erroSalvar = nil
                         Task{
                             if let ciclo, let cicloId = ciclo.backendId {
                                 let dayCount = Calendar.current.datesBetween(dataInicio, and: dataFim)
@@ -147,12 +158,23 @@ struct NewCicloView: View {
                                 do {
                                     try await cicloViewModel.editCiclo(cicloId: cicloId, ciclo: cicloEditado, dias: novosDias)
                                 } catch {
+                                    await MainActor.run {
+                                        erroSalvar = "Não foi possível salvar as alterações. Tente novamente."
+                                    }
                                     print("Erro ao editar ciclo:", error)
                                     return
                                 }
                             }
                             else {
-                                await cicloViewModel.createNewCiclo(startDate: dataInicio, endDate: dataFim, totalValue: Float(orcamento), titulo: nomeCiclo)
+                                do {
+                                    try await cicloViewModel.createNewCiclo(startDate: dataInicio, endDate: dataFim, totalValue: Float(orcamento), titulo: nomeCiclo)
+                                } catch {
+                                    await MainActor.run {
+                                        erroSalvar = "Não foi possível criar o ciclo. Tente novamente."
+                                    }
+                                    print("Erro ao criar ciclo:", error)
+                                    return
+                                }
                             }
                             
                             await MainActor.run {

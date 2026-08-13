@@ -105,7 +105,7 @@ struct CiclosListView: View {
     }
 
     private func header(showTitle: Bool = true) -> some View {
-        HStack {
+        HStack(alignment: showTitle ? .center : .top) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(saudacao)
                     .foregroundStyle(Color("textSecondary"))

@@ -97,7 +97,7 @@ final class CiclosViewModel: ObservableObject {
         }
     }
     
-    func createNewCiclo(startDate: Date, endDate: Date, totalValue: Float, titulo: String) async {
+    func createNewCiclo(startDate: Date, endDate: Date, totalValue: Float, titulo: String) async throws {
         let dayCount = Calendar.current.datesBetween(startDate, and: endDate)
         let safeDayCount = max(dayCount, 1)
         
@@ -107,7 +107,7 @@ final class CiclosViewModel: ObservableObject {
         let newCiclo = CicloSoftex(valor_total: totalValue, gasto_total: 0, periodo: periodo, diaria: saldo, titulo: titulo, dias: nil)
         let dias: [DiaLoteRequest] = createAllDiasLoteRequest(dayCount: dayCount, startDate: startDate)
         
-        await postToNetwork(newCiclo: newCiclo, dias: dias)
+        try await postToNetwork(newCiclo: newCiclo, dias: dias)
     }
     
     @MainActor
@@ -176,24 +176,24 @@ final class CiclosViewModel: ObservableObject {
     }
     
     @MainActor
-    private func postToNetwork(newCiclo: CicloSoftex, dias: [DiaLoteRequest]) async {
-        do {
-            var novoCiclo = try await NetworkManager.shared.postCiclo(newCiclo: newCiclo)
-            
-            guard let cicloId = novoCiclo.backendId else {
-                print("Erro: ciclo criado sem backendId")
-                return
-            }
-            
-            novoCiclo.dias = try await NetworkManager.shared.postDiasLote(cicloId: cicloId, dias: dias)
-            
-            self.allCiclos.insert(novoCiclo, at: 0)
-            self.atualCiclo = novoCiclo
-            self.index = 0
-            
-        } catch {
-            print("Erro ao criar o ciclo:", error)
+    private func postToNetwork(newCiclo: CicloSoftex, dias: [DiaLoteRequest]) async throws {
+        var novoCiclo = try await NetworkManager.shared.postCiclo(newCiclo: newCiclo)
+        
+        guard let cicloId = novoCiclo.backendId else {
+            throw URLError(.cannotParseResponse)
         }
+        
+        do {
+            novoCiclo.dias = try await NetworkManager.shared.postDiasLote(cicloId: cicloId, dias: dias)
+        } catch {
+            try? await NetworkManager.shared.deleteCiclo(cicloId: cicloId)
+            throw error
+        }
+        
+        self.allCiclos.insert(novoCiclo, at: 0)
+        self.atualCiclo = novoCiclo
+        self.index = 0
+        self.salvarNoCache(ciclo: novoCiclo)
     }
     
     func createNewGasto(title: String, value: Float, dia: DiaSoftex, categoria: Categoria, comprovante: Data? = nil) async throws {
