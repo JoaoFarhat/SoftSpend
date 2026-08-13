@@ -13,3 +13,4 @@ pymysql
 google-genai
 python-multipart
 Pillow
+boto3

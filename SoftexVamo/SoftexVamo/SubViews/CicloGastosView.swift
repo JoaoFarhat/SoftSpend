@@ -200,13 +200,25 @@ struct CicloGastosView: View {
                     .font(.system(size: 16, weight: .bold))
                     .foregroundColor(Color("textPrimary"))
                 
-                Text(gasto.categoria.localizedName)
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(gasto.categoria.color)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(gasto.categoria.color.opacity(0.15))
-                    .cornerRadius(6)
+                HStack(spacing: 6) {
+                    Text(gasto.categoria.localizedName)
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(gasto.categoria.color)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(gasto.categoria.color.opacity(0.15))
+                        .cornerRadius(6)
+                    
+                    if gasto.temComprovante {
+                        Image(systemName: "paperclip")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(Color.appPurple)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 4)
+                            .background(Color.appPurple.opacity(0.15))
+                            .cornerRadius(6)
+                    }
+                }
             }
             
             Spacer()

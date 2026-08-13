@@ -63,6 +63,7 @@ struct AddNewGastoSheetView: View {
             _value = State(initialValue: gastoToEdit.valor)
             _valueString = State(initialValue: String(format: "%.2f", gastoToEdit.valor).replacingOccurrences(of: ".", with: ","))
             _selectedCategoria = State(initialValue: gastoToEdit.categoria)
+            _comprovanteUrlSalva = State(initialValue: gastoToEdit.comprovanteUrl)
         }
     }
     
@@ -87,8 +88,23 @@ struct AddNewGastoSheetView: View {
     @State private var campoEditadoPeloUsuario: Set<Campo> = []
     @State private var ignorarEdicaoAutomatica: Bool = false
     
+    @State private var comprovanteImagem: UIImage?
+    @State private var comprovanteData: Data?
+    @State private var comprovanteUrlSalva: String?
+    @State private var removerComprovanteSalvo: Bool = false
+    @State private var modoImagem: ModoImagem = .escanear
+    @State private var isSalvando: Bool = false
+    
     enum Campo: Hashable {
         case titulo, valor, categoria
+    }
+    
+    enum ModoImagem {
+        case escanear, anexar
+    }
+    
+    private var temComprovante: Bool {
+        comprovanteImagem != nil || (comprovanteUrlSalva != nil && !removerComprovanteSalvo)
     }
     
     var body: some View {
@@ -191,21 +207,17 @@ struct AddNewGastoSheetView: View {
                     }
                     .frame(minHeight: 150)
                     
+                    notaFiscalSection
+                    
                     Spacer()
                     
-                    Button(action: {
-                        tarefaRefinamento?.cancel()
-                        Task {
-                            if let gastoToEdit, let backendId = gastoToEdit.backendId {
-                                try await viewModel.editGasto(gastoId: backendId, novoDia: selectedDia, titulo: title, value: value, categoria: selectedCategoria)
-                            } else {
-                                try await viewModel.createNewGasto(title: title, value: value, dia: selectedDia, categoria: selectedCategoria)
-                            }
-                            await MainActor.run { dismiss() }
-                        }
-                    }) {
+                    Button(action: salvar) {
                         HStack {
-                            Image(systemName: "checkmark")
+                            if isSalvando {
+                                ProgressView().tint(.white)
+                            } else {
+                                Image(systemName: "checkmark")
+                            }
                             Text(isEditing ? "Atualizar Gasto" : "Salvar Gasto")
                         }
                         .font(.system(size: 20, weight: .bold))
@@ -221,7 +233,7 @@ struct AddNewGastoSheetView: View {
                     }
                     .padding(.top, 10)
                     .padding(.bottom, bottomInset + 8)
-                    .disabled(!canSave)
+                    .disabled(!canSave || isSalvando)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, headerHeight + 16)
@@ -300,6 +312,7 @@ struct AddNewGastoSheetView: View {
                     
                     
                     Button(action: {
+                        modoImagem = .escanear
                         showSourceDialog = true
                     }) {
                         HStack(spacing: 12) {
@@ -380,7 +393,11 @@ struct AddNewGastoSheetView: View {
         .onDisappear {
             tarefaRefinamento?.cancel()
         }
-        .confirmationDialog("Escanear comprovante", isPresented: $showSourceDialog, titleVisibility: .visible) {
+        .confirmationDialog(
+            modoImagem == .escanear ? "Escanear comprovante" : "Anexar nota fiscal",
+            isPresented: $showSourceDialog,
+            titleVisibility: .visible
+        ) {
             Button("Tirar foto") {
                 showCamera = true
             }
@@ -394,10 +411,9 @@ struct AddNewGastoSheetView: View {
             guard let newItem else { return }
             Task {
                 if let data = try? await newItem.loadTransferable(type: Data.self),
-                   let imagem = UIImage(data: data),
-                   let comprimida = comprimirParaUpload(imagem) {
+                   let imagem = UIImage(data: data) {
                     await MainActor.run {
-                        processarImagem(imagem: imagem, data: comprimida)
+                        processarImagem(imagem: imagem)
                     }
                 }
                 photoItem = nil
@@ -408,22 +424,174 @@ struct AddNewGastoSheetView: View {
                 .ignoresSafeArea()
         }
         .onChange(of: capturedImage) { _, newImage in
-            guard let img = newImage, let data = comprimirParaUpload(img) else { return }
+            guard let img = newImage else { return }
             Task {
                 await MainActor.run {
-                    processarImagem(imagem: img, data: data)
+                    processarImagem(imagem: img)
                     capturedImage = nil
                 }
             }
         }
     }
     
-    /// Reduz a imagem antes do upload.
+    private var notaFiscalSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Nota fiscal")
+                .font(.system(size: 14, weight: .bold))
+            
+            if temComprovante {
+                HStack(spacing: 14) {
+                    comprovanteThumbnail
+                    
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(comprovanteImagem != nil ? "Nota anexada" : "Nota salva")
+                            .font(.system(size: 15, weight: .bold))
+                            .foregroundStyle(Color("textPrimary"))
+                        Text(comprovanteImagem != nil
+                             ? "Será enviada ao salvar o gasto"
+                             : "Já disponível para exportação")
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color("textSecondary"))
+                    }
+                    
+                    Spacer()
+                    
+                    Button(role: .destructive) {
+                        withAnimation { removerNotaFiscal() }
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.red)
+                            .padding(12)
+                            .background(Color.red.opacity(0.12))
+                            .clipShape(Circle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(14)
+                .background(Color("cinza"))
+                .cornerRadius(20)
+            } else {
+                Button {
+                    modoImagem = .anexar
+                    showSourceDialog = true
+                } label: {
+                    HStack(spacing: 14) {
+                        Image(systemName: "paperclip")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(purplePrimary)
+                            .frame(width: 44, height: 44)
+                            .background(purplePrimary.opacity(0.15))
+                            .clipShape(Circle())
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Anexar nota fiscal")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(Color("textPrimary"))
+                            Text("Guarde o comprovante para exportar depois")
+                                .font(.system(size: 12))
+                                .foregroundStyle(Color("textSecondary"))
+                        }
+                        
+                        Spacer()
+                        
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(Color("textSecondary"))
+                    }
+                    .padding(14)
+                    .background(Color("cinza"))
+                    .cornerRadius(20)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(grayBorder, lineWidth: 1)
+                    )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+    
+    @ViewBuilder
+    private var comprovanteThumbnail: some View {
+        let forma = RoundedRectangle(cornerRadius: 14)
+        
+        if let imagem = comprovanteImagem {
+            Image(uiImage: imagem)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 52, height: 52)
+                .clipShape(forma)
+        } else if let urlString = comprovanteUrlSalva, let url = URL(string: urlString) {
+            AsyncImage(url: url) { fase in
+                if let imagem = fase.image {
+                    imagem.resizable().scaledToFill()
+                } else {
+                    Color("surfaceBackground").overlay(
+                        Image(systemName: "doc.text.image")
+                            .foregroundStyle(Color("textSecondary"))
+                    )
+                }
+            }
+            .frame(width: 52, height: 52)
+            .clipShape(forma)
+        }
+    }
+    
+    private func removerNotaFiscal() {
+        if comprovanteImagem != nil {
+            comprovanteImagem = nil
+            comprovanteData = nil
+        } else if comprovanteUrlSalva != nil {
+            removerComprovanteSalvo = true
+        }
+    }
+    
+    private func salvar() {
+        tarefaRefinamento?.cancel()
+        isSalvando = true
+        
+        Task {
+            defer { Task { @MainActor in isSalvando = false } }
+            
+            do {
+                if let gastoToEdit, let backendId = gastoToEdit.backendId {
+                    try await viewModel.editGasto(gastoId: backendId, novoDia: selectedDia, titulo: title, value: value, categoria: selectedCategoria)
+                    
+                    if let data = comprovanteData {
+                        try await viewModel.anexarComprovante(gastoId: backendId, imageData: data)
+                    } else if removerComprovanteSalvo {
+                        try await viewModel.removerComprovante(gastoId: backendId)
+                    }
+                } else {
+                    try await viewModel.createNewGasto(
+                        title: title,
+                        value: value,
+                        dia: selectedDia,
+                        categoria: selectedCategoria,
+                        comprovante: comprovanteData
+                    )
+                }
+                
+                await MainActor.run { dismiss() }
+            } catch {
+                await MainActor.run {
+                    erroExtracao = "Não foi possível salvar o gasto. Tente novamente."
+                }
+                print("Erro ao salvar gasto:", error)
+            }
+        }
+    }
+    
+    /// Teto de upload da nota. O servidor rejeita acima de 10MB.
+    private static let tamanhoMaximoNota = 9 * 1024 * 1024
+
+    /// Reduz a imagem antes de enviar ao OCR.
     ///
     /// A foto original da camera tem vários MB, mas o servidor a reduz para
     /// 1280px antes de enviar ao Gemini. Subir a resolucao total apenas gasta
     /// tempo de rede, que domina a latencia percebida do escaneamento.
-    private func comprimirParaUpload(_ image: UIImage) -> Data? {
+    private func comprimirParaOCR(_ image: UIImage) -> Data? {
         let ladoMaximo: CGFloat = 1280
         let maiorLado = max(image.size.width, image.size.height)
         let escala = min(1, ladoMaximo / maiorLado)
@@ -441,9 +609,37 @@ struct AddNewGastoSheetView: View {
         return redimensionada.jpegData(compressionQuality: 0.8)
     }
 
+    /// Codifica a nota preservando a resolução original.
+    ///
+    /// Diferente do OCR, a nota arquivada precisa continuar legível para fins
+    /// fiscais, então não há redimensionamento: só a conversão para JPEG (o
+    /// HEIC da galeria não é universalmente legível). A qualidade cai apenas
+    /// se o arquivo passar do teto aceito pelo servidor.
+    private func codificarNotaFiscal(_ image: UIImage) -> Data? {
+        var qualidade: CGFloat = 0.95
+        var dados = image.jpegData(compressionQuality: qualidade)
+
+        while let atual = dados, atual.count > Self.tamanhoMaximoNota, qualidade > 0.4 {
+            qualidade -= 0.15
+            dados = image.jpegData(compressionQuality: qualidade)
+        }
+
+        return dados
+    }
 
     @MainActor
-    private func processarImagem(imagem: UIImage, data: Data) {
+    private func processarImagem(imagem: UIImage) {
+        comprovanteImagem = imagem
+        comprovanteData = codificarNotaFiscal(imagem)
+        removerComprovanteSalvo = false
+        
+        guard modoImagem == .escanear, let dataOCR = comprimirParaOCR(imagem) else { return }
+        
+        extrairComIA(imagem: imagem, data: dataOCR)
+    }
+    
+    @MainActor
+    private func extrairComIA(imagem: UIImage, data: Data) {
         isExtraindo = true
         erroExtracao = nil
         tarefaRefinamento?.cancel()

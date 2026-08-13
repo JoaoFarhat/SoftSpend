@@ -12,16 +12,17 @@ load_dotenv()
 
 # Importa os models
 import models
-from database import Base
+from database import Base, DATABASE_URL
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
-# Override URL do banco com variável de ambiente
-database_url = os.getenv("DATABASE_URL")
-if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+# Usa a mesma URL da aplicação (DATABASE_URL ou DB_USER/DB_PASS/DB_HOST/DB_NAME),
+# em vez da URL fixa do alembic.ini, que fica desatualizada.
+# O `%` precisa ser escapado: o alembic.ini passa pelo configparser, que trata
+# `%` como interpolação — e senhas url-encoded contêm `%`.
+config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

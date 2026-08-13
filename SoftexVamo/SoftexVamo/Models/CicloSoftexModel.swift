@@ -124,6 +124,11 @@ struct GastosDia: Codable, Identifiable, Hashable  {
     let valor: Float
     let titulo: String
     let categoria: Categoria
+    var comprovanteUrl: String?
+    
+    var temComprovante: Bool {
+        comprovanteUrl != nil
+    }
     
     enum CodingKeys: String, CodingKey {
             case backendId = "id"
@@ -131,6 +136,7 @@ struct GastosDia: Codable, Identifiable, Hashable  {
             case valor
             case titulo
             case categoria
+            case comprovanteUrl = "comprovante_url"
         }
 
     static let examples = [ // 60

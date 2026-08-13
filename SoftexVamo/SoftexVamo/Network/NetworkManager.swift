@@ -152,11 +152,7 @@ final class NetworkManager {
         try await execute(makeRequest(url: url, method: "DELETE"))
     }
     
-    func extrairGastoDeImagem(imageData: Data) async throws -> GastoExtraidoResponse {
-        guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/extrair") else {
-            throw URLError(.badURL)
-        }
-        
+    private func makeImageUploadRequest(url: URL, imageData: Data) -> URLRequest {
         let boundary = "Boundary-\(UUID().uuidString)"
         var body = Data()
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
@@ -167,8 +163,35 @@ final class NetworkManager {
         
         var request = makeRequest(url: url, method: "POST", body: body, contentType: "multipart/form-data; boundary=\(boundary)")
         request.timeoutInterval = 90
+        return request
+    }
+    
+    func extrairGastoDeImagem(imageData: Data) async throws -> GastoExtraidoResponse {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/extrair") else {
+            throw URLError(.badURL)
+        }
+        
+        let request = makeImageUploadRequest(url: url, imageData: imageData)
         
         return try decoder.decode(GastoExtraidoResponse.self, from: try await execute(request))
+    }
+    
+    func uploadComprovante(gastoId: Int, imageData: Data) async throws -> GastosDia {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/\(gastoId)/comprovante") else {
+            throw URLError(.badURL)
+        }
+        
+        let request = makeImageUploadRequest(url: url, imageData: imageData)
+        
+        return try decoder.decode(GastosDia.self, from: try await execute(request))
+    }
+    
+    func deleteComprovante(gastoId: Int) async throws -> GastosDia {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/\(gastoId)/comprovante") else {
+            throw URLError(.badURL)
+        }
+        
+        return try decoder.decode(GastosDia.self, from: try await execute(makeRequest(url: url, method: "DELETE")))
     }
     
     func login(dados: LoginRequest) async throws -> AuthResponse {

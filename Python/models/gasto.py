@@ -11,5 +11,12 @@ class Gasto(Base):
     titulo = Column(String(100))
     valor = Column(Float)
     categoria = Column(Enum(Categoria, values_callable=lambda obj: [e.name for e in obj]))
+    comprovante_key = Column(String(255), nullable=True)
 
     dia = relationship("Dia", back_populates="gastos")
+
+    @property
+    def comprovante_url(self) -> str | None:
+        from services import storage_service
+
+        return storage_service.url_do_comprovante(self.comprovante_key)

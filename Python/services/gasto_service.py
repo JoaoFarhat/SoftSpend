@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 import models, dtos
 from dtos.gasto import GastoRequest
 from repositories import gasto_repository, dia_repository, ciclo_repository
+from services import storage_service
 
 def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: int):
     dia = dia_repository.find_dia(db, dia_id)
@@ -50,7 +51,6 @@ def atualizar_gasto(db: Session, gasto_id: int, gasto_request: GastoRequest, use
         if novo_dia.ciclo_id != dia_atual.ciclo_id:
             raise HTTPException(status_code=400, detail="O gasto só pode ser movido dentro do mesmo ciclo")
 
-        # Restaura o saldo do dia antigo e decrementa o saldo do dia novo
         dia_repository.incrementar_saldo(db, dia_atual.id, gasto.valor)
         dia_repository.incrementar_saldo(db, novo_dia_id, -gasto_request.valor)
         ciclo_repository.incrementar_gasto_total(db, dia_atual.ciclo_id, diferenca)
@@ -87,6 +87,46 @@ def remover_gasto(db: Session, gasto_id: int, user_id: int):
     gasto_repository.remover_gasto(db, gasto)
 
     return None
+
+
+def _buscar_gasto_do_usuario(db: Session, gasto_id: int, user_id: int) -> models.Gasto:
+    gasto = gasto_repository.find_gasto(db, gasto_id)
+
+    if not gasto:
+        raise HTTPException(status_code=404, detail="Gasto não encontrado")
+
+    if gasto.dia.ciclo.id_usuario != user_id:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
+    return gasto
+
+
+def anexar_comprovante(db: Session, gasto_id: int, conteudo: bytes, content_type: str, user_id: int):
+    """Sobe a nota fiscal e vincula ao gasto, substituindo a anterior se existir."""
+    if not storage_service.esta_configurado():
+        raise HTTPException(status_code=503, detail="Armazenamento de comprovantes indisponível")
+
+    gasto = _buscar_gasto_do_usuario(db, gasto_id, user_id)
+    key_anterior = gasto.comprovante_key
+
+    gasto.comprovante_key = storage_service.salvar_comprovante(user_id, gasto_id, conteudo, content_type)
+    gasto_repository.atualizar_gasto(db, gasto)
+
+    storage_service.remover_comprovante(key_anterior)
+
+    return gasto
+
+
+def remover_comprovante(db: Session, gasto_id: int, user_id: int):
+    gasto = _buscar_gasto_do_usuario(db, gasto_id, user_id)
+    key = gasto.comprovante_key
+
+    if key:
+        gasto.comprovante_key = None
+        gasto_repository.atualizar_gasto(db, gasto)
+        storage_service.remover_comprovante(key)
+
+    return gasto
 
 
 

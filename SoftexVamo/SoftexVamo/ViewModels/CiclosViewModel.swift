@@ -196,11 +196,21 @@ final class CiclosViewModel: ObservableObject {
         }
     }
     
-    func createNewGasto(title: String, value: Float, dia: DiaSoftex, categoria: Categoria) async throws {
+    func createNewGasto(title: String, value: Float, dia: DiaSoftex, categoria: Categoria, comprovante: Data? = nil) async throws {
         guard let diaId = dia.backendId else { return }
         
         let gasto = GastosDia(valor: value, titulo: title, categoria: categoria)
-        let novoGasto = try await NetworkManager.shared.postGasto(newGasto: gasto, diaId: diaId)
+        var novoGasto = try await NetworkManager.shared.postGasto(newGasto: gasto, diaId: diaId)
+        
+        if let comprovante, let gastoId = novoGasto.backendId {
+            do {
+                let comComprovante = try await NetworkManager.shared.uploadComprovante(gastoId: gastoId, imageData: comprovante)
+                novoGasto.comprovanteUrl = comComprovante.comprovanteUrl
+            } catch {
+                // O gasto já existe; falhar o anexo não deve descartá-lo.
+                print("Erro ao anexar comprovante:", error)
+            }
+        }
         
         await MainActor.run {
             guard let diaIndex = atualCiclo.dias?.firstIndex(where: { $0.backendId == dia.backendId }) else { return }
@@ -208,7 +218,35 @@ final class CiclosViewModel: ObservableObject {
             self.atualCiclo.dias?[diaIndex].gastos.append(novoGasto)
             self.atualCiclo.gasto_total += novoGasto.valor
             self.allCiclos[index] = self.atualCiclo
+            self.salvarNoCache(ciclo: self.atualCiclo)
         }
+    }
+
+    @MainActor
+    func anexarComprovante(gastoId: Int, imageData: Data) async throws {
+        let atualizado = try await NetworkManager.shared.uploadComprovante(gastoId: gastoId, imageData: imageData)
+        atualizarComprovanteLocal(gastoId: gastoId, url: atualizado.comprovanteUrl)
+    }
+    
+    @MainActor
+    func removerComprovante(gastoId: Int) async throws {
+        _ = try await NetworkManager.shared.deleteComprovante(gastoId: gastoId)
+        atualizarComprovanteLocal(gastoId: gastoId, url: nil)
+    }
+    
+    @MainActor
+    private func atualizarComprovanteLocal(gastoId: Int, url: String?) {
+        guard let dias = self.atualCiclo.dias,
+              let diaIndex = dias.firstIndex(where: { $0.gastos.contains(where: { $0.backendId == gastoId }) }),
+              let gastoIndex = dias[diaIndex].gastos.firstIndex(where: { $0.backendId == gastoId }) else { return }
+        
+        self.atualCiclo.dias?[diaIndex].gastos[gastoIndex].comprovanteUrl = url
+        
+        if self.index < self.allCiclos.count {
+            self.allCiclos[self.index] = self.atualCiclo
+        }
+        
+        self.salvarNoCache(ciclo: self.atualCiclo)
     }
     
     func deleteGasto(gastoID: Int) async throws{

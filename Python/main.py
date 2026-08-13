@@ -15,6 +15,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from limiter import limiter
 from services import ocr_service
+from services import comprovante_cleanup
 
 logging.basicConfig(level=logging.INFO)
 
