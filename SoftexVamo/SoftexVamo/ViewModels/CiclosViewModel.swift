@@ -7,6 +7,7 @@
 
 import Foundation
 import Combine
+import SwiftUI
 
 final class CiclosViewModel: ObservableObject {
     @Published var allCiclos: [CicloSoftex] = []
@@ -16,11 +17,18 @@ final class CiclosViewModel: ObservableObject {
     @Published var isLoading: Bool = true
     @Published var selectedTab: Int = 0
     
+    var errorManager: ErrorManager?
+    
     private var hasLoadedOnce = false
     var index: Int = 0
     
     private var currentUser: UserModel? {
         AuthService.shared.currentUser
+    }
+    
+    @MainActor
+    private func showError(_ error: Error) {
+        errorManager?.show(error: error)
     }
     
     @MainActor
@@ -37,8 +45,8 @@ final class CiclosViewModel: ObservableObject {
     func fetchCiclosResumo() async {
         
         guard currentUser != nil else {
-            print("Erro: Usuário não está logado")
-//            self.isLoading = false
+            showError(APIError.serverError(message: "Usuario nao esta logado", requestId: "-", statusCode: 401))
+            self.isLoading = false
             return
         }
         
@@ -55,7 +63,6 @@ final class CiclosViewModel: ObservableObject {
             if let cache = try? JSONDecoder().decode(CicloSoftex.self, from: data)
             {
                 self.atualCiclo = cache
-                print("Cache carregado em background")
             }
         }
         
@@ -87,8 +94,8 @@ final class CiclosViewModel: ObservableObject {
             self.hasLoadedOnce = true
             
         } catch {
-            print("Erro ao buscar ciclos:", error)
-            
+            showError(error)
+
             self.allCiclos = []
             self.atualCiclo = CicloSoftex.vazio
             UserDefaults.standard.removeObject(forKey: "ultimo_ciclo_cache")
@@ -207,8 +214,7 @@ final class CiclosViewModel: ObservableObject {
                 let comComprovante = try await NetworkManager.shared.uploadComprovante(gastoId: gastoId, imageData: comprovante)
                 novoGasto.comprovanteUrl = comComprovante.comprovanteUrl
             } catch {
-                // O gasto já existe; falhar o anexo não deve descartá-lo.
-                print("Erro ao anexar comprovante:", error)
+                showError(error)
             }
         }
         

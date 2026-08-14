@@ -71,7 +71,7 @@ struct GradientMask: View {
     let phase: CGFloat
     let centerColor = Color.white.opacity(0.4)
     let edgeColor = Color.white.opacity(1)
-    
+
     var body: some View {
         LinearGradient(
             gradient: Gradient(stops: [
@@ -82,5 +82,31 @@ struct GradientMask: View {
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
+    }
+}
+
+struct ErrorAlertModifier: ViewModifier {
+    @ObservedObject var errorManager: ErrorManager
+
+    func body(content: Content) -> some View {
+        content
+            .alert(errorManager.title, isPresented: $errorManager.isPresented) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(errorManager.message)
+                    if let requestId = errorManager.requestId {
+                        Text("ID: \(requestId)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+    }
+}
+
+extension View {
+    func errorAlert(errorManager: ErrorManager) -> some View {
+        modifier(ErrorAlertModifier(errorManager: errorManager))
     }
 }

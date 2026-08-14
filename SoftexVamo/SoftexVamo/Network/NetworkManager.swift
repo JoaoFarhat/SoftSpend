@@ -54,24 +54,27 @@ final class NetworkManager {
     @discardableResult
     private func execute(_ request: URLRequest, logout401: Bool = true) async throws -> Data {
         let (data, response) = try await session.data(for: request)
-        
+
         guard let http = response as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
+            throw APIError.unknown
         }
-        
+
         if http.statusCode == 401 {
             if logout401 {
                 Task { @MainActor in
                     AuthService.shared.logout()
                 }
-                throw URLError(.userAuthenticationRequired)
             }
+            throw APIError.authentication
         }
-        
+
         guard 200...299 ~= http.statusCode else {
-            throw URLError(.badServerResponse)
+            let decoded = try? decoder.decode(APIErrorResponse.self, from: data)
+            let message = decoded?.error ?? "Erro no servidor"
+            let requestId = decoded?.request_id ?? "-"
+            throw APIError.serverError(message: message, requestId: requestId, statusCode: http.statusCode)
         }
-        
+
         return data
     }
     

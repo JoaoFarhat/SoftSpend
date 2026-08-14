@@ -17,7 +17,9 @@ final class AuthService: ObservableObject {
     @Published var isAuthenticated: Bool = false
     @Published var isLoading: Bool = false
     @Published var errorMessage: String?
-    
+
+    var errorManager: ErrorManager?
+
     private var baseURL: String { APIConfig.shared.baseURL }
     private let userKey = "user_data"
     
@@ -43,7 +45,9 @@ final class AuthService: ObservableObject {
             let authResponse = try await NetworkManager.shared.login(dados: dados)
             await saveUser(authResponse)
         } catch {
-            errorMessage = "Email ou senha invalidos"
+            let message = (error as? APIError)?.localizedDescription ?? "Email ou senha invalidos"
+            errorMessage = message
+            errorManager?.show(title: "Erro no login", message: message)
         }
         
         isLoading = false
@@ -58,7 +62,9 @@ final class AuthService: ObservableObject {
             let authResponse = try await NetworkManager.shared.register(dados: dados)
             await saveUser(authResponse)
         } catch {
-            errorMessage = error.localizedDescription
+            let message = (error as? APIError)?.localizedDescription ?? error.localizedDescription
+            errorMessage = message
+            errorManager?.show(title: "Erro no cadastro", message: message)
         }
         
         isLoading = false
@@ -72,7 +78,9 @@ final class AuthService: ObservableObject {
             try await NetworkManager.shared.deleteAccount()
             logout()
         } catch {
-            errorMessage = "Não foi possível excluir a conta. Tente novamente."
+            let message = (error as? APIError)?.localizedDescription ?? "Não foi possível excluir a conta. Tente novamente."
+            errorMessage = message
+            errorManager?.show(title: "Erro ao excluir conta", message: message)
         }
         
         isLoading = false

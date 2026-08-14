@@ -83,6 +83,11 @@ AWS S3, Cloudflare R2, Supabase Storage e MinIO:
 | `S3_PUBLIC_BASE_URL` | — | Se definida, a URL é `{base}/{key}`; senão gera URL assinada |
 | `S3_URL_EXPIRACAO` | `3600` | Validade da URL assinada, em segundos. Recomenda-se 1h em produção |
 
+| Variável | Default | Descrição |
+| --- | --- | --- |
+| `ALLOWED_ORIGINS` | `https://softspend.com.br` | Origens CORS permitidas, separadas por vírgula |
+| `DOCS_ENABLED` | `false` | Se `true`, habilita `/docs`, `/redoc` e `/openapi.json` |
+
 ## Notas fiscais (comprovantes)
 
 O banco guarda apenas `gastos_dia.comprovante_key`; os bytes ficam no bucket.
@@ -106,6 +111,38 @@ SQLAlchemy registrados no import feito pelo `main.py`. O `after_delete` anota as
 keys na sessão e o `after_commit` as remove, de modo que um rollback não apaga
 arquivos. Isso cobre também os deletes por cascade (ciclo e conta do usuário),
 que não passam por `gasto_service.remover_gasto`.
+
+## Deploy no EC2
+
+Arquivos para rodar a API como serviço systemd e rotacionar logs:
+
+- `deploy/ec2/softspend.service` — serviço systemd
+- `deploy/ec2/logrotate-softspend` — rotação diária de logs
+- `deploy/ec2/setup.sh` — instala tudo no servidor
+
+Configure uma única vez no EC2:
+
+```bash
+cd ~/SoftSpend/deploy/ec2
+chmod +x setup.sh
+./setup.sh
+```
+
+O workflow do GitHub Actions pode reiniciar o serviço automaticamente:
+
+```yaml
+script: |
+  cd ~/SoftSpend
+  git fetch origin
+  git reset --hard origin/main
+  cd Python
+  source .venv/bin/activate
+  pip install -r requirements.txt
+  alembic upgrade head
+  sudo systemctl restart softspend
+```
+
+Logs ficam em `/var/log/softspend/app.log` e são rotacionados diariamente.
 
 ## Privacidade / OCR
 

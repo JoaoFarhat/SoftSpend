@@ -22,6 +22,7 @@ struct AddNewGastoSheetView: View {
     ]
     
     @EnvironmentObject var viewModel: CiclosViewModel
+    @EnvironmentObject var errorManager: ErrorManager
     
     @State var title: String = ""
     @State var valueString: String = ""
@@ -578,7 +579,9 @@ struct AddNewGastoSheetView: View {
                 await MainActor.run {
                     erroExtracao = "Não foi possível salvar o gasto. Tente novamente."
                 }
-                print("Erro ao salvar gasto:", error)
+                await MainActor.run {
+                    errorManager.show(error: error)
+                }
             }
         }
     }

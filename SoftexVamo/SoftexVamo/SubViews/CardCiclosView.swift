@@ -10,6 +10,7 @@ import SwiftUI
 struct CardCiclosView: View {
     
     @EnvironmentObject var viewModel: CiclosViewModel
+    @EnvironmentObject var errorManager: ErrorManager
     
     let ciclo : CicloSoftex
     
@@ -130,10 +131,8 @@ struct CardCiclosView: View {
                     do {
                         try await viewModel.deleteCiclo(cicloId: cicloId)
                     } catch {
-                        // Sem avisar, o card apenas continua na lista e o
-                        // usuário acha que o ciclo foi excluído.
                         await MainActor.run { falhaAoExcluir = true }
-                        print("Erro ao excluir ciclo:", error)
+                        errorManager.show(error: error)
                     }
                 }
             }, ciclo: ciclo, sheetDetent: $sheetDetent)

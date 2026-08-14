@@ -15,7 +15,7 @@ struct NewCicloView: View {
     }
     
     @Environment(\.dismiss) var dismiss
-    
+    @EnvironmentObject var errorManager: ErrorManager
     @EnvironmentObject var cicloViewModel: CiclosViewModel
     
     @State private var nomeCiclo: String
@@ -161,7 +161,7 @@ struct NewCicloView: View {
                                     await MainActor.run {
                                         erroSalvar = "Não foi possível salvar as alterações. Tente novamente."
                                     }
-                                    print("Erro ao editar ciclo:", error)
+                                    errorManager.show(error: error)
                                     return
                                 }
                             }
@@ -172,7 +172,7 @@ struct NewCicloView: View {
                                     await MainActor.run {
                                         erroSalvar = "Não foi possível criar o ciclo. Tente novamente."
                                     }
-                                    print("Erro ao criar ciclo:", error)
+                                    errorManager.show(error: error)
                                     return
                                 }
                             }
