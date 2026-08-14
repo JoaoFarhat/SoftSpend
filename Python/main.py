@@ -3,8 +3,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from controllers.ciclo_controller import router as ciclo_router
 from controllers.dia_controller import router as dia_router
@@ -14,10 +13,12 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from limiter import limiter
+from logging_config import setup_logging
+from middlewares import RequestIDMiddleware, LoggingMiddleware, setup_exception_handlers
 from services import ocr_service
 from services import comprovante_cleanup
 
-logging.basicConfig(level=logging.INFO)
+setup_logging()
 
 
 @asynccontextmanager
@@ -27,22 +28,20 @@ async def lifespan(app: FastAPI):
     tarefa.cancel()
 
 
-app = FastAPI(lifespan=lifespan)
+DOCS_ENABLED = os.getenv("DOCS_ENABLED", "false").lower() == "true"
+
+app = FastAPI(
+    lifespan=lifespan,
+    docs_url="/docs" if DOCS_ENABLED else None,
+    redoc_url="/redoc" if DOCS_ENABLED else None,
+    openapi_url="/openapi.json" if DOCS_ENABLED else None,
+)
 
 ALLOWED_ORIGINS_STR = os.getenv("ALLOWED_ORIGINS", "https://softspend.com.br")
 ALLOWED_ORIGINS = [o.strip() for o in ALLOWED_ORIGINS_STR.split(",") if o.strip()]
 
-
-@app.middleware("http")
-async def add_security_headers(request: Request, call_next):
-    response = await call_next(request)
-    response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["X-Frame-Options"] = "DENY"
-    response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
-    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    return response
-
-
+app.add_middleware(RequestIDMiddleware)
+app.add_middleware(LoggingMiddleware)
 app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
@@ -60,12 +59,4 @@ app.include_router(auth_router)
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
-
-@app.exception_handler(Exception)
-async def generic_exception_handler(request: Request, exc: Exception):
-    logging.exception("Erro interno nao tratado: %s", exc)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Erro interno no servidor"},
-    )
+setup_exception_handlers(app)

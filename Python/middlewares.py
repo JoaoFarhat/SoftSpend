@@ -1,0 +1,124 @@
+import logging
+import time
+import uuid
+
+from fastapi import Request, HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from logging_config import request_id_var
+
+logger = logging.getLogger(__name__)
+
+
+class RequestIDMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        request_id = request.headers.get("X-Request-ID")
+        if not request_id:
+            request_id = str(uuid.uuid4())
+        request.state.request_id = request_id
+        request_id_var.set(request_id)
+
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = request_id
+        return response
+
+
+class LoggingMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start = time.perf_counter()
+
+        logger.info(
+            "Request started",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "ip": self._get_client_ip(request),
+                "user_agent": request.headers.get("User-Agent", "-"),
+            },
+        )
+
+        try:
+            response = await call_next(request)
+        except Exception:
+            raise
+        finally:
+            duration_ms = round((time.perf_counter() - start) * 1000, 2)
+
+        logger.info(
+            "Request finished",
+            extra={
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": response.status_code,
+                "duration_ms": duration_ms,
+                "ip": self._get_client_ip(request),
+                "user_agent": request.headers.get("User-Agent", "-"),
+            },
+        )
+
+        return response
+
+    def _get_client_ip(self, request: Request) -> str:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[-1].strip()
+        return request.client.host if request.client else "-"
+
+
+def get_request_id(request: Request) -> str:
+    return getattr(request.state, "request_id", "-")
+
+
+def build_error_response(request: Request, status_code: int, message: str):
+    return JSONResponse(
+        status_code=status_code,
+        content={
+            "error": message,
+            "request_id": get_request_id(request),
+        },
+    )
+
+
+def setup_exception_handlers(app):
+    @app.exception_handler(HTTPException)
+    async def http_exception_handler(request: Request, exc: HTTPException):
+        if exc.status_code >= 500:
+            logger.error(
+                exc.detail,
+                extra={
+                    "status_code": exc.status_code,
+                    "path": request.url.path,
+                },
+            )
+        else:
+            logger.warning(
+                exc.detail,
+                extra={
+                    "status_code": exc.status_code,
+                    "path": request.url.path,
+                },
+            )
+        return build_error_response(request, exc.status_code, exc.detail)
+
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(request: Request, exc: RequestValidationError):
+        logger.warning(
+            "Validation error",
+            extra={
+                "path": request.url.path,
+                "errors": exc.errors(),
+            },
+        )
+        return build_error_response(request, 422, "Dados de entrada invalidos")
+
+    @app.exception_handler(Exception)
+    async def global_exception_handler(request: Request, exc: Exception):
+        logger.exception(
+            "Unhandled exception",
+            extra={
+                "path": request.url.path,
+            },
+        )
+        return build_error_response(request, 500, "Erro interno no servidor")
