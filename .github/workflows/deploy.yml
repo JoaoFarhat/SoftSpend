@@ -17,8 +17,11 @@ jobs:
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_KEY }}
           script: |
-            cd ~/SoftSpend/Python
-            git pull origin main
-            source .venv/bin/activate
-            pip install -r requirements.txt
-            sudo systemctl restart softspend
+             cd ~/SoftSpend
+             git fetch origin
+             git reset --hard origin/main
+             cd Python
+             source .venv/bin/activate
+             pip install -r requirements.txt
+             alembic upgrade head
+             sudo systemctl restart softspend
