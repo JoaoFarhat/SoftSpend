@@ -1,21 +1,15 @@
-//
-//  GastosViewModel.swift
-//  SoftSpend
-//
-//  Created by Joao Victor on 27/07/26.
-//
-
 import Foundation
 import Combine
 
+@MainActor
 final class GastosViewModel: ObservableObject {
     
-    @Published var ciclo: CicloSoftex
+    @Published var dias: [DiaSoftex]
     @Published var searchGastoText: String = ""
     @Published var categoriaFiltro: Categoria? = nil
     
-    init(ciclo: CicloSoftex) {
-        self.ciclo = ciclo
+    init(dias: [DiaSoftex]) {
+        self.dias = dias
     }
     
     func dateToString(date: Date) -> String {
@@ -25,8 +19,6 @@ final class GastosViewModel: ObservableObject {
     }
     
     var secoesExibidas: [DiaSoftex] {
-        guard let dias = ciclo.dias else { return []}
-        
         return dias.compactMap { dia in
             let gastosQueBatem = dia.gastos.filter { gasto in
                 let matchesTexto = searchGastoText.isEmpty || gasto.titulo.localizedCaseInsensitiveContains(searchGastoText)
@@ -56,9 +48,10 @@ final class GastosViewModel: ObservableObject {
         
         guard let backendID = gastoParaRemover.backendId else { return nil }
         
-        if let diaIndex = ciclo.dias?.firstIndex(where: { $0.id == dia.id }) {
-            ciclo.dias?[diaIndex].gastos.removeAll(where: { $0.id == gastoParaRemover.id })
+        if let diaIndex = dias.firstIndex(where: { $0.id == dia.id }) {
+            dias[diaIndex].gastos.removeAll(where: { $0.id == gastoParaRemover.id })
         }
         
         return backendID
-    }}
+    }
+}

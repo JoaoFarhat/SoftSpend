@@ -6,6 +6,15 @@ from dtos.dia import DiaRequest
 from repositories import dia_repository, ciclo_repository
 
 
+def listar_dias_por_ciclo(db: Session, ciclo_id: int, user_id: int, skip: int, limit: int):
+    ciclo = ciclo_repository.get_user_ciclo_by_id(db, ciclo_id, user_id)
+
+    if not ciclo:
+        raise HTTPException(status_code=404, detail="Ciclo não encontrado")
+
+    return dia_repository.listar_dias_por_ciclo(db, ciclo_id, skip, limit)
+
+
 def criar_dia(db: Session, ciclo_id: int, dia: DiaRequest, user_id: int):
     ciclo = ciclo_repository.get_user_ciclo_by_id(db, ciclo_id, user_id)
 

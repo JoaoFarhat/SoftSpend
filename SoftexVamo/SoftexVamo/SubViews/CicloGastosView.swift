@@ -124,7 +124,7 @@ struct CicloGastosView: View {
                         .padding(.top, 60)
                         .frame(maxWidth: .infinity)
                     } else {
-                        ForEach(gastosViewModel.secoesExibidas.reversed()) { dia in
+                        ForEach(Array(gastosViewModel.secoesExibidas.reversed().enumerated()), id: \.element.id) { index, dia in
                             if(dia.gastos.count != 0){
                                 Section(header: createSectionHeader(dia: dia)) {
                                     VStack(spacing: 0) {
@@ -143,6 +143,11 @@ struct CicloGastosView: View {
                                     .cornerRadius(18)
                                     .shadow(color: .black.opacity(0.1), radius: 10, x: 0, y: 5)
                                     .skeleton(isLoading: ciclosViewModel.isLoading)
+                                }
+                                .onAppear {
+                                    if index == gastosViewModel.secoesExibidas.count - 1 {
+                                        Task { await ciclosViewModel.loadMoreDias(cicloId: ciclosViewModel.atualCiclo.backendId ?? 0) }
+                                    }
                                 }
                                 
                             }
@@ -251,7 +256,7 @@ struct CicloGastosView: View {
     } deleteAction: { _,_ in
         print("")
     }
-    .environmentObject(GastosViewModel(ciclo: CicloSoftex.example))
+    .environmentObject(GastosViewModel(dias: CicloSoftex.example.dias ?? []))
     .environmentObject(CiclosViewModel())
 }
 

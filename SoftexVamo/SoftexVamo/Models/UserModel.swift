@@ -6,37 +6,39 @@
 //
 
 import Foundation
+import SwiftData
 
-struct UserModel: Codable, Identifiable {
-    let id: Int
-    let nome: String
-    let username: String
-    let email: String
+@Model
+final class UserModel {
+    var id: Int
+    var nome: String
+    var username: String
+    var email: String
     
-    enum CodingKeys: String, CodingKey {
-        case id
-        case nome
-        case username
-        case email
+    var syncStatus: SyncStatus = SyncStatus.synced
+    var criadoEm: Date = Date.now
+    var atualizadoEm: Date = Date.now
+    
+    init(
+        id: Int,
+        nome: String,
+        username: String,
+        email: String
+    ) {
+        self.id = id
+        self.nome = nome
+        self.username = username
+        self.email = email
+    }
+    
+    convenience init(from dto: UserDTO) {
+        self.init(
+            id: dto.id,
+            nome: dto.nome,
+            username: dto.username,
+            email: dto.email
+        )
     }
 }
 
-struct RegisterRequest: Codable {
-    let nome: String
-    let username: String
-    let email: String
-    let senha: String
-}
 
-struct LoginRequest: Codable {
-    let email: String
-    let senha: String
-}
-
-struct AuthResponse: Codable {
-    let id: Int
-    let nome: String
-    let username: String
-    let email: String
-    let token: String
-}

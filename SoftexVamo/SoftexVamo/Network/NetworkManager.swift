@@ -78,34 +78,60 @@ final class NetworkManager {
         return data
     }
     
-    func fetchCicloResumo() async throws -> [CicloSoftex] {
-        guard let url = URL(string: "\(APIConfig.shared.baseURL)/usuario/ciclos/resumo") else {
+    func fetchCicloResumo(skip: Int = 0, limit: Int = 5) async throws -> [CicloSoftex] {
+        guard var components = URLComponents(string: "\(APIConfig.shared.baseURL)/usuario/ciclos/resumo") else {
             throw URLError(.badURL)
         }
-        return try decoder.decode([CicloSoftex].self, from: try await execute(makeRequest(url: url)))
+        components.queryItems = [
+            URLQueryItem(name: "skip", value: String(skip)),
+            URLQueryItem(name: "limit", value: String(limit))
+        ]
+        guard let url = components.url else {
+            throw URLError(.badURL)
+        }
+        let response = try decoder.decode([CicloResponse].self, from: try await execute(makeRequest(url: url)))
+        return response.map { CicloSoftex(from: $0) }
     }
     
     func fetchCicloById(cicloId: Int) async throws -> CicloSoftex {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)") else {
             throw URLError(.badURL)
         }
-        return try decoder.decode(CicloSoftex.self, from: try await execute(makeRequest(url: url)))
+        let response = try decoder.decode(CicloResponse.self, from: try await execute(makeRequest(url: url)))
+        return CicloSoftex(from: response)
     }
     
-    func postCiclo(newCiclo: CicloSoftex) async throws -> CicloSoftex {
+    func fetchDias(cicloId: Int, skip: Int = 0, limit: Int = 20) async throws -> [DiaSoftex] {
+        guard var components = URLComponents(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)/dias") else {
+            throw URLError(.badURL)
+        }
+        components.queryItems = [
+            URLQueryItem(name: "skip", value: String(skip)),
+            URLQueryItem(name: "limit", value: String(limit))
+        ]
+        guard let url = components.url else {
+            throw URLError(.badURL)
+        }
+        let response = try decoder.decode([DiaSoftexResponse].self, from: try await execute(makeRequest(url: url)))
+        return response.map { DiaSoftex(from: $0) }
+    }
+    
+    func postCiclo(request: CicloCreateRequest) async throws -> CicloSoftex {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos") else {
             throw URLError(.badURL)
         }
-        let request = makeRequest(url: url, method: "POST", body: try encoder.encode(newCiclo))
-        return try decoder.decode(CicloSoftex.self, from: try await execute(request))
+        let req = makeRequest(url: url, method: "POST", body: try encoder.encode(request))
+        let response = try decoder.decode(CicloResponse.self, from: try await execute(req))
+        return CicloSoftex(from: response)
     }
     
-    func putCiclo(cicloId: Int, cicloEditado: CicloSoftex) async throws -> CicloSoftex {
+    func putCiclo(cicloId: Int, request: CicloUpdateRequest) async throws -> CicloSoftex {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)") else {
             throw URLError(.badURL)
         }
-        let request = makeRequest(url: url, method: "PUT", body: try encoder.encode(cicloEditado))
-        return try decoder.decode(CicloSoftex.self, from: try await execute(request))
+        let req = makeRequest(url: url, method: "PUT", body: try encoder.encode(request))
+        let response = try decoder.decode(CicloResponse.self, from: try await execute(req))
+        return CicloSoftex(from: response)
     }
     
     func deleteCiclo(cicloId: Int) async throws {
@@ -121,7 +147,8 @@ final class NetworkManager {
             throw URLError(.badURL)
         }
         let request = makeRequest(url: url, method: "POST", body: try encoder.encode(dias))
-        return try decoder.decode([DiaSoftex].self, from: try await execute(request))
+        let response = try decoder.decode([DiaSoftexResponse].self, from: try await execute(request))
+        return response.map { DiaSoftex(from: $0) }
     }
     
     func syncDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex] {
@@ -129,23 +156,26 @@ final class NetworkManager {
             throw URLError(.badURL)
         }
         let request = makeRequest(url: url, method: "PUT", body: try encoder.encode(dias))
-        return try decoder.decode([DiaSoftex].self, from: try await execute(request))
+        let response = try decoder.decode([DiaSoftexResponse].self, from: try await execute(request))
+        return response.map { DiaSoftex(from: $0) }
     }
     
-    func postGasto(newGasto: GastosDia, diaId: Int) async throws -> GastosDia {
-        guard let url = URL(string: "\(APIConfig.shared.baseURL)/dias/\(diaId)/gastos") else {
+    func postGasto(request: GastoCreateRequest) async throws -> GastosDia {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/dias/\(request.dia_id)/gastos") else {
             throw URLError(.badURL)
         }
-        let request = makeRequest(url: url, method: "POST", body: try encoder.encode(newGasto))
-        return try decoder.decode(GastosDia.self, from: try await execute(request))
+        let req = makeRequest(url: url, method: "POST", body: try encoder.encode(request))
+        let response = try decoder.decode(GastosDiaResponse.self, from: try await execute(req))
+        return GastosDia(from: response)
     }
     
-    func putGasto(gastoId: Int, gastoEditado: GastosDia) async throws -> GastosDia {
+    func putGasto(gastoId: Int, request: GastoUpdateRequest) async throws -> GastosDia {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/\(gastoId)") else {
             throw URLError(.badURL)
         }
-        let request = makeRequest(url: url, method: "PUT", body: try encoder.encode(gastoEditado))
-        return try decoder.decode(GastosDia.self, from: try await execute(request))
+        let req = makeRequest(url: url, method: "PUT", body: try encoder.encode(request))
+        let response = try decoder.decode(GastosDiaResponse.self, from: try await execute(req))
+        return GastosDia(from: response)
     }
     
     func deleteGasto(gastoId: Int) async throws {
@@ -186,7 +216,8 @@ final class NetworkManager {
         
         let request = makeImageUploadRequest(url: url, imageData: imageData)
         
-        return try decoder.decode(GastosDia.self, from: try await execute(request))
+        let response = try decoder.decode(GastosDiaResponse.self, from: try await execute(request))
+        return GastosDia(from: response)
     }
     
     func deleteComprovante(gastoId: Int) async throws -> GastosDia {
@@ -194,7 +225,8 @@ final class NetworkManager {
             throw URLError(.badURL)
         }
         
-        return try decoder.decode(GastosDia.self, from: try await execute(makeRequest(url: url, method: "DELETE")))
+        let response = try decoder.decode(GastosDiaResponse.self, from: try await execute(makeRequest(url: url, method: "DELETE")))
+        return response.toGastosDia()
     }
     
     func login(dados: LoginRequest) async throws -> AuthResponse {

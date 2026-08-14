@@ -11,6 +11,7 @@ import Combine
 struct CiclosListView: View {
     @EnvironmentObject var viewModel: CiclosViewModel
     @StateObject var authService = AuthService.shared
+    @StateObject var gastosViewModel = GastosViewModel(dias: [])
     @State private var showMenu = false
     
     private var currentUser: UserModel? {
@@ -176,7 +177,7 @@ struct CiclosListView: View {
                             Task { try await viewModel.deleteGasto(gastoID: gastoID) }
                         }
                         .id(viewModel.atualCiclo.id)
-                        .environmentObject(GastosViewModel(ciclo: viewModel.atualCiclo))
+                        .environmentObject(gastosViewModel)
                     } else {
                         CardMainView()
                         
@@ -192,7 +193,7 @@ struct CiclosListView: View {
                             Task { try await viewModel.deleteGasto(gastoID: gastoID) }
                         }
                         .id(viewModel.atualCiclo.id)
-                        .environmentObject(GastosViewModel(ciclo: viewModel.atualCiclo))
+                        .environmentObject(gastosViewModel)
                     }
                 }
             } else {
@@ -206,6 +207,9 @@ struct CiclosListView: View {
         .padding(.bottom, viewModel.isLoading || !isEmpty ? 30 : 100)
         .task {
             await viewModel.fetchCiclosResumo()
+        }
+        .onChange(of: viewModel.atualCiclo.dias) { _, newDias in
+            gastosViewModel.dias = newDias ?? []
         }
         .background(.backgroundCor)
         .overlay(alignment: .topTrailing) {

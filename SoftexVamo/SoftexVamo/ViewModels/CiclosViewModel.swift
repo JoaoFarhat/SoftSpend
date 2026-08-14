@@ -9,6 +9,7 @@ import Foundation
 import Combine
 import SwiftUI
 
+@MainActor
 final class CiclosViewModel: ObservableObject {
     @Published var allCiclos: [CicloSoftex] = []
     @Published var atualCiclo: CicloSoftex = CicloSoftex.vazio
@@ -16,33 +17,51 @@ final class CiclosViewModel: ObservableObject {
     @Published var availableInfo: GastosDia = GastosDia.example
     @Published var isLoading: Bool = true
     @Published var selectedTab: Int = 0
+    @Published var hasMorePages: Bool = true
     
     var errorManager: ErrorManager?
     
     private var hasLoadedOnce = false
     var index: Int = 0
+    private var skip = 0
+    private let limit = 5
+    
+    private var diasSkip = 0
+    private let diasLimit = 20
+    private var hasMoreDias = true
     
     private var currentUser: UserModel? {
         AuthService.shared.currentUser
     }
     
-    @MainActor
     private func showError(_ error: Error) {
         errorManager?.show(error: error)
     }
     
-    @MainActor
     func reset() {
         self.allCiclos = []
         self.atualCiclo = CicloSoftex.vazio
         self.index = 0
         self.isLoading = true
         self.hasLoadedOnce = false
+        self.hasMorePages = true
+        self.skip = 0
+        self.diasSkip = 0
+        self.hasMoreDias = true
         UserDefaults.standard.removeObject(forKey: "ultimo_ciclo_cache")
     }
 
-    @MainActor
     func fetchCiclosResumo() async {
+        await loadCiclos(append: false)
+    }
+    
+    func loadMoreCiclos() async {
+        guard hasMorePages, !isLoading else { return }
+        skip += limit
+        await loadCiclos(append: true)
+    }
+    
+    private func loadCiclos(append: Bool) async {
         
         guard currentUser != nil else {
             showError(APIError.serverError(message: "Usuario nao esta logado", requestId: "-", statusCode: 401))
@@ -50,57 +69,81 @@ final class CiclosViewModel: ObservableObject {
             return
         }
         
+        if append, !hasMorePages { return }
+        if !append, hasLoadedOnce { return }
         
-        
-        if hasLoadedOnce { return }
-        
-        
-        
+        isLoading = true
         
         let cacheData = UserDefaults.standard.data(forKey: "ultimo_ciclo_cache")
         
-        if let data = cacheData {
-            if let cache = try? JSONDecoder().decode(CicloSoftex.self, from: data)
-            {
-                self.atualCiclo = cache
+        if !append, let data = cacheData {
+            if let cache = try? JSONDecoder().decode(CicloResponse.self, from: data) {
+                self.atualCiclo = CicloSoftex(from: cache)
             }
         }
         
-       
         do {
-            let ciclos = try await NetworkManager.shared.fetchCicloResumo()
+            let ciclos = try await NetworkManager.shared.fetchCicloResumo(skip: skip, limit: limit)
             
-            self.allCiclos = ciclos
+            hasMorePages = ciclos.count == limit
             
-            self.index = 0
+            if append {
+                self.allCiclos.append(contentsOf: ciclos)
+            } else {
+                self.allCiclos = ciclos
+                self.index = 0
+            }
             
-            if !self.allCiclos.isEmpty {
+            if !append, !self.allCiclos.isEmpty {
                 let cicloParaSalvar = self.allCiclos[self.index]
                 
                 guard let cicloId = cicloParaSalvar.backendId else {
+                    isLoading = false
                     return
                 }
                 
                 self.atualCiclo = try await NetworkManager.shared.fetchCicloById(cicloId: cicloId)
+                self.atualCiclo.dias = []
+                self.diasSkip = 0
+                self.hasMoreDias = true
+                await loadMoreDias(cicloId: cicloId)
                 self.salvarNoCache(ciclo: self.atualCiclo)
-                
-            } else {
+            } else if !append {
                 self.atualCiclo = CicloSoftex.vazio
                 UserDefaults.standard.removeObject(forKey: "ultimo_ciclo_cache")
             }
             
-            self.isLoading = false
-            
-            self.hasLoadedOnce = true
+            isLoading = false
+            hasLoadedOnce = true
             
         } catch {
             showError(error)
 
-            self.allCiclos = []
-            self.atualCiclo = CicloSoftex.vazio
-            UserDefaults.standard.removeObject(forKey: "ultimo_ciclo_cache")
-            self.isLoading = false
-            self.hasLoadedOnce = true
+            if !append {
+                self.allCiclos = []
+                self.atualCiclo = CicloSoftex.vazio
+                UserDefaults.standard.removeObject(forKey: "ultimo_ciclo_cache")
+            }
+            isLoading = false
+            hasLoadedOnce = true
+        }
+    }
+    
+    func loadMoreDias(cicloId: Int) async {
+        guard hasMoreDias else { return }
+        
+        do {
+            let dias = try await NetworkManager.shared.fetchDias(cicloId: cicloId, skip: diasSkip, limit: diasLimit)
+            hasMoreDias = dias.count == diasLimit
+            diasSkip += dias.count
+            
+            if atualCiclo.dias == nil {
+                atualCiclo.dias = []
+            }
+            atualCiclo.dias?.append(contentsOf: dias)
+            
+        } catch {
+            showError(error)
         }
     }
     
@@ -117,9 +160,14 @@ final class CiclosViewModel: ObservableObject {
         try await postToNetwork(newCiclo: newCiclo, dias: dias)
     }
     
-    @MainActor
     func editCiclo(cicloId: Int, ciclo: CicloSoftex, dias: [DiaLoteRequest]? = nil) async throws {
-        var cicloEditado = try await NetworkManager.shared.putCiclo(cicloId: cicloId, cicloEditado: ciclo)
+        let request = CicloUpdateRequest(
+            titulo: ciclo.titulo,
+            valor_total: ciclo.valor_total,
+            diaria: ciclo.diaria,
+            periodo: ciclo.periodo
+        )
+        var cicloEditado = try await NetworkManager.shared.putCiclo(cicloId: cicloId, request: request)
         
         if let dias {
             cicloEditado.dias = try await NetworkManager.shared.syncDiasLote(cicloId: cicloId, dias: dias)
@@ -135,7 +183,6 @@ final class CiclosViewModel: ObservableObject {
         }
     }
     
-    @MainActor
     func deleteCiclo(cicloId: Int) async throws {
         _ = try await NetworkManager.shared.deleteCiclo(cicloId: cicloId)
         
@@ -158,7 +205,7 @@ final class CiclosViewModel: ObservableObject {
     
     private func salvarNoCache(ciclo: CicloSoftex) {
         if ciclo.backendId != nil {
-            if let encoded = try? JSONEncoder().encode(ciclo) {
+            if let encoded = try? JSONEncoder().encode(ciclo.toDTO()) {
                 UserDefaults.standard.set(encoded, forKey: "ultimo_ciclo_cache")
             }
         }
@@ -182,9 +229,14 @@ final class CiclosViewModel: ObservableObject {
         return "\(dateFormatter.string(from: from)) - \(dateFormatter.string(from: to))"
     }
     
-    @MainActor
     private func postToNetwork(newCiclo: CicloSoftex, dias: [DiaLoteRequest]) async throws {
-        var novoCiclo = try await NetworkManager.shared.postCiclo(newCiclo: newCiclo)
+        let request = CicloCreateRequest(
+            titulo: newCiclo.titulo,
+            valor_total: newCiclo.valor_total,
+            diaria: newCiclo.diaria,
+            periodo: newCiclo.periodo
+        )
+        var novoCiclo = try await NetworkManager.shared.postCiclo(request: request)
         
         guard let cicloId = novoCiclo.backendId else {
             throw URLError(.cannotParseResponse)
@@ -206,8 +258,8 @@ final class CiclosViewModel: ObservableObject {
     func createNewGasto(title: String, value: Float, dia: DiaSoftex, categoria: Categoria, comprovante: Data? = nil) async throws {
         guard let diaId = dia.backendId else { return }
         
-        let gasto = GastosDia(valor: value, titulo: title, categoria: categoria)
-        var novoGasto = try await NetworkManager.shared.postGasto(newGasto: gasto, diaId: diaId)
+        let request = GastoCreateRequest(titulo: title, valor: value, categoria: categoria, dia_id: diaId)
+        var novoGasto = try await NetworkManager.shared.postGasto(request: request)
         
         if let comprovante, let gastoId = novoGasto.backendId {
             do {
@@ -228,19 +280,16 @@ final class CiclosViewModel: ObservableObject {
         }
     }
 
-    @MainActor
     func anexarComprovante(gastoId: Int, imageData: Data) async throws {
         let atualizado = try await NetworkManager.shared.uploadComprovante(gastoId: gastoId, imageData: imageData)
         atualizarComprovanteLocal(gastoId: gastoId, url: atualizado.comprovanteUrl)
     }
     
-    @MainActor
     func removerComprovante(gastoId: Int) async throws {
         _ = try await NetworkManager.shared.deleteComprovante(gastoId: gastoId)
         atualizarComprovanteLocal(gastoId: gastoId, url: nil)
     }
     
-    @MainActor
     private func atualizarComprovanteLocal(gastoId: Int, url: String?) {
         guard let dias = self.atualCiclo.dias,
               let diaIndex = dias.firstIndex(where: { $0.gastos.contains(where: { $0.backendId == gastoId }) }),
@@ -279,10 +328,8 @@ final class CiclosViewModel: ObservableObject {
     func editGasto(gastoId: Int, novoDia: DiaSoftex, titulo: String, value: Float, categoria: Categoria) async throws {
         guard let diaBackendId = novoDia.backendId else { return }
         
-        var gastoEditado = GastosDia(valor: value, titulo: titulo, categoria: categoria)
-        gastoEditado.diaId = diaBackendId
-        
-        var gastoAtualizado = try await NetworkManager.shared.putGasto(gastoId: gastoId, gastoEditado: gastoEditado)
+        let request = GastoUpdateRequest(titulo: titulo, valor: value, categoria: categoria)
+        var gastoAtualizado = try await NetworkManager.shared.putGasto(gastoId: gastoId, request: request)
         
         await MainActor.run {
             guard let dias = self.atualCiclo.dias,

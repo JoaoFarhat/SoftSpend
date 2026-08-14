@@ -52,7 +52,7 @@ struct AddNewGastoSheetView: View {
         
         let hoje = dias.first(where: { Calendar.current.isDateInToday($0.data) })
         let inicial: DiaSoftex
-        if let gastoToEdit, let diaDoGasto {
+        if gastoToEdit != nil, let diaDoGasto {
             inicial = diaDoGasto
         } else {
             inicial = hoje ?? dias.first ?? DiaSoftex.examples[0]

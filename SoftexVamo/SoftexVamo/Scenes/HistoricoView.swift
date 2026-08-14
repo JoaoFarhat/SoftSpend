@@ -37,10 +37,15 @@ struct HistoricoView: View {
                     ScrollView{
                         VStack(alignment: .leading){
                             
-                            ForEach(viewModel.allCiclos){ ciclo in
+                            ForEach(Array(viewModel.allCiclos.enumerated()), id: \.element.id) { index, ciclo in
                                 CardCiclosView(ciclo: ciclo)
                                     .environmentObject(viewModel)
                                     .id("\(ciclo.id)-\(viewModel.atualCiclo.id)")
+                                    .onAppear {
+                                        if index == viewModel.allCiclos.count - 1 {
+                                            Task { await viewModel.loadMoreCiclos() }
+                                        }
+                                    }
                             }
                             
                             

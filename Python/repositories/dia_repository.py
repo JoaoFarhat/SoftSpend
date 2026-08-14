@@ -4,6 +4,17 @@ import models
 def find_dia(db: Session, dia_id: int):
     return db.query(models.Dia).filter(models.Dia.id == dia_id).first()
 
+def listar_dias_por_ciclo(db: Session, ciclo_id: int, skip: int, limit: int):
+    return (
+        db.query(models.Dia)
+        .filter(models.Dia.ciclo_id == ciclo_id)
+        .order_by(models.Dia.data)
+        .offset(skip)
+        .limit(limit)
+        .options(joinedload(models.Dia.gastos))
+        .all()
+    )
+
 def criar_dia(db: Session, dia: models.Dia):
     db.add(dia)
     db.commit()

@@ -7,7 +7,7 @@
 
 import Foundation
 
-enum SyncStatus: Codable {
+enum SyncStatus : String, Codable, Sendable {
     case pending    // nunca foi sync
     case syncing    // tentando agora
     case synced     // sucesso

@@ -30,8 +30,8 @@ final class AuthService: ObservableObject {
     func checkAuthentication() {
         if let _ = KeychainManager.getToken(),
            let userData = UserDefaults.standard.data(forKey: userKey),
-           let user = try? JSONDecoder().decode(UserModel.self, from: userData) {
-            self.currentUser = user
+           let dto = try? JSONDecoder().decode(UserDTO.self, from: userData) {
+            self.currentUser = UserModel(from: dto)
             self.isAuthenticated = true
         }
     }
@@ -99,7 +99,7 @@ final class AuthService: ObservableObject {
             id: response.id,
             nome: response.nome,
             username: response.username,
-            email: response.email,
+            email: response.email
         )
         
         self.currentUser = user
@@ -107,7 +107,8 @@ final class AuthService: ObservableObject {
         
         KeychainManager.saveToken(response.token)
         
-        if let userData = try? JSONEncoder().encode(user) {
+        let dto = UserDTO(id: response.id, nome: response.nome, username: response.username, email: response.email)
+        if let userData = try? JSONEncoder().encode(dto) {
             UserDefaults.standard.set(userData, forKey: self.userKey)
         }
     }
