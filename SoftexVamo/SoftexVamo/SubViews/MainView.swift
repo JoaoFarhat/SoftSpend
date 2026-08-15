@@ -112,6 +112,8 @@ struct MainView: View {
         .onAppear {
             viewModel.modelContext = modelContext
             syncManager.modelContext = modelContext
+        }
+        .refreshable {
             Task { await syncManager.sync() }
         }
     }

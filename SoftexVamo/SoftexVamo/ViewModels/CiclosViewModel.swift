@@ -76,6 +76,7 @@ final class CiclosViewModel: ObservableObject {
         isLoading = true
         
         let descriptor = FetchDescriptor<CicloSoftex>(
+            predicate: #Predicate { $0.deletadoEm == nil },
             sortBy: [SortDescriptor(\.criadoEm, order: .reverse)]
         )
         
@@ -182,7 +183,7 @@ final class CiclosViewModel: ObservableObject {
             try modelContext?.save()
             
             let descriptor = FetchDescriptor<DiaSoftex>(
-                predicate: #Predicate { $0.backendId != nil },
+                predicate: #Predicate { $0.ciclo?.backendId == cicloId && $0.deletadoEm == nil },
                 sortBy: [SortDescriptor(\.data)]
             )
             let diasAtualizados: [DiaSoftex]
@@ -192,9 +193,7 @@ final class CiclosViewModel: ObservableObject {
                 diasAtualizados = []
             }
             
-            self.atualCiclo.dias = diasAtualizados.filter { dia in
-                self.atualCiclo.dias?.contains(where: { $0.backendId == dia.backendId || $0.id == dia.id }) ?? false
-            }
+            self.atualCiclo.dias = diasAtualizados
             
         } catch {
             showError(error)
@@ -297,53 +296,20 @@ final class CiclosViewModel: ObservableObject {
         
         try? modelContext?.save()
         
-        // Sincroniza em background
-        Task {
-            do {
-                let request = CicloUpdateRequest(
-                    titulo: ciclo.titulo,
-                    valor_total: ciclo.valor_total,
-                    diaria: ciclo.diaria,
-                    periodo: ciclo.periodo
+        SyncManager.shared.modelContext = modelContext
+        
+        // Se o ciclo ainda não tem backendId, deixa o sync() normal cuidar da criação primeiro
+        if cicloLocal.backendId != nil {
+            try await SyncManager.shared.editarCiclo(cicloLocal, dias: dias)
+        } else {
+            await SyncManager.shared.sync()
+            let status = cicloLocal.syncStatus
+            if status == .failed {
+                throw APIError.serverError(
+                    message: cicloLocal.syncError ?? "Falha ao sincronizar o ciclo editado",
+                    requestId: "-",
+                    statusCode: 0
                 )
-                var cicloEditado = try await NetworkManager.shared.putCiclo(cicloId: cicloId, request: request)
-                
-                if let dias {
-                    cicloEditado.dias = try await NetworkManager.shared.syncDiasLote(cicloId: cicloId, dias: dias)
-                }
-                
-                await MainActor.run {
-                    cicloLocal.titulo = cicloEditado.titulo
-                    cicloLocal.valor_total = cicloEditado.valor_total
-                    cicloLocal.gasto_total = cicloEditado.gasto_total
-                    cicloLocal.periodo = cicloEditado.periodo
-                    cicloLocal.diaria = cicloEditado.diaria
-                    cicloLocal.syncStatus = .synced
-                    cicloLocal.syncError = nil
-                    
-                    if let diasRemotos = cicloEditado.dias {
-                        for diaRemoto in diasRemotos {
-                            self.salvarOuAtualizarDiaLocal(diaRemoto, no: cicloLocal)
-                        }
-                    }
-                    
-                    if let index = self.allCiclos.firstIndex(where: { $0.backendId == cicloId }) {
-                        self.allCiclos[index] = cicloLocal
-                    }
-                    
-                    if self.atualCiclo.backendId == cicloId {
-                        self.atualCiclo = cicloLocal
-                    }
-                    
-                    try? self.modelContext?.save()
-                }
-            } catch {
-                await MainActor.run {
-                    cicloLocal.syncStatus = .failed
-                    cicloLocal.syncError = error.localizedDescription
-                    try? self.modelContext?.save()
-                    self.showError(error)
-                }
             }
         }
     }
@@ -371,22 +337,8 @@ final class CiclosViewModel: ObservableObject {
         ciclo.syncStatus = .pending
         try? modelContext?.save()
         
-        // Sincroniza em background
         Task {
-            do {
-                try await NetworkManager.shared.deleteCiclo(cicloId: cicloId)
-                await MainActor.run {
-                    self.modelContext?.delete(ciclo)
-                    try? self.modelContext?.save()
-                }
-            } catch {
-                await MainActor.run {
-                    ciclo.syncStatus = .failed
-                    ciclo.syncError = error.localizedDescription
-                    try? self.modelContext?.save()
-                    self.showError(error)
-                }
-            }
+            await SyncManager.shared.sync()
         }
     }
     
@@ -433,138 +385,93 @@ final class CiclosViewModel: ObservableObject {
         self.atualCiclo = newCiclo
         self.index = 0
         
-        // Sincroniza em background
+        SyncManager.shared.modelContext = modelContext
         Task {
-            do {
-                let request = CicloCreateRequest(
-                    client_id: newCiclo.clientId,
-                    titulo: newCiclo.titulo,
-                    valor_total: newCiclo.valor_total,
-                    diaria: newCiclo.diaria,
-                    periodo: newCiclo.periodo
-                )
-                var novoCiclo = try await NetworkManager.shared.postCiclo(request: request)
-                
-                guard let cicloId = novoCiclo.backendId else {
-                    throw URLError(.cannotParseResponse)
-                }
-                
-                novoCiclo.dias = try await NetworkManager.shared.postDiasLote(cicloId: cicloId, dias: dias)
-                
-                await MainActor.run {
-                    newCiclo.backendId = novoCiclo.backendId
-                    newCiclo.gasto_total = novoCiclo.gasto_total
-                    newCiclo.syncStatus = .synced
-                    newCiclo.syncError = nil
-                    
-                    if let diasLocais = newCiclo.dias, let diasRemotos = novoCiclo.dias {
-                        for (index, diaLocal) in diasLocais.enumerated() {
-                            if index < diasRemotos.count {
-                                diaLocal.backendId = diasRemotos[index].backendId
-                                diaLocal.syncStatus = .synced
-                            }
-                        }
-                    }
-                    
-                    try? self.modelContext?.save()
-                }
-            } catch {
-                await MainActor.run {
-                    newCiclo.syncStatus = .failed
-                    newCiclo.syncError = error.localizedDescription
-                    try? self.modelContext?.save()
-                    self.showError(error)
-                }
-            }
+            await SyncManager.shared.sync()
         }
     }
     
     func createNewGasto(title: String, value: Float, dia: DiaSoftex, categoria: Categoria, comprovante: Data? = nil) async throws {
+        guard let modelContext else {
+            throw APIError.serverError(message: "Contexto do banco de dados não configurado", requestId: "-", statusCode: 500)
+        }
+        guard let diaBackendId = dia.backendId else {
+            throw APIError.serverError(message: "O dia selecionado ainda não foi sincronizado", requestId: "-", statusCode: 400)
+        }
+        
         let novoGasto = GastosDia(
             valor: value,
             titulo: title,
             categoria: categoria,
-            diaId: dia.backendId,
+            diaId: diaBackendId,
             backendId: nil,
-            comprovanteUrl: nil
+            comprovanteUrl: nil,
+            comprovanteData: comprovante
         )
         
-        guard let diaIndex = self.atualCiclo.dias?.firstIndex(where: { $0.id == dia.id }) else { return }
+        modelContext.insert(novoGasto)
+        
+        guard let diaIndex = self.atualCiclo.dias?.firstIndex(where: { $0.id == dia.id }) else {
+            throw APIError.serverError(message: "Dia selecionado não encontrado no ciclo atual", requestId: "-", statusCode: 404)
+        }
         
         self.atualCiclo.dias?[diaIndex].gastos.append(novoGasto)
         self.atualCiclo.gasto_total += novoGasto.valor
         self.allCiclos[index] = self.atualCiclo
         
-        modelContext?.insert(novoGasto)
-        try? modelContext?.save()
+        try modelContext.save()
         
+        SyncManager.shared.modelContext = modelContext
         Task {
-            do {
-                guard let diaId = dia.backendId else {
-                    novoGasto.syncStatus = .failed
-                    novoGasto.syncError = "Dia não tem backendId"
-                    try? modelContext?.save()
-                    return
-                }
-                
-                let request = GastoCreateRequest(client_id: novoGasto.clientId, titulo: title, valor: value, categoria: categoria, dia_id: diaId)
-                var gastoSync = try await NetworkManager.shared.postGasto(request: request)
-                
-                if let comprovante, let gastoId = gastoSync.backendId {
-                    do {
-                        let comComprovante = try await NetworkManager.shared.uploadComprovante(gastoId: gastoId, imageData: comprovante)
-                        gastoSync.comprovanteUrl = comComprovante.comprovanteUrl
-                    } catch {
-                        await MainActor.run { showError(error) }
-                    }
-                }
-                
-                await MainActor.run {
-                    novoGasto.backendId = gastoSync.backendId
-                    novoGasto.diaId = gastoSync.diaId
-                    novoGasto.comprovanteUrl = gastoSync.comprovanteUrl
-                    novoGasto.syncStatus = .synced
-                    novoGasto.syncError = nil
-                    self.atualCiclo.gasto_total += 0
-                    try? self.modelContext?.save()
-                }
-            } catch {
-                await MainActor.run {
-                    novoGasto.syncStatus = .failed
-                    novoGasto.syncError = error.localizedDescription
-                    try? self.modelContext?.save()
-                    self.showError(error)
-                }
-            }
+            await SyncManager.shared.sync()
         }
     }
 
     func anexarComprovante(gastoId: Int, imageData: Data) async throws {
-        let atualizado = try await NetworkManager.shared.uploadComprovante(gastoId: gastoId, imageData: imageData)
-        atualizarComprovanteLocal(gastoId: gastoId, url: atualizado.comprovanteUrl)
+        guard let modelContext else {
+            throw APIError.serverError(message: "Contexto do banco de dados não configurado", requestId: "-", statusCode: 500)
+        }
+        guard let gasto = encontrarGasto(backendId: gastoId) else {
+            throw APIError.serverError(message: "Gasto não encontrado", requestId: "-", statusCode: 404)
+        }
+        gasto.comprovanteData = imageData
+        gasto.comprovanteParaRemover = false
+        gasto.syncStatus = .pending
+        try modelContext.save()
+        
+        await SyncManager.shared.sync()
     }
     
     func removerComprovante(gastoId: Int) async throws {
-        _ = try await NetworkManager.shared.deleteComprovante(gastoId: gastoId)
-        atualizarComprovanteLocal(gastoId: gastoId, url: nil)
+        guard let modelContext else {
+            throw APIError.serverError(message: "Contexto do banco de dados não configurado", requestId: "-", statusCode: 500)
+        }
+        guard let gasto = encontrarGasto(backendId: gastoId) else {
+            throw APIError.serverError(message: "Gasto não encontrado", requestId: "-", statusCode: 404)
+        }
+        gasto.comprovanteData = nil
+        gasto.comprovanteParaRemover = true
+        gasto.syncStatus = .pending
+        try modelContext.save()
+        
+        await SyncManager.shared.sync()
     }
     
-    private func atualizarComprovanteLocal(gastoId: Int, url: String?) {
-        guard let dias = self.atualCiclo.dias,
-              let diaIndex = dias.firstIndex(where: { $0.gastos.contains(where: { $0.backendId == gastoId }) }),
-              let gastoIndex = dias[diaIndex].gastos.firstIndex(where: { $0.backendId == gastoId }) else { return }
-        
-        self.atualCiclo.dias?[diaIndex].gastos[gastoIndex].comprovanteUrl = url
-        
-        if self.index < self.allCiclos.count {
-            self.allCiclos[self.index] = self.atualCiclo
-        }
-        
-        self.salvarCicloLocal(self.atualCiclo)
+    private func encontrarGasto(backendId: Int) -> GastosDia? {
+        guard let context = modelContext else { return nil }
+        let descriptor = FetchDescriptor<GastosDia>(
+            predicate: #Predicate { $0.backendId == backendId }
+        )
+        return (try? context.fetch(descriptor).first)
     }
     
     func deleteGasto(gastoID: Int) async throws {
-        guard let dias = atualCiclo.dias else { return }
+        guard let modelContext else {
+            throw APIError.serverError(message: "Contexto do banco de dados não configurado", requestId: "-", statusCode: 500)
+        }
+        guard let dias = atualCiclo.dias else {
+            throw APIError.serverError(message: "Ciclo atual não possui dias", requestId: "-", statusCode: 404)
+        }
         
         var gastoParaDeletar: GastosDia?
         
@@ -583,36 +490,41 @@ final class CiclosViewModel: ObservableObject {
             }
         }
         
-        guard let gasto = gastoParaDeletar else { return }
+        guard let gasto = gastoParaDeletar else {
+            throw APIError.serverError(message: "Gasto não encontrado", requestId: "-", statusCode: 404)
+        }
         
         gasto.deletadoEm = Date()
         gasto.syncStatus = .pending
-        try? modelContext?.save()
+        try modelContext.save()
         
         Task {
-            do {
-                try await NetworkManager.shared.deleteGasto(gastoId: gastoID)
-                await MainActor.run {
-                    self.modelContext?.delete(gasto)
-                    try? self.modelContext?.save()
-                }
-            } catch {
-                await MainActor.run {
-                    gasto.syncStatus = .failed
-                    gasto.syncError = error.localizedDescription
-                    try? self.modelContext?.save()
-                    self.showError(error)
-                }
-            }
+            await SyncManager.shared.sync()
         }
     }
+    
     func editGasto(gastoId: Int, novoDia: DiaSoftex, titulo: String, value: Float, categoria: Categoria) async throws {
-        guard let diaBackendId = novoDia.backendId,
-              let dias = self.atualCiclo.dias,
-              let oldDiaIndex = dias.firstIndex(where: { $0.gastos.contains(where: { $0.backendId == gastoId }) }),
-              let oldGastoIndex = dias[oldDiaIndex].gastos.firstIndex(where: { $0.backendId == gastoId }),
-              let newDiaIndex = dias.firstIndex(where: { $0.backendId == diaBackendId }),
-              let gastoLocal = self.atualCiclo.dias?[oldDiaIndex].gastos[oldGastoIndex] else { return }
+        guard let modelContext else {
+            throw APIError.serverError(message: "Contexto do banco de dados não configurado", requestId: "-", statusCode: 500)
+        }
+        guard let diaBackendId = novoDia.backendId else {
+            throw APIError.serverError(message: "Dia de destino não sincronizado", requestId: "-", statusCode: 400)
+        }
+        guard let dias = self.atualCiclo.dias else {
+            throw APIError.serverError(message: "Ciclo atual não possui dias", requestId: "-", statusCode: 404)
+        }
+        guard let oldDiaIndex = dias.firstIndex(where: { $0.gastos.contains(where: { $0.backendId == gastoId }) }) else {
+            throw APIError.serverError(message: "Dia do gasto não encontrado", requestId: "-", statusCode: 404)
+        }
+        guard let oldGastoIndex = dias[oldDiaIndex].gastos.firstIndex(where: { $0.backendId == gastoId }) else {
+            throw APIError.serverError(message: "Gasto não encontrado", requestId: "-", statusCode: 404)
+        }
+        guard let newDiaIndex = dias.firstIndex(where: { $0.backendId == diaBackendId }) else {
+            throw APIError.serverError(message: "Dia de destino não encontrado", requestId: "-", statusCode: 404)
+        }
+        guard let gastoLocal = self.atualCiclo.dias?[oldDiaIndex].gastos[oldGastoIndex] else {
+            throw APIError.serverError(message: "Gasto não encontrado", requestId: "-", statusCode: 404)
+        }
         
         let gastoAntigoValor = gastoLocal.valor
         let diferenca = value - gastoAntigoValor
@@ -640,30 +552,10 @@ final class CiclosViewModel: ObservableObject {
             self.allCiclos[self.index] = self.atualCiclo
         }
         
-        try? modelContext?.save()
+        try modelContext.save()
         
         Task {
-            do {
-                let request = GastoUpdateRequest(titulo: titulo, valor: value, categoria: categoria)
-                let gastoAtualizado = try await NetworkManager.shared.putGasto(gastoId: gastoId, request: request)
-                
-                await MainActor.run {
-                    gastoLocal.titulo = gastoAtualizado.titulo
-                    gastoLocal.valor = gastoAtualizado.valor
-                    gastoLocal.categoria = gastoAtualizado.categoria
-                    gastoLocal.comprovanteUrl = gastoAtualizado.comprovanteUrl
-                    gastoLocal.syncStatus = .synced
-                    gastoLocal.syncError = nil
-                    try? self.modelContext?.save()
-                }
-            } catch {
-                await MainActor.run {
-                    gastoLocal.syncStatus = .failed
-                    gastoLocal.syncError = error.localizedDescription
-                    try? self.modelContext?.save()
-                    self.showError(error)
-                }
-            }
+            await SyncManager.shared.sync()
         }
     }
 }

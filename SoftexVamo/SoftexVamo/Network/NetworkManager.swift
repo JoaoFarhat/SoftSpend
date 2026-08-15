@@ -160,6 +160,13 @@ final class NetworkManager {
         return response.map { DiaSoftex(from: $0) }
     }
     
+    func deleteDia(diaId: Int) async throws {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/dias/\(diaId)") else {
+            throw URLError(.badURL)
+        }
+        try await execute(makeRequest(url: url, method: "DELETE"))
+    }
+    
     func postGasto(request: GastoCreateRequest) async throws -> GastosDia {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/dias/\(request.dia_id)/gastos") else {
             throw URLError(.badURL)

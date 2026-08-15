@@ -19,8 +19,27 @@ final class GastosDia {
     var titulo: String
     var categoria: Categoria
     var comprovanteUrl: String?
+    var comprovanteDataCriptografado: Data?
+    var comprovanteData: Data? {
+        get {
+            guard let comprovanteDataCriptografado else { return nil }
+            return try? ComprovanteCrypto.shared.descriptografar(comprovanteDataCriptografado)
+        }
+        set {
+            if let newValue {
+                comprovanteDataCriptografado = try? ComprovanteCrypto.shared.criptografar(newValue)
+            } else {
+                comprovanteDataCriptografado = nil
+            }
+        }
+    }
+    var comprovanteParaRemover: Bool = false
     
-    var syncStatus: SyncStatus = SyncStatus.pending
+    var syncStatusRaw: String = SyncStatus.pending.rawValue
+    var syncStatus: SyncStatus {
+        get { SyncStatus(rawValue: syncStatusRaw) ?? .pending }
+        set { syncStatusRaw = newValue.rawValue }
+    }
     var syncError: String?
     var tentativas: Int = 0
     var proximaTentativaEm: Date?
@@ -36,7 +55,9 @@ final class GastosDia {
         categoria: Categoria,
         diaId: Int? = nil,
         backendId: Int? = nil,
-        comprovanteUrl: String? = nil
+        comprovanteUrl: String? = nil,
+        comprovanteData: Data? = nil,
+        comprovanteParaRemover: Bool = false
     ) {
         self.id = id
         self.clientId = clientId
@@ -46,6 +67,9 @@ final class GastosDia {
         self.diaId = diaId
         self.backendId = backendId
         self.comprovanteUrl = comprovanteUrl
+        self.comprovanteDataCriptografado = nil
+        self.comprovanteData = comprovanteData
+        self.comprovanteParaRemover = comprovanteParaRemover
     }
     
     convenience init(from dto: GastosDiaResponse) {

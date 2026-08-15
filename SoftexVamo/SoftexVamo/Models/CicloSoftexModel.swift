@@ -22,9 +22,14 @@ final class CicloSoftex {
     
     @Relationship(deleteRule: .cascade) var dias: [DiaSoftex]?
     
-    var syncStatus: SyncStatus = SyncStatus.pending
+    var syncStatus: SyncStatus {
+            get { SyncStatus(rawValue: syncStatusRaw) ?? .pending }
+            set { syncStatusRaw = newValue.rawValue }
+        }
+    var syncStatusRaw: String = SyncStatus.pending.rawValue
     var syncError: String?
     var tentativas: Int = 0
+    
     var proximaTentativaEm: Date?
     var criadoEm: Date = Date.now
     var atualizadoEm: Date = Date.now

@@ -52,4 +52,5 @@ struct GastoUpdateRequest: Codable {
     let titulo: String
     let valor: Float
     let categoria: Categoria
+    let dia_id: Int?
 }

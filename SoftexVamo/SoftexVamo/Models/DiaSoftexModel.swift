@@ -18,7 +18,11 @@ final class DiaSoftex {
     var data: Date
     var saldo: Float
     
-    var syncStatus: SyncStatus = SyncStatus.pending
+    var syncStatusRaw: String = SyncStatus.pending.rawValue
+    var syncStatus: SyncStatus {
+        get { SyncStatus(rawValue: syncStatusRaw) ?? .pending }
+        set { syncStatusRaw = newValue.rawValue }
+    }
     var syncError: String?
     var tentativas: Int = 0
     var proximaTentativaEm: Date?

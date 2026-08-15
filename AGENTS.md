@@ -23,6 +23,31 @@ Backend (checagem rápida de import e rotas):
 cd Python && python3 -c "import main; print(len(main.app.routes))"
 ```
 
+## Arquitetura iOS — SwiftData e offline-first
+
+O app usa **SwiftData** como banco local (`CicloSoftex`, `DiaSoftex`, `GastosDia`, `UserModel`).
+
+- O `ModelContainer` é registrado no `SoftexVamoApp.swift`.
+- O `ModelContext` é acessado pelas views via `@Environment(\.modelContext)` e repassado para os ViewModels.
+- Toda ação de escrita (criar, editar, excluir) altera o SwiftData primeiro e sincroniza com o backend em segundo plano.
+- Cada model tem `syncStatus` (`pending`, `syncing`, `synced`, `failed`), `syncError`, `tentativas` e `proximaTentativaEm` para backoff.
+- Deduplicação é feita pelo `clientId`, gerado no app e enviado nas requisições.
+
+### Componentes
+
+- `CiclosViewModel` — operações de ciclo/dia/gasto com persistência local.
+- `GastosViewModel` — filtro e estado da tela de gastos.
+- `SyncManager` — sincronização sob demanda com backoff exponencial.
+
+### Fluxo de sync
+
+1. A operação atualiza o model local e marca `syncStatus = .pending`.
+2. A UI reflete a mudança imediatamente.
+3. Uma `Task` em background envia a requisição.
+4. Em caso de sucesso, preenche `backendId`, `clientId` retornado e `syncStatus = .synced`.
+5. Em caso de falha, `syncStatus = .failed`, mensagem em `syncError` e `proximaTentativaEm` calculado por backoff.
+6. O `SyncManager` (chamado no `onAppear` do `MainView`) retenta itens pendentes/falhados que já podem ser sincronizados.
+
 ## Bancos de dados
 
 Existem dois: um **MySQL local** (para testes) e o **da AWS** (produção). O
@@ -87,6 +112,22 @@ AWS S3, Cloudflare R2, Supabase Storage e MinIO:
 | --- | --- | --- |
 | `ALLOWED_ORIGINS` | `https://softspend.com.br` | Origens CORS permitidas, separadas por vírgula |
 | `DOCS_ENABLED` | `false` | Se `true`, habilita `/docs`, `/redoc` e `/openapi.json` |
+
+## Deduplicação e `client_id`
+
+Para evitar criação duplicada quando o app não recebe a resposta do `POST` (ex: timeout com a requisição já processada no backend), todos os models (`Ciclo`, `Dia`, `Gasto`) têm `client_id`.
+
+- O iOS gera `clientId` (UUID) ao criar ciclo, dia ou gasto local.
+- O `client_id` é enviado nas requisições de criação.
+- O backend verifica se já existe um registro com o mesmo `client_id` e retorna o existente, em vez de criar um novo.
+- As tabelas têm unique constraints por `client_id` + entidade pai:
+  - `uix_ciclo_client_id_usuario`
+  - `uix_dia_client_id_ciclo`
+  - `uix_gasto_client_id_dia`
+
+Migrations relacionadas:
+- `a1f4c9b2d7e3_add_comprovante_key_to_gasto`
+- `3e17707010d8_add_client_id_to_ciclos_dias_gastos`
 
 ## Notas fiscais (comprovantes)
 
