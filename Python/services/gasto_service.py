@@ -14,7 +14,13 @@ def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: int):
     if dia.ciclo.id_usuario != user_id:
         raise HTTPException(status_code=403, detail="Acesso negado")
 
+    if gasto.client_id:
+        existente = gasto_repository.find_by_client_id(db, gasto.client_id, dia_id)
+        if existente:
+            return existente
+
     novo_gasto = models.Gasto(
+        client_id=gasto.client_id,
         titulo=gasto.titulo,
         valor=gasto.valor,
         categoria=gasto.categoria,

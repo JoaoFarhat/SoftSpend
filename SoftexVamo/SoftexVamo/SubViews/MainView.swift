@@ -6,10 +6,13 @@
 //
 
 import SwiftUI
+import SwiftData
 
 struct MainView: View {
     
     @EnvironmentObject var viewModel: CiclosViewModel
+    @Environment(\.modelContext) private var modelContext
+    @StateObject private var syncManager = SyncManager.shared
     @State var sheetview = false
     @State private var isExpanded = true
 
@@ -106,6 +109,11 @@ struct MainView: View {
         }
         .ignoresSafeArea(.all, edges: .bottom)
         .toolbar(.hidden, for: .navigationBar)
+        .onAppear {
+            viewModel.modelContext = modelContext
+            syncManager.modelContext = modelContext
+            Task { await syncManager.sync() }
+        }
     }
 }
 }

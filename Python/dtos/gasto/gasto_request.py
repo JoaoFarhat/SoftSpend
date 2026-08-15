@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from enums.categoria_enum import Categoria
 
 class GastoRequest(BaseModel):
+    client_id: Optional[str] = Field(default=None, max_length=50)
     titulo: str = Field(..., min_length=1, max_length=100)
     valor: float = Field(..., gt=0)
     categoria: Categoria

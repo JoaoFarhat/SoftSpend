@@ -12,6 +12,7 @@ import SwiftData
 final class CicloSoftex {
     @Attribute(.unique) var id: UUID
     
+    var clientId: String
     var backendId: Int?
     var valor_total: Float
     var gasto_total: Float
@@ -23,12 +24,15 @@ final class CicloSoftex {
     
     var syncStatus: SyncStatus = SyncStatus.pending
     var syncError: String?
+    var tentativas: Int = 0
+    var proximaTentativaEm: Date?
     var criadoEm: Date = Date.now
     var atualizadoEm: Date = Date.now
     var deletadoEm: Date?
     
     init(
         id: UUID = UUID(),
+        clientId: String = UUID().uuidString,
         valor_total: Float,
         gasto_total: Float,
         periodo: String,
@@ -37,6 +41,7 @@ final class CicloSoftex {
         dias: [DiaSoftex]? = nil
     ) {
         self.id = id
+        self.clientId = clientId
         self.valor_total = valor_total
         self.gasto_total = gasto_total
         self.periodo = periodo
@@ -47,6 +52,7 @@ final class CicloSoftex {
     
     convenience init(from dto: CicloResponse) {
         self.init(
+            clientId: dto.clientId ?? UUID().uuidString,
             valor_total: dto.valor_total,
             gasto_total: dto.gasto_total,
             periodo: dto.periodo,
@@ -61,6 +67,7 @@ final class CicloSoftex {
     func toDTO() -> CicloResponse {
         CicloResponse(
             id: backendId,
+            clientId: clientId,
             valor_total: valor_total,
             gasto_total: gasto_total,
             periodo: periodo,

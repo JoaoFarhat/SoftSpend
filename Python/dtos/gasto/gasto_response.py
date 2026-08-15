@@ -7,6 +7,7 @@ from enums.categoria_enum import Categoria
 
 class GastoResponse(BaseModel):
     id: int
+    client_id: Optional[str] = None
     titulo: str
     valor: float
     categoria: Categoria

@@ -5,6 +5,7 @@ from dtos.gasto.gasto_response import GastoResponse
 
 class DiaResponse(BaseModel):
     id: int
+    client_id: str | None
     data: datetime
     saldo: float
     gastos: List[GastoResponse]

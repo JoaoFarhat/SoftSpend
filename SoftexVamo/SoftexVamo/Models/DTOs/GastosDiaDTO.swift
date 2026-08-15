@@ -8,14 +8,26 @@ import Foundation
 
 struct GastosDiaResponse: Codable {
     let id: Int?
+    let clientId: String?
     let dia_id: Int?
     let valor: Float
     let titulo: String
     let categoria: Categoria
     let comprovante_url: String?
     
+    enum CodingKeys: String, CodingKey {
+        case id
+        case clientId = "client_id"
+        case dia_id
+        case valor
+        case titulo
+        case categoria
+        case comprovante_url
+    }
+    
     func toGastosDia() -> GastosDia {
         let gasto = GastosDia(
+            clientId: clientId ?? UUID().uuidString,
             valor: valor,
             titulo: titulo,
             categoria: categoria,
@@ -29,6 +41,7 @@ struct GastosDiaResponse: Codable {
 }
 
 struct GastoCreateRequest: Codable {
+    let client_id: String?
     let titulo: String
     let valor: Float
     let categoria: Categoria

@@ -4,6 +4,13 @@ import models
 def find_dia(db: Session, dia_id: int):
     return db.query(models.Dia).filter(models.Dia.id == dia_id).first()
 
+def find_by_client_id(db: Session, client_id: str, ciclo_id: int):
+    return (
+        db.query(models.Dia)
+        .filter(models.Dia.client_id == client_id, models.Dia.ciclo_id == ciclo_id)
+        .first()
+    )
+
 def listar_dias_por_ciclo(db: Session, ciclo_id: int, skip: int, limit: int):
     return (
         db.query(models.Dia)

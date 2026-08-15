@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SwiftData
 
 @MainActor
 final class GastosViewModel: ObservableObject {
@@ -8,8 +9,11 @@ final class GastosViewModel: ObservableObject {
     @Published var searchGastoText: String = ""
     @Published var categoriaFiltro: Categoria? = nil
     
-    init(dias: [DiaSoftex]) {
+    var modelContext: ModelContext?
+    
+    init(dias: [DiaSoftex], modelContext: ModelContext? = nil) {
         self.dias = dias
+        self.modelContext = modelContext
     }
     
     func dateToString(date: Date) -> String {

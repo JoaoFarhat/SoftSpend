@@ -12,6 +12,7 @@ import Foundation
 final class GastosDia {
     @Attribute(.unique) var id: UUID
     
+    var clientId: String
     var backendId: Int?
     var diaId: Int?
     var valor: Float
@@ -21,12 +22,15 @@ final class GastosDia {
     
     var syncStatus: SyncStatus = SyncStatus.pending
     var syncError: String?
+    var tentativas: Int = 0
+    var proximaTentativaEm: Date?
     var criadoEm: Date = Date.now
     var atualizadoEm: Date = Date.now
     var deletadoEm: Date?
     
     init(
         id: UUID = UUID(),
+        clientId: String = UUID().uuidString,
         valor: Float,
         titulo: String,
         categoria: Categoria,
@@ -35,6 +39,7 @@ final class GastosDia {
         comprovanteUrl: String? = nil
     ) {
         self.id = id
+        self.clientId = clientId
         self.valor = valor
         self.titulo = titulo
         self.categoria = categoria
@@ -45,6 +50,7 @@ final class GastosDia {
     
     convenience init(from dto: GastosDiaResponse) {
         self.init(
+            clientId: dto.clientId ?? UUID().uuidString,
             valor: dto.valor,
             titulo: dto.titulo,
             categoria: dto.categoria,
@@ -62,6 +68,7 @@ final class GastosDia {
     func toDTO() -> GastosDiaResponse {
         GastosDiaResponse(
             id: backendId,
+            clientId: clientId,
             dia_id: diaId,
             valor: valor,
             titulo: titulo,

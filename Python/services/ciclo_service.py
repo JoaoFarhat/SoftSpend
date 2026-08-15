@@ -1,4 +1,3 @@
-from sqlalchemy.orm import Session
 import models
 from dtos.ciclo import CicloResponse, CicloRequest
 from repositories import ciclo_repository
@@ -7,6 +6,7 @@ from fastapi import HTTPException
 
 def montar_ciclo(ciclo: CicloRequest) -> models.Ciclo:
     return models.Ciclo(
+        client_id=ciclo.client_id,
         valor_total=ciclo.valor_total,
         titulo=ciclo.titulo,
         periodo=ciclo.periodo,
@@ -16,10 +16,15 @@ def montar_ciclo(ciclo: CicloRequest) -> models.Ciclo:
 
 
 def criar_ciclo(db: Session, ciclo: CicloRequest, user_id: int):
+    if ciclo.client_id:
+        existente = ciclo_repository.find_by_client_id(db, ciclo.client_id, user_id)
+        if existente:
+            return existente
+
     novo_ciclo = montar_ciclo(ciclo)
     novo_ciclo.id_usuario = user_id
     return ciclo_repository.criar_ciclo(db, novo_ciclo)
-    
+
 
 def get_all_ciclos(db: Session, user_id: int, skip: int = 0, limit: int = 100):
     return ciclo_repository.get_all_ciclos(db, user_id, skip=skip, limit=limit)
@@ -34,25 +39,12 @@ def get_ciclo_by_id(db: Session, ciclo_id: int):
 
 
 def get_user_ciclo_by_id(db: Session, ciclo_id: int, user_id: int):
-
-    ciclo = ciclo_repository.get_user_ciclo_by_id(db, ciclo_id, user_id)
-
-    if not ciclo:
-        raise HTTPException(status_code=404, detail="Ciclo nao encontrado")
-        
-    return ciclo    
-
-def delete_ciclo(db: Session, ciclo_id: int, user_id: int):
-    ciclo = get_user_ciclo_by_id(db, ciclo_id, user_id)
-    
-    ciclo_repository.delete_ciclo(db, ciclo)
-
-    return None
+    return ciclo_repository.get_user_ciclo_by_id(db, ciclo_id, user_id)
 
 
-def update_ciclo(db: Session, ciclo_id: int, user_id: int, ciclo_request: CicloRequest):
-    ciclo = get_user_ciclo_by_id(db, ciclo_id, user_id)
-    
-    return ciclo_repository.update_ciclo(db, ciclo, ciclo_request)
+def incrementar_gasto_total(db: Session, ciclo_id: int, valor: float):
+    return ciclo_repository.incrementar_gasto_total(db, ciclo_id, valor)
 
 
+def delete_ciclo(db: Session, ciclo_id: int):
+    return ciclo_repository.delete_ciclo(db, ciclo_id)

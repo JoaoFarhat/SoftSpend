@@ -21,7 +21,13 @@ def criar_dia(db: Session, ciclo_id: int, dia: DiaRequest, user_id: int):
     if not ciclo:
         raise HTTPException(status_code=404, detail="Ciclo não encontrado")
 
+    if dia.client_id:
+        existente = dia_repository.find_by_client_id(db, dia.client_id, ciclo_id)
+        if existente:
+            return existente
+
     novo_dia = models.Dia(
+        client_id=dia.client_id,
         data=dia.data,
         saldo=ciclo.diaria,
         ciclo_id=ciclo_id
@@ -36,12 +42,19 @@ def criar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], user_id:
     if not ciclo:
         raise HTTPException(status_code=404, detail="Ciclo não encontrado")
 
-    novos_dias = [
-        models.Dia(data=dia.data, saldo=ciclo.diaria, ciclo_id=ciclo_id)
-        for dia in dias
-    ]
+    dias_existentes = {d.client_id: d for d in ciclo.dias if d.client_id}
+    novos_dias: List[models.Dia] = []
 
-    return dia_repository.criar_dias_lote(db, novos_dias)
+    for dia in dias:
+        if dia.client_id and dia.client_id in dias_existentes:
+            novos_dias.append(dias_existentes[dia.client_id])
+            continue
+        novos_dias.append(models.Dia(client_id=dia.client_id, data=dia.data, saldo=ciclo.diaria, ciclo_id=ciclo_id))
+
+    if novos_dias:
+        return dia_repository.criar_dias_lote(db, novos_dias)
+
+    return ciclo.dias
 
 
 def atualizar_dia(db: Session, dia_id: int, dia_request: DiaRequest, user_id: int):

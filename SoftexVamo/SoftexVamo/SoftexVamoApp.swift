@@ -19,15 +19,17 @@ struct SoftexVamoApp: App {
                 if authService.isAuthenticated {
                     MainView()
                         .environmentObject(listViewModel)
-                        .id(authService.currentUser?.id ?? 0)
+                        .id(authService.currentUser?.id)
                 } else {
                     LoginView()
-                        .environmentObject(authService)
+                        
                 }
             }
+            .environmentObject(authService)
             .onChange(of: authService.currentUser?.id) { _, _ in
                 listViewModel.reset()
             }
+            .modelContainer(for: [CicloSoftex.self, DiaSoftex.self, GastosDia.self, UserModel.self])
         }
     }
 }

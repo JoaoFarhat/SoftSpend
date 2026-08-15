@@ -7,6 +7,7 @@ class Gasto(Base):
     __tablename__ = "gastos_dia"
 
     id = Column(Integer, primary_key=True)
+    client_id = Column(String(50), index=True, nullable=True)
     dia_id = Column(Integer, ForeignKey("dias.id"))
     titulo = Column(String(100))
     valor = Column(Float)
@@ -14,6 +15,10 @@ class Gasto(Base):
     comprovante_key = Column(String(255), nullable=True)
 
     dia = relationship("Dia", back_populates="gastos")
+
+    __table_args__ = (
+        UniqueConstraint("client_id", "dia_id", name="uix_gasto_client_id_dia"),
+    )
 
     @property
     def comprovante_url(self) -> str | None:

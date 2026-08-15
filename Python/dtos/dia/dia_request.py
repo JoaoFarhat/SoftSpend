@@ -1,7 +1,9 @@
+from typing import Optional
 from datetime import datetime, date, timezone, timedelta
 from pydantic import BaseModel, Field, field_validator
 
 class DiaRequest(BaseModel):
+    client_id: Optional[str] = Field(default=None, max_length=50)
     data: datetime
 
     @field_validator("data")

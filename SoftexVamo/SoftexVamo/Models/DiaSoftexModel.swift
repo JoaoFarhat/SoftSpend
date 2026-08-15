@@ -11,24 +11,30 @@ import Foundation
 final class DiaSoftex {
     @Attribute(.unique) var id: UUID
     
+    var clientId: String
     var backendId: Int?
+    @Relationship(inverse: \CicloSoftex.dias) var ciclo: CicloSoftex?
     @Relationship(deleteRule: .cascade) var gastos: [GastosDia]
     var data: Date
     var saldo: Float
     
     var syncStatus: SyncStatus = SyncStatus.pending
     var syncError: String?
+    var tentativas: Int = 0
+    var proximaTentativaEm: Date?
     var criadoEm: Date = Date.now
     var atualizadoEm: Date = Date.now
     var deletadoEm: Date?
     
     init(
         id: UUID = UUID(),
+        clientId: String = UUID().uuidString,
         data: Date,
         saldo: Float,
         gastos: [GastosDia] = []
     ) {
         self.id = id
+        self.clientId = clientId
         self.data = data
         self.saldo = saldo
         self.gastos = gastos
@@ -36,6 +42,7 @@ final class DiaSoftex {
     
     convenience init(from dto: DiaSoftexResponse) {
         self.init(
+            clientId: dto.clientId ?? UUID().uuidString,
             data: dto.data,
             saldo: dto.saldo,
             gastos: dto.gastos?.map { GastosDia(from: $0) } ?? []
@@ -47,6 +54,7 @@ final class DiaSoftex {
     func toDTO() -> DiaSoftexResponse {
         DiaSoftexResponse(
             id: backendId,
+            clientId: clientId,
             data: data,
             saldo: saldo,
             gastos: gastos.map { $0.toDTO() }

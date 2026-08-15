@@ -4,6 +4,7 @@ from dtos.dia.dia_response import DiaResponse
 
 class CicloResponse(BaseModel):
     id: int
+    client_id: str | None
     valor_total: float
     gasto_total: float
     diaria: float

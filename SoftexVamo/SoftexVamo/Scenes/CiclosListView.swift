@@ -7,11 +7,13 @@
 
 import SwiftUI
 import Combine
+import SwiftData
 
 struct CiclosListView: View {
     @EnvironmentObject var viewModel: CiclosViewModel
     @StateObject var authService = AuthService.shared
     @StateObject var gastosViewModel = GastosViewModel(dias: [])
+    @Environment(\.modelContext) private var modelContext
     @State private var showMenu = false
     
     private var currentUser: UserModel? {
@@ -210,6 +212,9 @@ struct CiclosListView: View {
         }
         .onChange(of: viewModel.atualCiclo.dias) { _, newDias in
             gastosViewModel.dias = newDias ?? []
+        }
+        .onAppear {
+            gastosViewModel.modelContext = modelContext
         }
         .background(.backgroundCor)
         .overlay(alignment: .topTrailing) {

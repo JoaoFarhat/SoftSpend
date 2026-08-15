@@ -50,6 +50,14 @@ def get_user_ciclo_by_id(db: Session, ciclo_id: int, user_id: int):
     )
 
 
+def find_by_client_id(db: Session, client_id: str, user_id: int):
+    return (
+        db.query(models.Ciclo)
+        .filter(models.Ciclo.client_id == client_id, models.Ciclo.id_usuario == user_id)
+        .first()
+    )
+
+
 def incrementar_gasto_total(db: Session, ciclo_id: int, valor: float):
     db.query(models.Ciclo).filter(models.Ciclo.id == ciclo_id).update(
         {models.Ciclo.gasto_total: models.Ciclo.gasto_total + valor},
