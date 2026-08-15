@@ -37,8 +37,6 @@ actor SyncActor {
 
     private let logger = Logger(subsystem: "br.com.softspend", category: "SyncActor")
 
-    /// Salva o `modelContext` logando falhas em vez de silenciá-las.
-    /// Sync em background não pode mostrar UI, mas o log aparece no Console.app.
     private func salvarContexto(_ contexto: String) {
         do {
             try modelContext.save()
@@ -66,9 +64,6 @@ actor SyncActor {
 
     private func contarPendentes(agora: Date) -> Int {
         let synced = SyncStatus.synced.rawValue
-        // fetchCount é mais leve que fetch — não materializa objetos em memória.
-        // Não filtra por proximaTentativaEm aqui (Date dinâmico não vai em #Predicate);
-        // o valor serve como indicador de progresso para o loop de passadas.
         let cicloDesc = FetchDescriptor<CicloSoftex>(
             predicate: #Predicate { $0.syncStatusRaw != synced && $0.deletadoEm == nil }
         )
@@ -95,12 +90,6 @@ actor SyncActor {
             DiaLoteRequest(clientId: $0.clientId, data: $0.data)
         }
 
-        // Snapshot antes do await para detectar reedição concorrente.
-        // NOTA: O SyncActor tem seu próprio ModelContext isolado via @ModelActor.
-        // Mudanças da UI em outro context não são visíveis aqui durante o await,
-        // mas podem ser mescladas automaticamente se o store usar autosave.
-        // O snapshot captura o estado local atual; após o resume, comparamos
-        // para preservar edições do usuário feitas durante a requisição.
         let tituloAntes = ciclo.titulo
         let valorTotalAntes = ciclo.valor_total
         let diariaAntes = ciclo.diaria
@@ -277,9 +266,6 @@ actor SyncActor {
         let gastos = todos.filter { deveTentar($0, agora: agora) }
 
         for gasto in gastos {
-            // Verificação de dependência via relação: se o dia pai ainda não tem
-            // backendId, o gasto aguarda na fila. Assim que syncDias rodar e der
-            // um backendId ao dia, na próxima passada o gasto passa aqui.
             guard let diaIdReal = gasto.dia?.backendId else {
                 continue
             }
@@ -328,10 +314,6 @@ actor SyncActor {
 
     private func syncComprovantes(agora: Date) async {
         let synced = SyncStatus.synced.rawValue
-        // comprovanteData é @Transient (não persistido no banco).
-        // #Predicate só pode referenciar propriedades persistidas,
-        // então usamos comprovanteDataCriptografado no predicado e
-        // fazemos o filtro por comprovanteData em memória depois.
         let descriptor = FetchDescriptor<GastosDia>(
             predicate: #Predicate { item in
                 item.syncStatusRaw != synced &&
@@ -347,9 +329,7 @@ actor SyncActor {
             guard let backendId = gasto.backendId else { continue }
             do {
                 try await sincronizarComprovante(gasto, backendId: backendId)
-                // Só marca sucesso se não há mais comprovante pendente
-                // (pode ter sido marcado .synced por syncGastos, mas comprovante ainda pendente)
-                if gasto.comprovanteData == nil && !gasto.comprovanteParaRemover {
+                 if gasto.comprovanteData == nil && !gasto.comprovanteParaRemover {
                     marcarSucesso(gasto)
                 }
             } catch {

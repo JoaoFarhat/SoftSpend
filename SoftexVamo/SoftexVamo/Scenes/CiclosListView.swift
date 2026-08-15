@@ -215,6 +215,7 @@ struct CiclosListView: View {
         }
         .onAppear {
             gastosViewModel.modelContext = modelContext
+            gastosViewModel.dias = viewModel.atualCiclo.dias ?? []
         }
         .background(.backgroundCor)
         .overlay(alignment: .topTrailing) {
