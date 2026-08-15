@@ -9,7 +9,7 @@ import Foundation
 import SwiftData
 
 @Model
-final class CicloSoftex {
+nonisolated final class CicloSoftex {
     @Attribute(.unique) var id: UUID
     
     var clientId: String
@@ -20,17 +20,19 @@ final class CicloSoftex {
     var diaria: Float
     var titulo: String
     
-    @Relationship(deleteRule: .cascade) var dias: [DiaSoftex]?
-    
+    @Relationship(deleteRule: .cascade, inverse: \DiaSoftex.ciclo) var dias: [DiaSoftex]?
+
+    var syncStatusRaw: String = SyncStatus.pending.rawValue
+    var syncError: String?
+    var tentativas: Int = 0
+    var proximaTentativaEm: Date?
+
+    @Transient
     var syncStatus: SyncStatus {
             get { SyncStatus(rawValue: syncStatusRaw) ?? .pending }
             set { syncStatusRaw = newValue.rawValue }
         }
-    var syncStatusRaw: String = SyncStatus.pending.rawValue
-    var syncError: String?
-    var tentativas: Int = 0
     
-    var proximaTentativaEm: Date?
     var criadoEm: Date = Date.now
     var atualizadoEm: Date = Date.now
     var deletadoEm: Date?
@@ -53,6 +55,9 @@ final class CicloSoftex {
         self.diaria = diaria
         self.titulo = titulo
         self.dias = dias
+
+        self.tentativas = 0
+        self.syncStatusRaw = SyncStatus.pending.rawValue
     }
     
     convenience init(from dto: CicloResponse) {

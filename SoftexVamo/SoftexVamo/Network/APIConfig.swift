@@ -5,14 +5,14 @@
 
 import Foundation
 
-final class APIConfig {
-    static let shared = APIConfig()
-    
+final class APIConfig: Sendable {
+    nonisolated static let shared = APIConfig()
+
     private let key = "api_environment"
-    
+
     private init() {}
-    
-    var current: APIEnvironment {
+
+    nonisolated var current: APIEnvironment {
         get {
             if let raw = UserDefaults.standard.string(forKey: key),
                let env = APIEnvironment(rawValue: raw) {
@@ -28,8 +28,8 @@ final class APIConfig {
             UserDefaults.standard.set(newValue.rawValue, forKey: key)
         }
     }
-    
-    var baseURL: String {
+
+    nonisolated var baseURL: String {
         current.baseURL
     }
 }

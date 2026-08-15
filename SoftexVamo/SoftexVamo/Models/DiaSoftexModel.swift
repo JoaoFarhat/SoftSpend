@@ -8,21 +8,24 @@ import SwiftData
 import Foundation
 
 @Model
-final class DiaSoftex {
+nonisolated final class DiaSoftex {
     @Attribute(.unique) var id: UUID
     
     var clientId: String
     var backendId: Int?
-    @Relationship(inverse: \CicloSoftex.dias) var ciclo: CicloSoftex?
-    @Relationship(deleteRule: .cascade) var gastos: [GastosDia]
+    var ciclo: CicloSoftex?
+    @Relationship(deleteRule: .cascade, inverse: \GastosDia.dia) var gastos: [GastosDia]
     var data: Date
     var saldo: Float
     
     var syncStatusRaw: String = SyncStatus.pending.rawValue
+
+    @Transient
     var syncStatus: SyncStatus {
         get { SyncStatus(rawValue: syncStatusRaw) ?? .pending }
         set { syncStatusRaw = newValue.rawValue }
     }
+
     var syncError: String?
     var tentativas: Int = 0
     var proximaTentativaEm: Date?
@@ -42,6 +45,9 @@ final class DiaSoftex {
         self.data = data
         self.saldo = saldo
         self.gastos = gastos
+        
+        self.tentativas = 0
+        self.syncStatusRaw = SyncStatus.pending.rawValue
     }
     
     convenience init(from dto: DiaSoftexResponse) {

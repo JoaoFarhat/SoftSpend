@@ -9,25 +9,41 @@ import SwiftData
 import Foundation
 
 @Model
-final class GastosDia {
+nonisolated final class GastosDia {
     @Attribute(.unique) var id: UUID
     
     var clientId: String
     var backendId: Int?
-    var diaId: Int?
+    @Transient
+    var diaId: Int? {
+        return dia?.backendId
+    }
+    var dia: DiaSoftex?
     var valor: Float
     var titulo: String
     var categoria: Categoria
     var comprovanteUrl: String?
     var comprovanteDataCriptografado: Data?
+
+    @Transient
     var comprovanteData: Data? {
         get {
             guard let comprovanteDataCriptografado else { return nil }
-            return try? ComprovanteCrypto.shared.descriptografar(comprovanteDataCriptografado)
+            do {
+                return try ComprovanteCrypto.shared.descriptografar(comprovanteDataCriptografado)
+            } catch {
+                print("ComprovanteCrypto: falha ao descriptografar comprovante: \(error.localizedDescription)")
+                return nil
+            }
         }
         set {
             if let newValue {
-                comprovanteDataCriptografado = try? ComprovanteCrypto.shared.criptografar(newValue)
+                do {
+                    comprovanteDataCriptografado = try ComprovanteCrypto.shared.criptografar(newValue)
+                } catch {
+                    print("ComprovanteCrypto: falha ao criptografar comprovante: \(error.localizedDescription)")
+                    comprovanteDataCriptografado = nil
+                }
             } else {
                 comprovanteDataCriptografado = nil
             }
@@ -36,6 +52,7 @@ final class GastosDia {
     var comprovanteParaRemover: Bool = false
     
     var syncStatusRaw: String = SyncStatus.pending.rawValue
+    @Transient
     var syncStatus: SyncStatus {
         get { SyncStatus(rawValue: syncStatusRaw) ?? .pending }
         set { syncStatusRaw = newValue.rawValue }
@@ -53,7 +70,7 @@ final class GastosDia {
         valor: Float,
         titulo: String,
         categoria: Categoria,
-        diaId: Int? = nil,
+        dia: DiaSoftex? = nil,
         backendId: Int? = nil,
         comprovanteUrl: String? = nil,
         comprovanteData: Data? = nil,
@@ -64,27 +81,30 @@ final class GastosDia {
         self.valor = valor
         self.titulo = titulo
         self.categoria = categoria
-        self.diaId = diaId
+        self.dia = dia
         self.backendId = backendId
         self.comprovanteUrl = comprovanteUrl
         self.comprovanteDataCriptografado = nil
         self.comprovanteData = comprovanteData
         self.comprovanteParaRemover = comprovanteParaRemover
+
+        self.tentativas = 0
+        self.syncStatusRaw = SyncStatus.pending.rawValue
     }
-    
+
     convenience init(from dto: GastosDiaResponse) {
         self.init(
             clientId: dto.clientId ?? UUID().uuidString,
             valor: dto.valor,
             titulo: dto.titulo,
             categoria: dto.categoria,
-            diaId: dto.dia_id,
             backendId: dto.id,
             comprovanteUrl: dto.comprovante_url
         )
         self.syncStatus = .synced
     }
     
+    @Transient
     var temComprovante: Bool {
         comprovanteUrl != nil
     }
@@ -110,7 +130,7 @@ final class GastosDia {
     static let example = GastosDia(valor: 12, titulo: "Uber", categoria: .TRANSPORTE)
 }
 
-struct GastoExtraidoResponse: Codable {
+nonisolated struct GastoExtraidoResponse: Codable, Sendable {
     let titulo: String
     let valor: Float
     let categoria: Categoria

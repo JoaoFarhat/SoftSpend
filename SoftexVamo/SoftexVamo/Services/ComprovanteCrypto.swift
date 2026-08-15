@@ -14,7 +14,7 @@ enum ComprovanteCryptoError: Error {
     case invalidKeySize
 }
 
-struct ComprovanteCrypto {
+nonisolated struct ComprovanteCrypto {
     static let shared = ComprovanteCrypto()
     private let keyTag = "br.com.softspend.comprovantekey".data(using: .utf8)!
     
@@ -65,9 +65,14 @@ struct ComprovanteCrypto {
             kSecClass as String: kSecClassKey,
             kSecAttrApplicationTag as String: keyTag,
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+            kSecAttrKeyClass as String: kSecAttrKeyClassSymmetric,
+            kSecAttrKeySizeInBits as String: 256
         ]
-        SecItemDelete(query as CFDictionary)
+        let deleteStatus = SecItemDelete(query as CFDictionary)
+        if deleteStatus != errSecSuccess && deleteStatus != errSecItemNotFound {
+            print("ComprovanteCrypto: SecItemDelete retornou status inesperado \(deleteStatus)")
+        }
         let status = SecItemAdd(query as CFDictionary, nil)
         guard status == errSecSuccess else {
             throw ComprovanteCryptoError.keyNotAvailable

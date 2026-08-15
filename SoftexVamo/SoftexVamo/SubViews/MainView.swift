@@ -111,7 +111,7 @@ struct MainView: View {
         .toolbar(.hidden, for: .navigationBar)
         .onAppear {
             viewModel.modelContext = modelContext
-            syncManager.modelContext = modelContext
+            syncManager.configure(container: modelContext.container)
         }
         .refreshable {
             Task { await syncManager.sync() }

@@ -6,7 +6,7 @@
 //
 import Foundation
 
-struct GastosDiaResponse: Codable {
+nonisolated struct GastosDiaResponse: Codable, Sendable {
     let id: Int?
     let clientId: String?
     let dia_id: Int?
@@ -25,13 +25,14 @@ struct GastosDiaResponse: Codable {
         case comprovante_url
     }
     
-    func toGastosDia() -> GastosDia {
+    // Cria um GastosDia a partir do DTO.
+    // IMPORTANTE: O caller deve estabelecer a relação "dia" via "dia.gastos.append(gasto)" ou "gasto.dia = dia.
+    nonisolated func toGastosDia() -> GastosDia {
         let gasto = GastosDia(
             clientId: clientId ?? UUID().uuidString,
             valor: valor,
             titulo: titulo,
             categoria: categoria,
-            diaId: dia_id,
             comprovanteUrl: comprovante_url
         )
         gasto.backendId = id
@@ -40,7 +41,7 @@ struct GastosDiaResponse: Codable {
     }
 }
 
-struct GastoCreateRequest: Codable {
+nonisolated struct GastoCreateRequest: Codable, Sendable {
     let client_id: String?
     let titulo: String
     let valor: Float
@@ -48,7 +49,7 @@ struct GastoCreateRequest: Codable {
     let dia_id: Int
 }
 
-struct GastoUpdateRequest: Codable {
+nonisolated struct GastoUpdateRequest: Codable, Sendable {
     let titulo: String
     let valor: Float
     let categoria: Categoria

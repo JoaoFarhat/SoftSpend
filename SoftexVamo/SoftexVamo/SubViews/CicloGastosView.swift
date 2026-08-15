@@ -14,7 +14,7 @@ struct CicloGastosView: View {
     
     let action: () -> Void
     let editAction: (GastosDia, DiaSoftex) -> Void
-    let deleteAction: (Int, Int) -> Void
+    let deleteAction: (GastosDia, DiaSoftex) -> Void
     
     var body: some View {
         VStack{
@@ -124,14 +124,14 @@ struct CicloGastosView: View {
                         .padding(.top, 60)
                         .frame(maxWidth: .infinity)
                     } else {
-                        ForEach(Array(gastosViewModel.secoesExibidas.reversed().enumerated()), id: \.element.id) { index, dia in
-                            if(dia.gastos.count != 0){
-                                Section(header: createSectionHeader(dia: dia)) {
+                        ForEach(Array(gastosViewModel.secoesExibidas.reversed().enumerated()), id: \.element.id) { index, secao in
+                            if !secao.gastosFiltrados.isEmpty {
+                                Section(header: createSectionHeader(data: secao.data)) {
                                     VStack(spacing: 0) {
-                                        ForEach(Array(dia.gastos.enumerated()), id: \.element.id) { index, gasto in
-                                            createGastoCell(gasto: gasto, dia: dia)
-                                            
-                                            if index < dia.gastos.count - 1 {
+                                        ForEach(Array(secao.gastosFiltrados.enumerated()), id: \.element.id) { gastoIndex, gasto in
+                                            createGastoCell(gasto: gasto, dia: secao.dia)
+
+                                            if gastoIndex < secao.gastosFiltrados.count - 1 {
                                                 Divider()
                                                     .background(Color("textPrimary").opacity(0.08))
                                                     .padding(.horizontal, 16)
@@ -145,11 +145,16 @@ struct CicloGastosView: View {
                                     .skeleton(isLoading: ciclosViewModel.isLoading)
                                 }
                                 .onAppear {
-                                    if index == gastosViewModel.secoesExibidas.count - 1 {
-                                        Task { await ciclosViewModel.loadMoreDias(cicloId: ciclosViewModel.atualCiclo.backendId ?? 0) }
+                                    // Só carrega mais dias se o ciclo já tem
+                                    // backendId e não está sincronizando
+                                    // (evita chamar durante sync).
+                                    if index == gastosViewModel.secoesExibidas.count - 1,
+                                       let cicloId = ciclosViewModel.atualCiclo.backendId,
+                                       !ciclosViewModel.isLoadingDias {
+                                        Task { await ciclosViewModel.loadMoreDias(cicloId: cicloId) }
                                     }
                                 }
-                                
+
                             }
                         }
                     }
@@ -164,21 +169,21 @@ struct CicloGastosView: View {
             }
     }
     
-    @ViewBuilder func createSectionHeader(dia: DiaSoftex) -> some View {
+    @ViewBuilder func createSectionHeader(data: Date) -> some View {
         HStack {
-            if Calendar.current.isDateInToday(dia.data) {
+            if Calendar.current.isDateInToday(data) {
                 Text("HOJE")
                     .frame(width: 90)
                     .skeleton(isLoading: ciclosViewModel.isLoading)
-                
-                
-            } else if Calendar.current.isDateInYesterday(dia.data) {
+
+
+            } else if Calendar.current.isDateInYesterday(data) {
                 Text("ONTEM")
                     .frame(width: 90)
                     .skeleton(isLoading: ciclosViewModel.isLoading)
-                
+
             } else {
-                Text(gastosViewModel.dateToString(date: dia.data))
+                Text(gastosViewModel.dateToString(date: data))
                     .frame(width: 90)
                     .skeleton(isLoading: ciclosViewModel.isLoading)
             }
@@ -244,6 +249,18 @@ struct CicloGastosView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             editAction(gasto, dia)
+        }
+        .contextMenu {
+            Button {
+                editAction(gasto, dia)
+            } label: {
+                Label("Editar", systemImage: "pencil")
+            }
+            Button(role: .destructive) {
+                deleteAction(gasto, dia)
+            } label: {
+                Label("Excluir", systemImage: "trash")
+            }
         }
     }
 }

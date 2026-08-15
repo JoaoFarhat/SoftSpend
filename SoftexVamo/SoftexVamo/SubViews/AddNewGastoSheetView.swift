@@ -41,8 +41,7 @@ struct AddNewGastoSheetView: View {
     var canSave: Bool {
         title.isEmpty == false &&
         value > 0 &&
-        !dias.isEmpty &&
-        selectedDia.backendId != nil
+        !dias.isEmpty
     }
     
     init(dias: [DiaSoftex], gastoToEdit: GastosDia? = nil, diaDoGasto: DiaSoftex? = nil) {
@@ -551,18 +550,17 @@ struct AddNewGastoSheetView: View {
     private func salvar() {
         tarefaRefinamento?.cancel()
         isSalvando = true
-        
+
         Task {
-            defer { Task { @MainActor in isSalvando = false } }
-            
             do {
-                if let gastoToEdit, let backendId = gastoToEdit.backendId {
-                    try await viewModel.editGasto(gastoId: backendId, novoDia: selectedDia, titulo: title, value: value, categoria: selectedCategoria)
-                    
+                if let gastoToEdit {
+                    let gastoLocalId = gastoToEdit.id
+                    try await viewModel.editGasto(gastoId: gastoLocalId, novoDia: selectedDia, titulo: title, value: value, categoria: selectedCategoria)
+
                     if let data = comprovanteData {
-                        try await viewModel.anexarComprovante(gastoId: backendId, imageData: data)
+                        try await viewModel.anexarComprovante(gastoId: gastoLocalId, imageData: data)
                     } else if removerComprovanteSalvo {
-                        try await viewModel.removerComprovante(gastoId: backendId)
+                        try await viewModel.removerComprovante(gastoId: gastoLocalId)
                     }
                 } else {
                     try await viewModel.createNewGasto(
@@ -573,15 +571,16 @@ struct AddNewGastoSheetView: View {
                         comprovante: comprovanteData
                     )
                 }
-                
-                await MainActor.run { dismiss() }
+
+                // isSalvando DEVE ser resetado ANTES do dismiss().
+                // O padrão anterior usava `defer { Task { ... } }` que rodava
+                // depois do dismiss, acessando @State de uma view destruída.
+                isSalvando = false
+                dismiss()
             } catch {
-                await MainActor.run {
-                    erroExtracao = "Não foi possível salvar o gasto. Tente novamente."
-                }
-                await MainActor.run {
-                    errorManager.show(error: error)
-                }
+                isSalvando = false
+                erroExtracao = "Não foi possível salvar o gasto. Tente novamente."
+                errorManager.show(error: error)
             }
         }
     }

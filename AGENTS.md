@@ -27,17 +27,57 @@ cd Python && python3 -c "import main; print(len(main.app.routes))"
 
 O app usa **SwiftData** como banco local (`CicloSoftex`, `DiaSoftex`, `GastosDia`, `UserModel`).
 
-- O `ModelContainer` é registrado no `SoftexVamoApp.swift`.
-- O `ModelContext` é acessado pelas views via `@Environment(\.modelContext)` e repassado para os ViewModels.
-- Toda ação de escrita (criar, editar, excluir) altera o SwiftData primeiro e sincroniza com o backend em segundo plano.
-- Cada model tem `syncStatus` (`pending`, `syncing`, `synced`, `failed`), `syncError`, `tentativas` e `proximaTentativaEm` para backoff.
+- O `ModelContainer` é registrado no `SoftexVamoApp.swift` via
+  `.modelContainer(for:)`. O erro cosmético `Failed to create file; code = 2`
+  do Core Data na primeira execução é esperado — o recovery automático cria o
+  diretório e abre o store com sucesso.
+- O `ModelContext` é acessado pelas views via `@Environment(\.modelContext)` e
+  repassado para os ViewModels.
+- Toda ação de escrita (criar, editar, excluir) altera o SwiftData primeiro e
+  sincroniza com o backend em segundo plano.
+- Cada model tem `syncStatus` (`pending`, `syncing`, `synced`, `failed`),
+  `syncError`, `tentativas` e `proximaTentativaEm` para backoff.
 - Deduplicação é feita pelo `clientId`, gerado no app e enviado nas requisições.
+
+### Isolamento de actor (Swift 6 / `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`)
+
+O projeto usa `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, que faz todo tipo
+não-anotado ser implicitamente `@MainActor`. Como a sincronização roda em um
+`actor` próprio (`SyncActor`), os modelos e o protocolo `Syncavel` precisam ser
+**explicitamente `nonisolated`** para serem acessíveis de dentro do `SyncActor`:
+
+```swift
+@Model
+nonisolated final class CicloSoftex { ... }
+
+nonisolated protocol Syncavel: AnyObject { ... }
+nonisolated extension CicloSoftex: Syncavel {}
+```
+
+`ComprovanteCrypto` também é `nonisolated` porque é acessado de propriedades
+`@Transient` do `GastosDia` (que é `nonisolated`).
+
+`NetworkManager` e `APIConfig` são `Sendable` com membros `nonisolated` para
+que as chamadas de rede feitas a partir do `SyncActor` (background) não façam
+hop para o MainActor e bloqueiem a UI. Sem isso, todo `await
+NetworkManager.shared.postCiclo(...)` executado pelo `SyncActor` era
+serializado no MainActor, congelando a UI durante a sincronização.
 
 ### Componentes
 
 - `CiclosViewModel` — operações de ciclo/dia/gasto com persistência local.
 - `GastosViewModel` — filtro e estado da tela de gastos.
 - `SyncManager` — sincronização sob demanda com backoff exponencial.
+
+### Relacionamentos SwiftData
+
+- `CicloSoftex.dias` → `@Relationship(deleteRule: .cascade, inverse: \DiaSoftex.ciclo)`
+- `DiaSoftex.gastos` → `@Relationship(deleteRule: .cascade, inverse: \GastosDia.dia)`
+- `GastosDia.diaId` é `@Transient` e deriva de `dia?.backendId` — **não é
+  persistido**, eliminando a denormalização. O `syncGastos` resolve o `diaId`
+  via relação `gasto.dia?.backendId`.
+- Propriedades computadas (`syncStatus`, `comprovanteData`, `temComprovante`,
+  `diaId`) são marcadas `@Transient` para não serem persistidas pelo SwiftData.
 
 ### Fluxo de sync
 
@@ -47,6 +87,123 @@ O app usa **SwiftData** como banco local (`CicloSoftex`, `DiaSoftex`, `GastosDia
 4. Em caso de sucesso, preenche `backendId`, `clientId` retornado e `syncStatus = .synced`.
 5. Em caso de falha, `syncStatus = .failed`, mensagem em `syncError` e `proximaTentativaEm` calculado por backoff.
 6. O `SyncManager` (chamado no `onAppear` do `MainView`) retenta itens pendentes/falhados que já podem ser sincronizados.
+
+### SyncManager e SyncActor
+
+O `SyncManager` é `@MainActor` apenas para publicar `isSyncing` e
+`pendentesRestantes` na UI. O trabalho pesado roda no `SyncActor`, um
+`@ModelActor` (background) com seu próprio `ModelContext`:
+
+```
+SyncManager (@MainActor, ObservableObject)
+  └─ configure(container:) → SyncActor (@ModelActor, background)
+       └─ sync(agora:) → até 5 passadas
+            ├─ syncCiclos    (cria/edita ciclos)
+            ├─ syncDias      (cria dias, reconcilia saldo)
+            ├─ syncGastos    (cria/edita gastos, respeita dependência dia)
+            ├─ syncComprovantes (upload/delete de comprovantes)
+            └─ syncDeletions (delete em cascata: gasto → dia → ciclo)
+```
+
+**Cascata automática**: O usuário pode criar ciclo → dias → gastos totalmente
+offline (todos com `backendId == nil`). Quando a conexão restabelece, o loop de
+passadas destrava cada etapa na mesma invocação de `sync()`:
+
+1. `syncCiclos` sobe o ciclo → ciclo recebe `backendId`.
+2. `syncDias` vê `dia.ciclo?.backendId` → sobe os dias → dias recebem `backendId`.
+3. `syncGastos` vê `gasto.dia?.backendId` → sobe os gastos → gastos recebem `backendId`.
+4. `syncComprovantes` vê `gasto.backendId` → sobe os comprovantes.
+
+Cada stage só processa itens cujo pai já tem `backendId`. Itens órfãos aguardam
+na fila (`continue`) para a próxima passada.
+
+**Backoff exponencial**: base 60s, teto 3600s (1h). `marcarFalha` incrementa
+`tentativas` e seta `proximaTentativaEm`. `deveTentar` só retorna `true` se
+`proximaTentativaEm <= agora`.
+
+**Logging**: `SyncActor` usa `os.Logger` (subsystem `br.com.softspend`,
+category `SyncActor`) para logar falhas de save e dias remotos sem `backendId`.
+O helper `salvarContexto(_:)` substitui `try? modelContext.save()` — erros de
+save aparecem no Console.app em vez de serem silenciados.
+
+**Delete centralizado**: Em `syncDeletions`, o `modelContext.delete` é chamado
+uma única vez após o try/catch. Em sucesso ou 404, o item é deletado localmente.
+Em falha real, `marcarFalha` + `continue` (sem delete).
+
+**Comprovantes**: `syncComprovantes` filtra por `syncStatusRaw != synced` no
+predicado. Chama `marcarFalha` em falha (backoff) e `marcarSucesso` apenas se
+`comprovanteData == nil && !comprovanteParaRemover`. `syncGastos` também só
+marca `.synced` se não há comprovante pendente — o gasto permanece `.pending`
+até o comprovante ser processado.
+
+### ComprovanteCrypto
+
+`GastosDia.comprovanteData` é uma propriedade `@Transient` que encripta/decripta
+sob demanda usando `ComprovanteCrypto` (CryptoKit AES-GCM). O bytes criptografados
+ficam em `comprovanteDataCriptografado`. A chave simétrica de 256 bits é armazenada
+no Keychain com `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`.
+
+`ComprovanteCrypto` é `nonisolated` porque é acessado de `GastosDia` (que é
+`nonisolated`).
+
+### Pegadinhas SwiftData / SwiftUI (crashes conhecidos)
+
+Estas armadilhas já causaram crashes em produção e foram corrigidas. Mantenha
+estas regras ao modificar o código:
+
+1. **`@Transient` em `#Predicate` é fatal error em runtime.**
+   `#Predicate` é traduzido em SQL pelo SwiftData e só pode referenciar
+   propriedades persistidas (colunas reais da tabela). Usar uma propriedade
+   `@Transient` (como `comprovanteData`, `syncStatus`, `diaId`, `temComprovante`)
+   dentro de `FetchDescriptor(predicate:)` causa:
+
+   ```
+   Fatal error: Couldn't find \GastosDia.comprovanteData on GastosDia
+   with fields [...]
+   ```
+
+   **Regra**: no `#Predicate`, use sempre a propriedade persistida
+   (`comprovanteDataCriptografado`, `syncStatusRaw`). O filtro pela propriedade
+   `@Transient` deve ser feito em memória, **depois** do `fetch`.
+
+2. **Mutar `@Model` durante o body da view causa loop infinito de observação.**
+   `@Model` é observado pelo SwiftUI. Se uma computed property chamada durante
+   o `body` muta o modelo, o SwiftUI detecta a mudança → re-renderiza → chama a
+   computed property de novo → muta de novo → crash/freeze.
+
+   **Caso concreto**: `GastosViewModel.secoesExibidas` fazia
+   `diaFiltrado.gastos = gastosQueBatem` (mutava o `@Model` durante o body).
+   Corrigido com `DiaComGastosFiltrados`, um struct imutável que envolve o
+   dia e os gastos filtrados sem mutar o modelo.
+
+   **Regra**: computed properties de ViewModel chamadas em `body` nunca devem
+   mutar `@Model`. Se precisar de dados filtrados, retorne um struct value type.
+
+3. **Não fazer append manual em relacionamentos inversos.**
+   `GastosDia(dia: dia)` já seta `novoGasto.dia = dia`. Após
+   `modelContext.insert(novoGasto)`, SwiftData estabelece a relação inversa
+   automaticamente — `dia.gastos` já contém o gasto. Fazer
+   `dia.gastos.append(novoGasto)` manualmente cria uma **duplicata** na relação,
+   que causa crash de integridade quando o `SyncActor` faz merge do contexto.
+
+   **Regra**: para criar um gasto, faça apenas `GastosDia(dia: dia)` +
+   `modelContext.insert(novoGasto)`. Nunca faça append manual na relação
+   inversa. Atualize apenas campos derivados como `gasto_total`.
+
+4. **Não acessar `@State` após `dismiss()`.**
+   `defer { Task { @MainActor in isSalvando = false } }` executa **depois**
+   do `dismiss()`. Quando o sheet é destruído, o `@State` é desalocado — a
+   Task do `defer` acessa memória morta → crash.
+
+   **Regra**: sempre reset `@State` **antes** de `dismiss()`, síncrono no
+   MainActor. Nunca use `defer` com `Task` aninhada para resetar estado de UI.
+
+5. **Delete de gastos via context menu (long press).**
+   Os gastos estão em `ScrollView` + `VStack` (não em `List`), então
+   `.swipeActions` não funciona. O delete é feito via `.contextMenu` na célula
+   do gasto em `CicloGastosView`, que chama `deleteAction` →
+   `CiclosViewModel.deleteGasto(gastoID: UUID)` (soft delete + sync). O
+   `GastosViewModel.deleteGasto(dia:offsets:)` era código morto e foi removido.
 
 ## Bancos de dados
 
@@ -83,6 +240,15 @@ migration, então um banco novo pode não ter `alembic_version`. Nesse caso
 `alembic stamp 663d2dcc98c8` marca a baseline (cujo schema já existe) antes do
 `upgrade head`; sem isso a migration inicial falha tentando recriar colunas de
 `users`.
+
+Cadeia de migrations:
+
+1. `663d2dcc98c8` — baseline (users, ciclos, dias, gastos_dia).
+2. `a1f4c9b2d7e3` — adiciona `comprovante_key` em `gastos_dia`.
+3. `3e17707010d8` — adiciona `client_id` em `ciclos`, `dias` e `gastos_dia`
+   com índices e unique constraints. **Sem essa migration, qualquer rota que
+   toque `client_id` falha com** `Unknown column 'ciclos.client_id' in 'field
+   list'` (erro 1054 do MySQL).
 
 ## Variáveis de ambiente (backend)
 

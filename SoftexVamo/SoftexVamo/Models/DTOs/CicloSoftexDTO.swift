@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct CicloCreateRequest: Codable {
+nonisolated struct CicloCreateRequest: Codable, Sendable {
     let client_id: String?
     let titulo: String
     let valor_total: Float
@@ -15,14 +15,14 @@ struct CicloCreateRequest: Codable {
     let periodo: String
 }
 
-struct CicloUpdateRequest: Codable {
+nonisolated struct CicloUpdateRequest: Codable, Sendable {
     let titulo: String
     let valor_total: Float
     let diaria: Float
     let periodo: String
 }
 
-struct CicloResponse: Codable {
+nonisolated struct CicloResponse: Codable, Sendable {
     let id: Int?
     let clientId: String?
     let valor_total: Float

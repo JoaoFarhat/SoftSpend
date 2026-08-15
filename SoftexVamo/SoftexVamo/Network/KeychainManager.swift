@@ -8,11 +8,11 @@
 import Security
 import Foundation
 
-struct KeychainManager {
-    
+nonisolated struct KeychainManager {
+
     private static let tokenKey = "com.joao.softspend.jwt_token"
-    
-    static func saveToken(_ token: String) {
+
+    nonisolated static func saveToken(_ token: String) {
         guard let data = token.data(using: .utf8) else { return }
         
         let query: [String: Any] = [
@@ -25,7 +25,7 @@ struct KeychainManager {
         SecItemAdd(query as CFDictionary, nil)
     }
     
-    static func getToken() -> String? {
+    nonisolated static func getToken() -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: tokenKey,
@@ -42,7 +42,7 @@ struct KeychainManager {
         return String(data: data, encoding: .utf8)
     }
     
-    static func deleteToken() {
+    nonisolated static func deleteToken() {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: tokenKey

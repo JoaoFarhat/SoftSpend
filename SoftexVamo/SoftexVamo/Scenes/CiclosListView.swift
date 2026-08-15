@@ -175,8 +175,8 @@ struct CiclosListView: View {
                             gastoToEdit = gasto
                             diaDoGasto = dia
                             addNewGastoSheet.toggle()
-                        } deleteAction: { diaId, gastoID in
-                            Task { try await viewModel.deleteGasto(gastoID: gastoID) }
+                        } deleteAction: { gasto, _ in
+                            Task { try await viewModel.deleteGasto(gastoID: gasto.id) }
                         }
                         .id(viewModel.atualCiclo.id)
                         .environmentObject(gastosViewModel)
@@ -191,8 +191,8 @@ struct CiclosListView: View {
                             gastoToEdit = gasto
                             diaDoGasto = dia
                             addNewGastoSheet.toggle()
-                        } deleteAction: { diaId, gastoID in
-                            Task { try await viewModel.deleteGasto(gastoID: gastoID) }
+                        } deleteAction: { gasto, _ in
+                            Task { try await viewModel.deleteGasto(gastoID: gasto.id) }
                         }
                         .id(viewModel.atualCiclo.id)
                         .environmentObject(gastosViewModel)

@@ -1,6 +1,6 @@
 import Foundation
 
-struct APIErrorResponse: Codable {
+nonisolated struct APIErrorResponse: Codable, Sendable {
     let error: String?
     let request_id: String?
 }

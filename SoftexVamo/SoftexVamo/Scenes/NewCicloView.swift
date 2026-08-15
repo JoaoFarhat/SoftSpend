@@ -154,16 +154,8 @@ struct NewCicloView: View {
                                 cicloEditado.diaria = orcamento / Float(safeDayCount)
                                 
                                 let novosDias = cicloViewModel.createAllDiasLoteRequest(dayCount: dayCount, startDate: dataInicio)
-                                
-                                do {
-                                    try await cicloViewModel.editCiclo(cicloId: cicloId, ciclo: cicloEditado, dias: novosDias)
-                                } catch {
-                                    await MainActor.run {
-                                        erroSalvar = "Não foi possível salvar as alterações. Tente novamente."
-                                    }
-                                    errorManager.show(error: error)
-                                    return
-                                }
+
+                                await cicloViewModel.editCiclo(cicloId: cicloId, ciclo: cicloEditado, dias: novosDias)
                             }
                             else {
                                 do {

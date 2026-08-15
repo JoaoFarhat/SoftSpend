@@ -6,7 +6,7 @@
 //
 import Foundation
 
-enum APIEnvironment: String, CaseIterable {
+nonisolated enum APIEnvironment: String, CaseIterable, Sendable {
     case local
     case production
     

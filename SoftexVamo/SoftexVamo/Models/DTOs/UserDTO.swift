@@ -1,25 +1,25 @@
 import Foundation
 
-struct UserDTO: Codable {
+nonisolated struct UserDTO: Codable, Sendable {
     let id: Int
     let nome: String
     let username: String
     let email: String
 }
 
-struct RegisterRequest: Codable {
+nonisolated struct RegisterRequest: Codable, Sendable {
     let nome: String
     let username: String
     let email: String
     let senha: String
 }
 
-struct LoginRequest: Codable {
+nonisolated struct LoginRequest: Codable, Sendable {
     let email: String
     let senha: String
 }
 
-struct AuthResponse: Codable {
+nonisolated struct AuthResponse: Codable, Sendable {
     let id: Int
     let nome: String
     let username: String

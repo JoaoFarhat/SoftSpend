@@ -8,7 +8,7 @@
 import Foundation
 import SwiftUI
 
-enum Categoria: String, Codable, CaseIterable, Identifiable {
+nonisolated enum Categoria: String, Codable, CaseIterable, Identifiable, Sendable {
     case ALIMENTACAO = "ALIMENTACAO"
     case TRANSPORTE = "TRANSPORTE"
     case LAZER = "LAZER"

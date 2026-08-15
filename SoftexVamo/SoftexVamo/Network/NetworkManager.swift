@@ -8,29 +8,34 @@
 import Foundation
 import Combine
 
-final class NetworkManager {
+final class NetworkManager: Sendable {
+
+    nonisolated static let shared = NetworkManager()
+
+    private nonisolated let session: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 30
+        return URLSession(
+            configuration: config,
+            delegate: InsecureSessionDelegate(),
+            delegateQueue: nil
+        )
+    }()
     
-    static let shared = NetworkManager()
-    
-    private let session = URLSession(
-        configuration: .default,
-        delegate: InsecureSessionDelegate(),
-        delegateQueue: nil
-    )
-    
-    private let decoder: JSONDecoder = {
+    private nonisolated let decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601
         return d
     }()
     
-    private let encoder: JSONEncoder = {
+    private nonisolated let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.dateEncodingStrategy = .iso8601
         return e
     }()
     
-    private func makeRequest(
+    nonisolated private func makeRequest(
         url: URL,
         method: String = "GET",
         body: Data? = nil,
@@ -52,7 +57,7 @@ final class NetworkManager {
     }
     
     @discardableResult
-    private func execute(_ request: URLRequest, logout401: Bool = true) async throws -> Data {
+    nonisolated private func execute(_ request: URLRequest, logout401: Bool = true) async throws -> Data {
         let (data, response) = try await session.data(for: request)
 
         guard let http = response as? HTTPURLResponse else {
@@ -78,7 +83,7 @@ final class NetworkManager {
         return data
     }
     
-    func fetchCicloResumo(skip: Int = 0, limit: Int = 5) async throws -> [CicloSoftex] {
+    nonisolated func fetchCicloResumo(skip: Int = 0, limit: Int = 5) async throws -> [CicloSoftex] {
         guard var components = URLComponents(string: "\(APIConfig.shared.baseURL)/usuario/ciclos/resumo") else {
             throw URLError(.badURL)
         }
@@ -93,7 +98,7 @@ final class NetworkManager {
         return response.map { CicloSoftex(from: $0) }
     }
     
-    func fetchCicloById(cicloId: Int) async throws -> CicloSoftex {
+    nonisolated func fetchCicloById(cicloId: Int) async throws -> CicloSoftex {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)") else {
             throw URLError(.badURL)
         }
@@ -101,7 +106,7 @@ final class NetworkManager {
         return CicloSoftex(from: response)
     }
     
-    func fetchDias(cicloId: Int, skip: Int = 0, limit: Int = 20) async throws -> [DiaSoftex] {
+    nonisolated func fetchDias(cicloId: Int, skip: Int = 0, limit: Int = 20) async throws -> [DiaSoftex] {
         guard var components = URLComponents(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)/dias") else {
             throw URLError(.badURL)
         }
@@ -116,7 +121,7 @@ final class NetworkManager {
         return response.map { DiaSoftex(from: $0) }
     }
     
-    func postCiclo(request: CicloCreateRequest) async throws -> CicloSoftex {
+    nonisolated func postCiclo(request: CicloCreateRequest) async throws -> CicloSoftex {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos") else {
             throw URLError(.badURL)
         }
@@ -125,7 +130,7 @@ final class NetworkManager {
         return CicloSoftex(from: response)
     }
     
-    func putCiclo(cicloId: Int, request: CicloUpdateRequest) async throws -> CicloSoftex {
+    nonisolated func putCiclo(cicloId: Int, request: CicloUpdateRequest) async throws -> CicloSoftex {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)") else {
             throw URLError(.badURL)
         }
@@ -134,7 +139,7 @@ final class NetworkManager {
         return CicloSoftex(from: response)
     }
     
-    func deleteCiclo(cicloId: Int) async throws {
+    nonisolated func deleteCiclo(cicloId: Int) async throws {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)") else {
             throw URLError(.badURL)
         }
@@ -142,7 +147,7 @@ final class NetworkManager {
         try await execute(makeRequest(url: url, method: "DELETE"))
     }
     
-    func postDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex] {
+    nonisolated func postDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex] {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)/dias/lote") else {
             throw URLError(.badURL)
         }
@@ -151,7 +156,7 @@ final class NetworkManager {
         return response.map { DiaSoftex(from: $0) }
     }
     
-    func syncDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex] {
+    nonisolated func syncDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex] {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)/dias/lote") else {
             throw URLError(.badURL)
         }
@@ -160,14 +165,14 @@ final class NetworkManager {
         return response.map { DiaSoftex(from: $0) }
     }
     
-    func deleteDia(diaId: Int) async throws {
+    nonisolated func deleteDia(diaId: Int) async throws {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/dias/\(diaId)") else {
             throw URLError(.badURL)
         }
         try await execute(makeRequest(url: url, method: "DELETE"))
     }
     
-    func postGasto(request: GastoCreateRequest) async throws -> GastosDia {
+    nonisolated func postGasto(request: GastoCreateRequest) async throws -> GastosDia {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/dias/\(request.dia_id)/gastos") else {
             throw URLError(.badURL)
         }
@@ -176,7 +181,7 @@ final class NetworkManager {
         return GastosDia(from: response)
     }
     
-    func putGasto(gastoId: Int, request: GastoUpdateRequest) async throws -> GastosDia {
+    nonisolated func putGasto(gastoId: Int, request: GastoUpdateRequest) async throws -> GastosDia {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/\(gastoId)") else {
             throw URLError(.badURL)
         }
@@ -185,14 +190,14 @@ final class NetworkManager {
         return GastosDia(from: response)
     }
     
-    func deleteGasto(gastoId: Int) async throws {
+    nonisolated func deleteGasto(gastoId: Int) async throws {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/\(gastoId)") else {
             throw URLError(.badURL)
         }
         try await execute(makeRequest(url: url, method: "DELETE"))
     }
     
-    private func makeImageUploadRequest(url: URL, imageData: Data) -> URLRequest {
+    nonisolated private func makeImageUploadRequest(url: URL, imageData: Data) -> URLRequest {
         let boundary = "Boundary-\(UUID().uuidString)"
         var body = Data()
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
@@ -206,7 +211,7 @@ final class NetworkManager {
         return request
     }
     
-    func extrairGastoDeImagem(imageData: Data) async throws -> GastoExtraidoResponse {
+    nonisolated func extrairGastoDeImagem(imageData: Data) async throws -> GastoExtraidoResponse {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/extrair") else {
             throw URLError(.badURL)
         }
@@ -216,7 +221,7 @@ final class NetworkManager {
         return try decoder.decode(GastoExtraidoResponse.self, from: try await execute(request))
     }
     
-    func uploadComprovante(gastoId: Int, imageData: Data) async throws -> GastosDia {
+    nonisolated func uploadComprovante(gastoId: Int, imageData: Data) async throws -> GastosDia {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/\(gastoId)/comprovante") else {
             throw URLError(.badURL)
         }
@@ -227,7 +232,7 @@ final class NetworkManager {
         return GastosDia(from: response)
     }
     
-    func deleteComprovante(gastoId: Int) async throws -> GastosDia {
+    nonisolated func deleteComprovante(gastoId: Int) async throws -> GastosDia {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/\(gastoId)/comprovante") else {
             throw URLError(.badURL)
         }
@@ -236,7 +241,7 @@ final class NetworkManager {
         return response.toGastosDia()
     }
     
-    func login(dados: LoginRequest) async throws -> AuthResponse {
+    nonisolated func login(dados: LoginRequest) async throws -> AuthResponse {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/login") else {
             throw URLError(.badURL)
         }
@@ -244,7 +249,7 @@ final class NetworkManager {
         return try decoder.decode(AuthResponse.self, from: try await execute(request, logout401: false))
     }
 
-    func register(dados: RegisterRequest) async throws -> AuthResponse {
+    nonisolated func register(dados: RegisterRequest) async throws -> AuthResponse {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/register") else {
             throw URLError(.badURL)
         }
@@ -252,7 +257,7 @@ final class NetworkManager {
         return try decoder.decode(AuthResponse.self, from: try await execute(request, logout401: false))
     }
     
-    func deleteAccount() async throws {
+    nonisolated func deleteAccount() async throws {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/conta") else {
             throw URLError(.badURL)
         }

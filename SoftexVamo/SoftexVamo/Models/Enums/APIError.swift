@@ -6,7 +6,7 @@
 //
 import Foundation
 
-enum APIError: LocalizedError {
+nonisolated enum APIError: LocalizedError, Sendable {
     case serverError(message: String, requestId: String, statusCode: Int)
     case badURL
     case authentication

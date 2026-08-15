@@ -7,7 +7,7 @@
 
 import Foundation
 
-struct DiaSoftexResponse: Codable {
+nonisolated struct DiaSoftexResponse: Codable, Sendable {
     let id: Int?
     let clientId: String?
     let data: Date
@@ -22,12 +22,12 @@ struct DiaSoftexResponse: Codable {
         case gastos
     }
     
-    func toDiaSoftex() -> DiaSoftex {
+    nonisolated func toDiaSoftex() -> DiaSoftex {
         DiaSoftex(from: self)
     }
 }
 
-struct DiaLoteRequest: Codable {
+nonisolated struct DiaLoteRequest: Codable, Sendable {
     let clientId: String?
     let data: Date
     
