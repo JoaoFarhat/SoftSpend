@@ -5,7 +5,7 @@ from dtos.gasto import GastoRequest
 from repositories import gasto_repository, dia_repository, ciclo_repository
 from services import storage_service
 
-def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: int):
+def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: str):
     dia = dia_repository.find_dia(db, dia_id)
 
     if not dia:
@@ -32,7 +32,7 @@ def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: int):
 
     return gasto_repository.criar_gasto(db, novo_gasto)
 
-def atualizar_gasto(db: Session, gasto_id: int, gasto_request: GastoRequest, user_id: int):
+def atualizar_gasto(db: Session, gasto_id: int, gasto_request: GastoRequest, user_id: str):
     gasto = gasto_repository.find_gasto(db, gasto_id)
 
     if not gasto:
@@ -76,7 +76,7 @@ def atualizar_gasto(db: Session, gasto_id: int, gasto_request: GastoRequest, use
     return gasto
 
 
-def remover_gasto(db: Session, gasto_id: int, user_id: int):
+def remover_gasto(db: Session, gasto_id: int, user_id: str):
     gasto = gasto_repository.find_gasto(db, gasto_id)
 
     if not gasto:
@@ -95,7 +95,7 @@ def remover_gasto(db: Session, gasto_id: int, user_id: int):
     return None
 
 
-def _buscar_gasto_do_usuario(db: Session, gasto_id: int, user_id: int) -> models.Gasto:
+def _buscar_gasto_do_usuario(db: Session, gasto_id: int, user_id: str) -> models.Gasto:
     gasto = gasto_repository.find_gasto(db, gasto_id)
 
     if not gasto:
@@ -107,7 +107,7 @@ def _buscar_gasto_do_usuario(db: Session, gasto_id: int, user_id: int) -> models
     return gasto
 
 
-def anexar_comprovante(db: Session, gasto_id: int, conteudo: bytes, content_type: str, user_id: int):
+def anexar_comprovante(db: Session, gasto_id: int, conteudo: bytes, content_type: str, user_id: str):
     """Sobe a nota fiscal e vincula ao gasto, substituindo a anterior se existir."""
     if not storage_service.esta_configurado():
         raise HTTPException(status_code=503, detail="Armazenamento de comprovantes indisponível")
@@ -123,7 +123,7 @@ def anexar_comprovante(db: Session, gasto_id: int, conteudo: bytes, content_type
     return gasto
 
 
-def remover_comprovante(db: Session, gasto_id: int, user_id: int):
+def remover_comprovante(db: Session, gasto_id: int, user_id: str):
     gasto = _buscar_gasto_do_usuario(db, gasto_id, user_id)
     key = gasto.comprovante_key
 

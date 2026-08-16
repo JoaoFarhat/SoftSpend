@@ -8,7 +8,7 @@ def criar_ciclo(db: Session, ciclo: models.Ciclo):
     db.refresh(ciclo)
     return ciclo
 
-def get_all_ciclos(db: Session, user_id: int, skip: int = 0, limit: int = 100):
+def get_all_ciclos(db: Session, user_id: str, skip: int = 0, limit: int = 100):
     return (
         db.query(models.Ciclo)
         .options(
@@ -21,7 +21,7 @@ def get_all_ciclos(db: Session, user_id: int, skip: int = 0, limit: int = 100):
         .all()
     )
 
-def get_ciclos_resumo(db: Session, user_id: int, skip: int = 0, limit: int = 1000):
+def get_ciclos_resumo(db: Session, user_id: str, skip: int = 0, limit: int = 1000):
     return (
         db.query(models.Ciclo)
         .filter(models.Ciclo.id_usuario == user_id)
@@ -42,7 +42,7 @@ def get_ciclo_by_id(db: Session, ciclo_id: int):
         .first()
     )
 
-def get_user_ciclo_by_id(db: Session, ciclo_id: int, user_id: int):
+def get_user_ciclo_by_id(db: Session, ciclo_id: int, user_id: str):
     return (
         db.query(models.Ciclo)
         .filter(models.Ciclo.id == ciclo_id, models.Ciclo.id_usuario == user_id)
@@ -50,7 +50,7 @@ def get_user_ciclo_by_id(db: Session, ciclo_id: int, user_id: int):
     )
 
 
-def find_by_client_id(db: Session, client_id: str, user_id: int):
+def find_by_client_id(db: Session, client_id: str, user_id: str):
     return (
         db.query(models.Ciclo)
         .filter(models.Ciclo.client_id == client_id, models.Ciclo.id_usuario == user_id)

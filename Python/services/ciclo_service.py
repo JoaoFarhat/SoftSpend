@@ -15,7 +15,7 @@ def montar_ciclo(ciclo: CicloRequest) -> models.Ciclo:
     )
 
 
-def criar_ciclo(db: Session, ciclo: CicloRequest, user_id: int):
+def criar_ciclo(db: Session, ciclo: CicloRequest, user_id: str):
     if ciclo.client_id:
         existente = ciclo_repository.find_by_client_id(db, ciclo.client_id, user_id)
         if existente:
@@ -26,11 +26,11 @@ def criar_ciclo(db: Session, ciclo: CicloRequest, user_id: int):
     return ciclo_repository.criar_ciclo(db, novo_ciclo)
 
 
-def get_all_ciclos(db: Session, user_id: int, skip: int = 0, limit: int = 100):
+def get_all_ciclos(db: Session, user_id: str, skip: int = 0, limit: int = 100):
     return ciclo_repository.get_all_ciclos(db, user_id, skip=skip, limit=limit)
 
 
-def get_ciclos_resumo(db: Session, user_id: int, skip: int = 0, limit: int = 1000):
+def get_ciclos_resumo(db: Session, user_id: str, skip: int = 0, limit: int = 1000):
     return ciclo_repository.get_ciclos_resumo(db, user_id, skip=skip, limit=limit)
 
 
@@ -38,7 +38,7 @@ def get_ciclo_by_id(db: Session, ciclo_id: int):
     return ciclo_repository.get_ciclo_by_id(db, ciclo_id)
 
 
-def get_user_ciclo_by_id(db: Session, ciclo_id: int, user_id: int):
+def get_user_ciclo_by_id(db: Session, ciclo_id: int, user_id: str):
     return ciclo_repository.get_user_ciclo_by_id(db, ciclo_id, user_id)
 
 

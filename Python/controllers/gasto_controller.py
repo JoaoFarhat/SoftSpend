@@ -14,19 +14,19 @@ TAMANHO_MAXIMO_IMAGEM = 5 * 1024 * 1024
 
 @router.post("/dias/{dia_id}/gastos", response_model=GastoResponse)
 @limiter.limit("60/minute")
-def criar_gasto(request: Request, dia_id: int, gasto: GastoRequest, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
+def criar_gasto(request: Request, dia_id: int, gasto: GastoRequest, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
     return gasto_service.criar_gasto(db, dia_id, gasto, user_id)
 
 
 @router.put("/gastos/{gasto_id}", response_model=GastoResponse)
 @limiter.limit("60/minute")
-def atualizar_gasto(request: Request, gasto_id: int, gasto: GastoRequest, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
+def atualizar_gasto(request: Request, gasto_id: int, gasto: GastoRequest, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
     return gasto_service.atualizar_gasto(db, gasto_id, gasto, user_id)
 
 
 @router.delete("/gastos/{gasto_id}", status_code=204)
 @limiter.limit("20/minute")
-def deletar_gasto(request: Request, gasto_id: int, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
+def deletar_gasto(request: Request, gasto_id: int, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
     return gasto_service.remover_gasto(db, gasto_id, user_id)
 
 
@@ -44,7 +44,7 @@ async def _ler_imagem(imagem: UploadFile) -> bytes:
 
 @router.post("/gastos/extrair", response_model=GastoExtraidoResponse)
 @limiter.limit("20/minute")
-async def extrair_gasto_de_imagem(request: Request, imagem: UploadFile = File(...), user_id: int = Depends(get_current_user_id)):
+async def extrair_gasto_de_imagem(request: Request, imagem: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
     conteudo = await _ler_imagem(imagem)
 
     try:
@@ -63,7 +63,7 @@ async def anexar_comprovante(
     gasto_id: int,
     imagem: UploadFile = File(...),
     db: Session = Depends(get_db),
-    user_id: int = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id),
 ):
     conteudo = await _ler_imagem(imagem)
 
@@ -74,5 +74,5 @@ async def anexar_comprovante(
 
 @router.delete("/gastos/{gasto_id}/comprovante", response_model=GastoResponse)
 @limiter.limit("30/minute")
-def remover_comprovante(request: Request, gasto_id: int, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
+def remover_comprovante(request: Request, gasto_id: int, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
     return gasto_service.remover_comprovante(db, gasto_id, user_id)

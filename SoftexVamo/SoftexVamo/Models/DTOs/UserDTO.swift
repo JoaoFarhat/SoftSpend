@@ -1,7 +1,7 @@
 import Foundation
 
 nonisolated struct UserDTO: Codable, Sendable {
-    let id: Int
+    let id: String
     let nome: String
     let username: String
     let email: String
@@ -20,7 +20,7 @@ nonisolated struct LoginRequest: Codable, Sendable {
 }
 
 nonisolated struct AuthResponse: Codable, Sendable {
-    let id: Int
+    let id: String
     let nome: String
     let username: String
     let email: String

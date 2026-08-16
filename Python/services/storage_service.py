@@ -67,11 +67,11 @@ def _conteudo_para_jpeg(conteudo: bytes) -> tuple[bytes, str]:
     return buffer.getvalue(), "image/jpeg"
 
 
-def _montar_key(user_id: int, gasto_id: int, extensao: str) -> str:
+def _montar_key(user_id: str, gasto_id: int, extensao: str) -> str:
     return f"comprovantes/{user_id}/{gasto_id}-{uuid.uuid4().hex[:12]}.{extensao}"
 
 
-def salvar_comprovante(user_id: int, gasto_id: int, conteudo: bytes, content_type: str) -> str:
+def salvar_comprovante(user_id: str, gasto_id: int, conteudo: bytes, content_type: str) -> str:
     if not _client:
         raise RuntimeError("Storage de comprovantes nao configurado")
 

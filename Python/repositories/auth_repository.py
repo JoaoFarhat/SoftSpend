@@ -11,7 +11,7 @@ def buscar_por_username(db: Session, username: str) -> models.User | None:
     return db.query(models.User).filter(models.User.username == username).first()
 
 
-def buscar_por_id(db: Session, user_id: int) -> models.User | None:
+def buscar_por_id(db: Session, user_id: str) -> models.User | None:
     return db.query(models.User).filter(models.User.id == user_id).first()
 
 
@@ -22,7 +22,7 @@ def criar_usuario(db: Session, usuario: models.User) -> models.User:
     return usuario
 
 
-def excluir_usuario_por_id(db: Session, user_id: int) -> None:
+def excluir_usuario_por_id(db: Session, user_id: str) -> None:
     usuario = buscar_por_id(db, user_id)
     if not usuario:
         raise ValueError("Usuario nao encontrado")

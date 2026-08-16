@@ -11,15 +11,16 @@ import SwiftData
 @Model
 nonisolated final class CicloSoftex {
     @Attribute(.unique) var id: UUID
-    
+
     var clientId: String
     var backendId: Int?
+    var userId: String
     var valor_total: Float
     var gasto_total: Float
     var periodo: String
     var diaria: Float
     var titulo: String
-    
+
     @Relationship(deleteRule: .cascade, inverse: \DiaSoftex.ciclo) var dias: [DiaSoftex]?
 
     var syncStatusRaw: String = SyncStatus.pending.rawValue
@@ -40,6 +41,7 @@ nonisolated final class CicloSoftex {
     init(
         id: UUID = UUID(),
         clientId: String = UUID().uuidString,
+        userId: String = "",
         valor_total: Float,
         gasto_total: Float,
         periodo: String,
@@ -49,6 +51,7 @@ nonisolated final class CicloSoftex {
     ) {
         self.id = id
         self.clientId = clientId
+        self.userId = userId
         self.valor_total = valor_total
         self.gasto_total = gasto_total
         self.periodo = periodo

@@ -249,6 +249,18 @@ Cadeia de migrations:
    com índices e unique constraints. **Sem essa migration, qualquer rota que
    toque `client_id` falha com** `Unknown column 'ciclos.client_id' in 'field
    list'` (erro 1054 do MySQL).
+4. `b2c4d6e8f0a1` — muda `users.id` de Integer auto-increment para String(36)
+   UUID. Gera UUIDs para usuários existentes e atualiza `ciclos.id_usuario`.
+   **Sem downgrade** — UUIDs não podem ser revertidos para inteiros sequenciais.
+
+## Isolamento por usuário (UUID)
+
+O `User.id` no backend é UUID string. Cada usuário tem identificador globalmente
+único — impossível colidir entre ambientes (dev/prod). No iOS, `CicloSoftex`
+tem `userId: String` que é setado a partir do usuário autenticado. Todas as
+queries SwiftData (fetch, sync, dedup) filtram por `userId`. Isso elimina o
+vazamento de dados entre usuários no mesmo dispositivo **sem precisar deletar
+dados no logout** — dados offline pendentes de sync são preservados.
 
 ## Variáveis de ambiente (backend)
 

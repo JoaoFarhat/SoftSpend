@@ -10,17 +10,17 @@ import SwiftData
 
 @Model
 final class UserModel {
-    var id: Int
+    var id: String
     var nome: String
     var username: String
     var email: String
-    
+
     var syncStatus: SyncStatus = SyncStatus.synced
     var criadoEm: Date = Date.now
     var atualizadoEm: Date = Date.now
-    
+
     init(
-        id: Int,
+        id: String,
         nome: String,
         username: String,
         email: String
@@ -30,7 +30,7 @@ final class UserModel {
         self.username = username
         self.email = email
     }
-    
+
     convenience init(from dto: UserDTO) {
         self.init(
             id: dto.id,

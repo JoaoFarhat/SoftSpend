@@ -43,7 +43,7 @@ def login(request: Request, dados: LoginRequest, db: Session = Depends(get_db)):
 
 @router.delete("/conta", status_code=204)
 @limiter.limit("10/minute")
-def excluir_conta(request: Request, db: Session = Depends(get_db), user_id: int = Depends(get_current_user_id)):
+def excluir_conta(request: Request, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
     auth_service.excluir_conta(db, user_id)
     return None
 

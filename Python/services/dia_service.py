@@ -6,7 +6,7 @@ from dtos.dia import DiaRequest
 from repositories import dia_repository, ciclo_repository
 
 
-def listar_dias_por_ciclo(db: Session, ciclo_id: int, user_id: int, skip: int, limit: int):
+def listar_dias_por_ciclo(db: Session, ciclo_id: int, user_id: str, skip: int, limit: int):
     ciclo = ciclo_repository.get_user_ciclo_by_id(db, ciclo_id, user_id)
 
     if not ciclo:
@@ -15,7 +15,7 @@ def listar_dias_por_ciclo(db: Session, ciclo_id: int, user_id: int, skip: int, l
     return dia_repository.listar_dias_por_ciclo(db, ciclo_id, skip, limit)
 
 
-def criar_dia(db: Session, ciclo_id: int, dia: DiaRequest, user_id: int):
+def criar_dia(db: Session, ciclo_id: int, dia: DiaRequest, user_id: str):
     ciclo = ciclo_repository.get_user_ciclo_by_id(db, ciclo_id, user_id)
 
     if not ciclo:
@@ -36,7 +36,7 @@ def criar_dia(db: Session, ciclo_id: int, dia: DiaRequest, user_id: int):
     return dia_repository.criar_dia(db, novo_dia)
 
 
-def criar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], user_id: int):
+def criar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], user_id: str):
     ciclo = ciclo_repository.get_user_ciclo_by_id(db, ciclo_id, user_id)
 
     if not ciclo:
@@ -57,7 +57,7 @@ def criar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], user_id:
     return ciclo.dias
 
 
-def atualizar_dia(db: Session, dia_id: int, dia_request: DiaRequest, user_id: int):
+def atualizar_dia(db: Session, dia_id: int, dia_request: DiaRequest, user_id: str):
     dia = dia_repository.find_dia(db, dia_id)
 
     if not dia:
@@ -71,7 +71,7 @@ def atualizar_dia(db: Session, dia_id: int, dia_request: DiaRequest, user_id: in
     return dia_repository.atualizar_dia(db, dia)
 
 
-def sincronizar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], user_id: int):
+def sincronizar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], user_id: str):
     ciclo = ciclo_repository.get_user_ciclo_by_id(db, ciclo_id, user_id)
 
     if not ciclo:
@@ -108,7 +108,7 @@ def sincronizar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], us
     return ciclo.dias
 
 
-def remover_dia(db: Session, dia_id: int, user_id: int):
+def remover_dia(db: Session, dia_id: int, user_id: str):
     dia = dia_repository.find_dia(db, dia_id)
 
     if not dia:

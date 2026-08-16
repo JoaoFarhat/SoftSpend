@@ -64,11 +64,9 @@ final class NetworkManager: Sendable {
             throw APIError.unknown
         }
 
-        if http.statusCode == 401 {
-            if logout401 {
-                Task { @MainActor in
-                    AuthService.shared.logout()
-                }
+        if http.statusCode == 401, logout401 {
+            Task { @MainActor in
+                AuthService.shared.logout()
             }
             throw APIError.authentication
         }

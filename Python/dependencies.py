@@ -25,5 +25,5 @@ def get_current_user(
     return usuario
 
 
-def get_current_user_id(usuario = Depends(get_current_user)) -> int:
+def get_current_user_id(usuario = Depends(get_current_user)) -> str:
     return usuario.id

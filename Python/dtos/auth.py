@@ -31,7 +31,7 @@ class LoginRequest(BaseModel):
 
 
 class AuthResponse(BaseModel):
-    id: int
+    id: str
     nome: str
     username: str
     email: str

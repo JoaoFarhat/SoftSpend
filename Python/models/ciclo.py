@@ -14,7 +14,7 @@ class Ciclo(Base):
     periodo = Column(String(100))
     diaria = Column(Float)
 
-    id_usuario = Column(Integer, ForeignKey("users.id"))
+    id_usuario = Column(String(36), ForeignKey("users.id"))
 
     usuario = relationship("User", back_populates="ciclos")
     dias = relationship("Dia", back_populates="ciclo", cascade="all, delete-orphan")

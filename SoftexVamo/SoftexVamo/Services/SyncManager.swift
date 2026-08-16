@@ -23,10 +23,12 @@ final class SyncManager: ObservableObject {
     func sync() async {
         guard let syncActor, !isSyncing else { return }
         guard NetworkMonitor.shared.isConnected else { return }
+        let userId = AuthService.shared.currentUser?.id ?? ""
+        guard !userId.isEmpty else { return }
         isSyncing = true
         defer { isSyncing = false }
         let agora = Date()
-        let restantes = await syncActor.sync(agora: agora)
+        let restantes = await syncActor.sync(agora: agora, userId: userId)
         pendentesRestantes = restantes
     }
 
@@ -45,33 +47,33 @@ actor SyncActor {
         }
     }
 
-    func sync(agora: Date) async -> Int {
+    func sync(agora: Date, userId: String) async -> Int {
         let maxPassadas = 5
 
         var pendentesDepois = 0
         for _ in 0..<maxPassadas {
-            let pendentesAntes = contarPendentes(agora: agora)
-            await syncCiclos(agora: agora)
-            await syncDias(agora: agora)
-            await syncGastos(agora: agora)
-            await syncComprovantes(agora: agora)
-            await syncDeletions(agora: agora)
-            pendentesDepois = contarPendentes(agora: agora)
+            let pendentesAntes = contarPendentes(agora: agora, userId: userId)
+            await syncCiclos(agora: agora, userId: userId)
+            await syncDias(agora: agora, userId: userId)
+            await syncGastos(agora: agora, userId: userId)
+            await syncComprovantes(agora: agora, userId: userId)
+            await syncDeletions(agora: agora, userId: userId)
+            pendentesDepois = contarPendentes(agora: agora, userId: userId)
             if pendentesDepois == 0 || pendentesDepois >= pendentesAntes { break }
         }
         return pendentesDepois
     }
 
-    private func contarPendentes(agora: Date) -> Int {
+    private func contarPendentes(agora: Date, userId: String) -> Int {
         let synced = SyncStatus.synced.rawValue
         let cicloDesc = FetchDescriptor<CicloSoftex>(
-            predicate: #Predicate { $0.syncStatusRaw != synced && $0.deletadoEm == nil }
+            predicate: #Predicate { $0.syncStatusRaw != synced && $0.deletadoEm == nil && $0.userId == userId }
         )
         let diaDesc = FetchDescriptor<DiaSoftex>(
-            predicate: #Predicate { $0.syncStatusRaw != synced && $0.deletadoEm == nil }
+            predicate: #Predicate { $0.syncStatusRaw != synced && $0.deletadoEm == nil && $0.ciclo?.userId == userId }
         )
         let gastoDesc = FetchDescriptor<GastosDia>(
-            predicate: #Predicate { $0.syncStatusRaw != synced && $0.deletadoEm == nil }
+            predicate: #Predicate { $0.syncStatusRaw != synced && $0.deletadoEm == nil && $0.dia?.ciclo?.userId == userId }
         )
         let ciclos = (try? modelContext.fetchCount(cicloDesc)) ?? 0
         let dias = (try? modelContext.fetchCount(diaDesc)) ?? 0
@@ -184,10 +186,10 @@ actor SyncActor {
         item.syncError = nil
     }
 
-    private func syncCiclos(agora: Date) async {
+    private func syncCiclos(agora: Date, userId: String) async {
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<CicloSoftex>(
-            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm == nil },
+            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm == nil && item.userId == userId },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
         let todos = (try? modelContext.fetch(descriptor)) ?? []
@@ -219,10 +221,10 @@ actor SyncActor {
         salvarContexto("syncCiclos")
     }
 
-    private func syncDias(agora: Date) async {
+    private func syncDias(agora: Date, userId: String) async {
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<DiaSoftex>(
-            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm == nil },
+            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm == nil && item.ciclo?.userId == userId },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
         let todos = (try? modelContext.fetch(descriptor)) ?? []
@@ -256,10 +258,10 @@ actor SyncActor {
         salvarContexto("syncDias")
     }
 
-    private func syncGastos(agora: Date) async {
+    private func syncGastos(agora: Date, userId: String) async {
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<GastosDia>(
-            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm == nil },
+            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm == nil && item.dia?.ciclo?.userId == userId },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
         let todos = (try? modelContext.fetch(descriptor)) ?? []
@@ -312,13 +314,14 @@ actor SyncActor {
         salvarContexto("syncGastos")
     }
 
-    private func syncComprovantes(agora: Date) async {
+    private func syncComprovantes(agora: Date, userId: String) async {
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<GastosDia>(
             predicate: #Predicate { item in
                 item.syncStatusRaw != synced &&
                 (item.comprovanteDataCriptografado != nil || item.comprovanteParaRemover) &&
-                item.deletadoEm == nil
+                item.deletadoEm == nil &&
+                item.dia?.ciclo?.userId == userId
             },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
@@ -379,11 +382,11 @@ actor SyncActor {
         return false
     }
 
-    private func syncDeletions(agora: Date) async {
+    private func syncDeletions(agora: Date, userId: String) async {
         let synced = SyncStatus.synced.rawValue
 
         let gastoDescriptor = FetchDescriptor<GastosDia>(
-            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm != nil },
+            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm != nil && item.dia?.ciclo?.userId == userId },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
 
@@ -408,7 +411,7 @@ actor SyncActor {
         }
 
         let diaDescriptor = FetchDescriptor<DiaSoftex>(
-            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm != nil },
+            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm != nil && item.ciclo?.userId == userId },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
         let dias = ((try? modelContext.fetch(diaDescriptor)) ?? []).filter { deveTentar($0, agora: agora) }
@@ -433,7 +436,7 @@ actor SyncActor {
         }
 
         let cicloDescriptor = FetchDescriptor<CicloSoftex>(
-            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm != nil },
+            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm != nil && item.userId == userId },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
         let ciclos = ((try? modelContext.fetch(cicloDescriptor)) ?? []).filter { deveTentar($0, agora: agora) }

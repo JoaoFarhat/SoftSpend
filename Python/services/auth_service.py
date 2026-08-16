@@ -31,11 +31,11 @@ JWT_ISSUER = os.getenv("JWT_ISSUER", "softspend-api")
 JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "softspend-mobile")
 
 
-def criar_token(user_id: int) -> str:
+def criar_token(user_id: str) -> str:
     now = datetime.utcnow()
     expire = now + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
     payload = {
-        "sub": str(user_id),
+        "sub": user_id,
         "iat": now,
         "exp": expire,
         "iss": JWT_ISSUER,
@@ -72,7 +72,7 @@ def login(db: Session, dados: LoginRequest) -> tuple[models.User, str]:
     return usuario, token
 
 
-def validar_token(token: str) -> int | None:
+def validar_token(token: str) -> str | None:
     try:
         payload = jwt.decode(
             token,
@@ -81,11 +81,10 @@ def validar_token(token: str) -> int | None:
             issuer=JWT_ISSUER,
             audience=JWT_AUDIENCE,
         )
-        user_id = int(payload.get("sub"))
-        return user_id
+        return payload.get("sub")
     except JWTError:
         return None
 
 
-def excluir_conta(db: Session, user_id: int) -> None:
+def excluir_conta(db: Session, user_id: str) -> None:
     auth_repository.excluir_usuario_por_id(db, user_id)

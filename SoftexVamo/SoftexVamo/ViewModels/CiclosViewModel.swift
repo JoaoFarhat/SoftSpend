@@ -65,6 +65,15 @@ final class CiclosViewModel: ObservableObject {
         self.hasMoreDias = true
     }
 
+    func limparDadosLocais() {
+        guard let modelContext else { return }
+        try? modelContext.delete(model: GastosDia.self)
+        try? modelContext.delete(model: DiaSoftex.self)
+        try? modelContext.delete(model: CicloSoftex.self)
+        try? modelContext.delete(model: UserModel.self)
+        try? modelContext.save()
+    }
+
     func fetchCiclosResumo() async {
         await loadCiclos(append: false)
     }
@@ -75,17 +84,11 @@ final class CiclosViewModel: ObservableObject {
         await loadCiclos(append: true)
     }
     
-    /// Remove ciclos locais duplicados por backendId E por clientId.
-    /// Bug anterior inseria um ciclo "detached" no context a cada abertura,
-    /// criando cópias com o mesmo backendId. Também deduplica ciclos offline
-    /// (sem backendId) por clientId — quando o sync falha e o app reinicia,
-    /// pode haver cópias com o mesmo clientId mas sem backendId.
-    /// Mantém o mais antigo (menor criadoEm) e deleta os demais.
-    /// Dias/gastos das duplicatas são transferidos para o ciclo original.
-    private func deduplicarCiclosLocais() {
+     private func deduplicarCiclosLocais() {
         guard let context = modelContext else { return }
+        let userId = currentUser?.id ?? ""
         let descriptor = FetchDescriptor<CicloSoftex>(
-            predicate: #Predicate { $0.deletadoEm == nil },
+            predicate: #Predicate { $0.deletadoEm == nil && $0.userId == userId },
             sortBy: [SortDescriptor(\.criadoEm, order: .forward)]
         )
         let todos: [CicloSoftex]
@@ -100,11 +103,6 @@ final class CiclosViewModel: ObservableObject {
             return
         }
 
-        // Deduplica por backendId (ciclos já sincronizados) OU por clientId
-        // (ciclos offline que podem ter sido duplicados por sync parcial).
-        // Ciclos com backendId só deduplicam por backendId; ciclos sem
-        // backendId (offline) só deduplicam por clientId. Misturar as duas
-        // chaves pode marcar um ciclo legítimo como duplicata.
         var originalPorBackendId: [Int: CicloSoftex] = [:]
         var originalPorClientId: [String: CicloSoftex] = [:]
         var duplicatas: [CicloSoftex] = []
@@ -162,20 +160,17 @@ final class CiclosViewModel: ObservableObject {
         
         isLoading = true
         
-        // Deduplica ciclos locais por backendId. Bug anterior (ciclo detached
-        // auto-inserido pelo SwiftData) criava duplicatas a cada abertura.
-        // Mantém o primeiro (mais antigo) e remove os demais. Dias associados
-        // às duplicatas serão re-fetchados pelo loadMoreDias.
         if !append {
             deduplicarCiclosLocais()
         }
         
+        let userId = currentUser?.id ?? ""
         let descriptor = FetchDescriptor<CicloSoftex>(
-            predicate: #Predicate { $0.deletadoEm == nil },
+            predicate: #Predicate { $0.deletadoEm == nil && $0.userId == userId },
             sortBy: [SortDescriptor(\.criadoEm, order: .reverse)]
         )
-        
-        
+
+
         let ciclosLocais: [CicloSoftex]
         if let context = modelContext {
             ciclosLocais = (try? context.fetch(descriptor)) ?? []
@@ -393,11 +388,16 @@ final class CiclosViewModel: ObservableObject {
     /// context-owned (a que está no ModelContext), seja ela a existente
     /// atualizada ou a recém-inserida. O caller DEVE usar o retorno em vez
     /// do parâmetro para evitar trabalhar com instâncias detached.
+    /// Sempre seta userId para o usuário logado — dados do backend
+    /// chegam filtrados pelo JWT, mas precisamos gravar o dono localmente.
     @discardableResult
     private func salvarOuAtualizarCicloLocal(_ ciclo: CicloSoftex) -> CicloSoftex? {
+        let userId = currentUser?.id ?? ""
+        ciclo.userId = userId
+
         if let backendId = ciclo.backendId {
             let descriptor = FetchDescriptor<CicloSoftex>(
-                predicate: #Predicate { $0.backendId == backendId }
+                predicate: #Predicate { $0.backendId == backendId && $0.userId == userId }
             )
             if let existente = try? modelContext?.fetch(descriptor).first {
                 existente.titulo = ciclo.titulo
@@ -406,6 +406,7 @@ final class CiclosViewModel: ObservableObject {
                 existente.periodo = ciclo.periodo
                 existente.diaria = ciclo.diaria
                 existente.backendId = backendId
+                existente.userId = userId
                 existente.syncStatus = .synced
                 existente.syncError = nil
                 return existente
@@ -414,7 +415,7 @@ final class CiclosViewModel: ObservableObject {
 
         let clientId = ciclo.clientId
         let descriptorPorClient = FetchDescriptor<CicloSoftex>(
-            predicate: #Predicate { $0.clientId == clientId }
+            predicate: #Predicate { $0.clientId == clientId && $0.userId == userId }
         )
         if let existente = try? modelContext?.fetch(descriptorPorClient).first {
             existente.titulo = ciclo.titulo
@@ -423,6 +424,7 @@ final class CiclosViewModel: ObservableObject {
             existente.periodo = ciclo.periodo
             existente.diaria = ciclo.diaria
             existente.backendId = ciclo.backendId
+            existente.userId = userId
             existente.syncStatus = .synced
             existente.syncError = nil
             return existente
@@ -437,11 +439,11 @@ final class CiclosViewModel: ObservableObject {
     func createNewCiclo(startDate: Date, endDate: Date, totalValue: Float, titulo: String) async throws {
         let dayCount = Calendar.current.datesBetween(startDate, and: endDate)
         let safeDayCount = max(dayCount, 1)
-        
+
         let saldo = totalValue / Float(safeDayCount)
         let periodo = createPeriodoString(from: startDate, to: endDate)
-        
-        let newCiclo = CicloSoftex(valor_total: totalValue, gasto_total: 0, periodo: periodo, diaria: saldo, titulo: titulo, dias: nil)
+
+        let newCiclo = CicloSoftex(userId: currentUser?.id ?? "", valor_total: totalValue, gasto_total: 0, periodo: periodo, diaria: saldo, titulo: titulo, dias: nil)
         let dias: [DiaLoteRequest] = createAllDiasLoteRequest(dayCount: dayCount, startDate: startDate)
         
         try await postToNetwork(newCiclo: newCiclo, dias: dias)

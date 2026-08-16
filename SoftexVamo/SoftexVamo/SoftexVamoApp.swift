@@ -28,6 +28,10 @@ struct SoftexVamoApp: App {
             }
             .environmentObject(authService)
             .onChange(of: authService.currentUser?.id) { _, _ in
+                // Com userId nos models, não precisa limpar dados no logout —
+                // cada usuário só vê os próprios dados via filtro por userId.
+                // Dados offline pendentes de sync são preservados para quando
+                // o usuário original logar novamente.
                 listViewModel.reset()
             }
             .onChange(of: networkMonitor.isConnected) { _, isConnected in
