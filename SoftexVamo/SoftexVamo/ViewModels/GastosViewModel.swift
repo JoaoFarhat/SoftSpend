@@ -41,7 +41,9 @@ final class GastosViewModel: ObservableObject {
             let gastosQueBatem = dia.gastos.filter { gasto in
                 let matchesTexto = searchGastoText.isEmpty || gasto.titulo.localizedCaseInsensitiveContains(searchGastoText)
                 let matchesCategoria = categoriaFiltro == nil || gasto.categoria == categoriaFiltro
-                return matchesTexto && matchesCategoria
+                // Não exibe gastos deletados (aguardando sync de deleção).
+                let matchesDeletado = gasto.deletadoEm == nil
+                return matchesTexto && matchesCategoria && matchesDeletado
             }
 
             if gastosQueBatem.isEmpty { return nil }

@@ -17,8 +17,10 @@ struct MainView: View {
     @State private var isExpanded = true
 
     
+    // Basta o ciclo ter dias locais: gastos criados offline sobem depois,
+    // pelo SyncActor, quando o dia pai receber backendId.
     var canAddGasto: Bool {
-        viewModel.atualCiclo.backendId != nil
+        !(viewModel.atualCiclo.dias?.isEmpty ?? true)
     }
     
     var body: some View {
@@ -112,9 +114,15 @@ struct MainView: View {
         .onAppear {
             viewModel.modelContext = modelContext
             syncManager.configure(container: modelContext.container)
+            syncManager.limparDadosMortos(context: modelContext)
+        }
+        .onChange(of: syncManager.isSyncing) { _, isSyncing in
+            if !isSyncing, syncManager.lastSyncError == nil {
+                viewModel.fetchCiclosResumo()
+            }
         }
         .refreshable {
-            Task { await syncManager.sync() }
+            await syncManager.sync(forcar: true)
         }
     }
 }

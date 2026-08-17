@@ -40,10 +40,9 @@ struct HistoricoView: View {
                             ForEach(Array(viewModel.allCiclos.enumerated()), id: \.element.id) { index, ciclo in
                                 CardCiclosView(ciclo: ciclo)
                                     .environmentObject(viewModel)
-                                    .id("\(ciclo.id)-\(viewModel.atualCiclo.id)")
                                     .onAppear {
                                         if index == viewModel.allCiclos.count - 1 {
-                                            Task { await viewModel.loadMoreCiclos() }
+                                            viewModel.loadMoreCiclos()
                                         }
                                     }
                             }

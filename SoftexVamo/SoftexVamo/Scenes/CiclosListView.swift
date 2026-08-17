@@ -103,8 +103,10 @@ struct CiclosListView: View {
         )
     }
     
+    // Não exige backendId: um ciclo criado offline (ou ainda pendente de
+    // sync) já existe localmente e deve ser exibido na tela inicial.
     private var isEmpty: Bool {
-        viewModel.allCiclos.isEmpty || viewModel.allCiclos.allSatisfy({ $0.backendId == nil })
+        viewModel.allCiclos.isEmpty
     }
 
     private func header(showTitle: Bool = true, isLoading: Bool = false) -> some View {
@@ -161,6 +163,15 @@ struct CiclosListView: View {
     var body: some View {
         
         VStack(alignment: .leading, spacing: 0) {
+            if viewModel.isOffline {
+                Text("Você está offline. Exibindo dados locais.")
+                    .font(.caption)
+                    .foregroundStyle(Color("textSecondary"))
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.vertical, 6)
+                    .background(Color.appPurple.opacity(0.12))
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
             if viewModel.isLoading || !isEmpty {
                 ScrollView() {
                     header(isLoading: viewModel.isLoading)
@@ -207,8 +218,9 @@ struct CiclosListView: View {
             }
         }
         .padding(.bottom, viewModel.isLoading || !isEmpty ? 30 : 100)
+        .animation(.default, value: viewModel.isOffline)
         .task {
-            await viewModel.fetchCiclosResumo()
+            viewModel.fetchCiclosResumo()
         }
         .onChange(of: viewModel.atualCiclo.dias) { _, newDias in
             gastosViewModel.dias = newDias ?? []

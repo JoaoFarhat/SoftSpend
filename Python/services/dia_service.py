@@ -1,9 +1,12 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from typing import List
+import logging
 import models
 from dtos.dia import DiaRequest
 from repositories import dia_repository, ciclo_repository
+
+logger = logging.getLogger(__name__)
 
 
 def listar_dias_por_ciclo(db: Session, ciclo_id: int, user_id: str, skip: int, limit: int):
@@ -79,7 +82,7 @@ def sincronizar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], us
 
     novas_datas = {dia.data.date() for dia in dias}
     dias_existentes = list(ciclo.dias)
-    datas_existentes = {dia_existente.data.date() for dia_existente in dias_existentes}
+    datas_existentes = {dia_existente.data.date(): dia_existente for dia_existente in dias_existentes}
 
     dias_para_remover = [
         dia_existente for dia_existente in dias_existentes
@@ -92,11 +95,12 @@ def sincronizar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], us
         )
         if gasto_total_removido:
             ciclo_repository.incrementar_gasto_total(db, ciclo_id, -gasto_total_removido)
+            logger.info(f"Decrementando gasto_total em {gasto_total_removido} pela remocao de {len(dias_para_remover)} dia(s)")
 
         dia_repository.remover_dias(db, dias_para_remover)
 
     novos_dias = [
-        models.Dia(data=dia.data, saldo=ciclo.diaria, ciclo_id=ciclo_id)
+        models.Dia(data=dia.data, saldo=ciclo.diaria, ciclo_id=ciclo_id, client_id=dia.client_id)
         for dia in dias
         if dia.data.date() not in datas_existentes
     ]

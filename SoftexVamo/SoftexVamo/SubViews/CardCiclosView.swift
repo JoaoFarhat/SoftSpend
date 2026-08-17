@@ -25,7 +25,7 @@ struct CardCiclosView: View {
     }
     
     private var isAtual: Bool {
-        viewModel.atualCiclo.backendId == ciclo.backendId
+        viewModel.atualCiclo.id == ciclo.id
     }
     
     @State var isPresented: Bool = false
@@ -126,10 +126,9 @@ struct CardCiclosView: View {
         //        .ignoresSafeArea()
         .sheet(isPresented: $isPresented){
             SheetView(deleteAction: {
-                guard let cicloId = ciclo.backendId else { return }
                 Task {
                     do {
-                        try await viewModel.deleteCiclo(cicloId: cicloId)
+                        try await viewModel.deleteCiclo(ciclo: ciclo)
                     } catch {
                         await MainActor.run { falhaAoExcluir = true }
                         errorManager.show(error: error)

@@ -14,22 +14,106 @@ final class SyncManager: ObservableObject {
 
     @Published var isSyncing = false
     @Published var pendentesRestantes: Int = 0
+    @Published var lastSyncError: Error?
     private var syncActor: SyncActor?
+    private var networkObservationTask: Task<Void, Never>?
+    private let logger = Logger(subsystem: "br.com.softspend", category: "SyncManager")
+
+    init() {
+        observeNetwork()
+    }
+
+    deinit {
+        networkObservationTask?.cancel()
+    }
+
+    private func observeNetwork() {
+        networkObservationTask = Task {
+            var wasConnected = NetworkMonitor.shared.isConnected
+            for await connected in NetworkMonitor.shared.$isConnected.values {
+                if connected && !wasConnected {
+                    logger.info("SyncManager: conexão voltou, sync forçado")
+                    await sync(forcar: true)
+                }
+                wasConnected = connected
+            }
+        }
+    }
 
     func configure(container: ModelContainer) {
         syncActor = SyncActor(modelContainer: container)
+        if NetworkMonitor.shared.isConnected {
+            Task {
+                await sync(forcar: true)
+            }
+        }
     }
 
-    func sync() async {
-        guard let syncActor, !isSyncing else { return }
-        guard NetworkMonitor.shared.isConnected else { return }
+    /// Remove do banco local ciclos, dias e gastos que já foram sincronizados
+    /// como deletados há mais de 7 dias. Evita acúmulo de registros mortos.
+    func limparDadosMortos(context: ModelContext) {
+        let limite = Date().addingTimeInterval(-7 * 24 * 3600)
+        let synced = SyncStatus.synced.rawValue
+
+        do {
+            let cicloDesc = FetchDescriptor<CicloSoftex>(
+                predicate: #Predicate { $0.deletadoEm != nil && $0.syncStatusRaw == synced }
+            )
+            let ciclos = (try? context.fetch(cicloDesc)) ?? []
+            for ciclo in ciclos where ciclo.deletadoEm ?? Date.distantFuture < limite {
+                context.delete(ciclo)
+            }
+
+            let diaDesc = FetchDescriptor<DiaSoftex>(
+                predicate: #Predicate { $0.deletadoEm != nil && $0.syncStatusRaw == synced }
+            )
+            let dias = (try? context.fetch(diaDesc)) ?? []
+            for dia in dias where dia.deletadoEm ?? Date.distantFuture < limite {
+                context.delete(dia)
+            }
+
+            let gastoDesc = FetchDescriptor<GastosDia>(
+                predicate: #Predicate { $0.deletadoEm != nil && $0.syncStatusRaw == synced }
+            )
+            let gastos = (try? context.fetch(gastoDesc)) ?? []
+            for gasto in gastos where gasto.deletadoEm ?? Date.distantFuture < limite {
+                context.delete(gasto)
+            }
+
+            try context.save()
+            logger.info("limparDadosMortos: cleanup concluido")
+        } catch {
+            logger.error("limparDadosMortos: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// - Parameter forcar: ignora o backoff pendente dos itens que falharam.
+    ///   Use em ações explícitas do usuário (pull to refresh) e quando a
+    ///   conexão volta — senão um item que falhou algumas vezes fica até 1h
+    ///   sem ser reenviado, mesmo com internet disponível.
+    func sync(forcar: Bool = false) async {
+        guard let syncActor, !isSyncing else {
+            if syncActor == nil { logger.error("SyncManager: syncActor ainda não configurado") }
+            if isSyncing { logger.warning("SyncManager: sync já em andamento, ignorado") }
+            return
+        }
+        guard NetworkMonitor.shared.isConnected else {
+            logger.warning("SyncManager: sem conexão, sync ignorado")
+            return
+        }
         let userId = AuthService.shared.currentUser?.id ?? ""
-        guard !userId.isEmpty else { return }
+        guard !userId.isEmpty else {
+            logger.error("SyncManager: userId vazio, sync ignorado")
+            return
+        }
         isSyncing = true
         defer { isSyncing = false }
+        lastSyncError = nil
         let agora = Date()
-        let restantes = await syncActor.sync(agora: agora, userId: userId)
+        logger.info("SyncManager: iniciando sync para userId \(userId, privacy: .private), forcar=\(forcar, privacy: .public)")
+        let restantes = await syncActor.sync(agora: agora, userId: userId, forcar: forcar)
         pendentesRestantes = restantes
+        logger.info("SyncManager: sync finalizado, pendentes restantes=\(restantes, privacy: .public)")
     }
 
 }
@@ -47,18 +131,20 @@ actor SyncActor {
         }
     }
 
-    func sync(agora: Date, userId: String) async -> Int {
+    func sync(agora: Date, userId: String, forcar: Bool = false) async -> Int {
         let maxPassadas = 5
 
         var pendentesDepois = 0
-        for _ in 0..<maxPassadas {
+        for passada in 0..<maxPassadas {
             let pendentesAntes = contarPendentes(agora: agora, userId: userId)
-            await syncCiclos(agora: agora, userId: userId)
-            await syncDias(agora: agora, userId: userId)
-            await syncGastos(agora: agora, userId: userId)
-            await syncComprovantes(agora: agora, userId: userId)
-            await syncDeletions(agora: agora, userId: userId)
+            logger.info("SyncActor: passada \(passada, privacy: .public), pendentesAntes=\(pendentesAntes, privacy: .public)")
+            await syncCiclos(agora: agora, userId: userId, forcar: forcar)
+            await syncDias(agora: agora, userId: userId, forcar: forcar)
+            await syncGastos(agora: agora, userId: userId, forcar: forcar)
+            await syncComprovantes(agora: agora, userId: userId, forcar: forcar)
+            await syncDeletions(agora: agora, userId: userId, forcar: forcar)
             pendentesDepois = contarPendentes(agora: agora, userId: userId)
+            logger.info("SyncActor: passada \(passada, privacy: .public), pendentesDepois=\(pendentesDepois, privacy: .public)")
             if pendentesDepois == 0 || pendentesDepois >= pendentesAntes { break }
         }
         return pendentesDepois
@@ -69,26 +155,48 @@ actor SyncActor {
         let cicloDesc = FetchDescriptor<CicloSoftex>(
             predicate: #Predicate { $0.syncStatusRaw != synced && $0.deletadoEm == nil && $0.userId == userId }
         )
-        let diaDesc = FetchDescriptor<DiaSoftex>(
-            predicate: #Predicate { $0.syncStatusRaw != synced && $0.deletadoEm == nil && $0.ciclo?.userId == userId }
+        var diaDesc = FetchDescriptor<DiaSoftex>(
+            predicate: #Predicate { $0.syncStatusRaw != synced && $0.deletadoEm == nil }
         )
-        let gastoDesc = FetchDescriptor<GastosDia>(
-            predicate: #Predicate { $0.syncStatusRaw != synced && $0.deletadoEm == nil && $0.dia?.ciclo?.userId == userId }
+        diaDesc.relationshipKeyPathsForPrefetching = [\.ciclo]
+        var gastoDesc = FetchDescriptor<GastosDia>(
+            predicate: #Predicate { $0.syncStatusRaw != synced && $0.deletadoEm == nil }
         )
+        gastoDesc.relationshipKeyPathsForPrefetching = [\.dia]
         let ciclos = (try? modelContext.fetchCount(cicloDesc)) ?? 0
-        let dias = (try? modelContext.fetchCount(diaDesc)) ?? 0
-        let gastos = (try? modelContext.fetchCount(gastoDesc)) ?? 0
+        let todosDias = (try? modelContext.fetch(diaDesc)) ?? []
+        let todosGastos = (try? modelContext.fetch(gastoDesc)) ?? []
+        let dias = todosDias.filter { $0.ciclo?.userId == userId }.count
+        let gastos = todosGastos.filter { $0.dia?.ciclo?.userId == userId }.count
         return ciclos + dias + gastos
     }
 
-    private func sincronizarEdicaoCiclo(_ ciclo: CicloSoftex, agora: Date) async {
-        guard let backendId = ciclo.backendId, deveTentar(ciclo, agora: agora) else { return }
+    private func sincronizarEdicaoCiclo(_ ciclo: CicloSoftex, agora: Date, forcar: Bool = false) async {
+        guard let backendId = ciclo.backendId, deveTentar(ciclo, agora: agora, forcar: forcar) else {
+            logger.info("sincronizarEdicaoCiclo: pulado backendId=\(String(describing: ciclo.backendId), privacy: .public)")
+            return
+        }
 
-        let diasPendentes = ciclo.dias?.filter {
-            $0.backendId == nil && $0.deletadoEm == nil
-        } ?? []
+        logger.info("sincronizarEdicaoCiclo: iniciando backendId=\(backendId, privacy: .public) titulo=\(ciclo.titulo, privacy: .private)")
 
-        let diasRequest: [DiaLoteRequest]? = diasPendentes.isEmpty ? nil : diasPendentes.map {
+        // Carrega os dias do ciclo explicitamente no contexto do SyncActor,
+        // pois `ciclo.dias` pode nao estar faultado e retornar vazio.
+        let cicloId = ciclo.id
+        var diasDesc = FetchDescriptor<DiaSoftex>(
+            predicate: #Predicate { _ in true },
+            sortBy: [SortDescriptor(\.data)]
+        )
+        diasDesc.relationshipKeyPathsForPrefetching = [\.ciclo]
+        let todosDias = ((try? modelContext.fetch(diasDesc)) ?? [])
+        let locais = todosDias.filter {
+            guard let diaCiclo = $0.ciclo else { return false }
+            return diaCiclo.id == cicloId
+        }
+        let diasAtivos = locais.filter { $0.deletadoEm == nil }
+
+        // Envia TODOS os dias nao deletados para o backend, nao apenas os pendentes,
+        // para que o PUT /ciclos/{id}/dias/lote sincronize adicoes/remocoes de datas.
+        let diasRequest: [DiaLoteRequest]? = diasAtivos.isEmpty ? nil : diasAtivos.map {
             DiaLoteRequest(clientId: $0.clientId, data: $0.data)
         }
 
@@ -104,12 +212,19 @@ actor SyncActor {
                 diaria: ciclo.diaria,
                 periodo: ciclo.periodo
             )
-            
-            let cicloEditado = try await NetworkManager.shared.putCiclo(cicloId: backendId, request: updateRequest)
 
+            // 1. Sincroniza datas primeiro: cria novos dias e deleta os que
+            // sairam do periodo (com seus gastos) em cascata no backend.
+            var diasRemotos: [DiaSoftex]?
             if let diasRequest {
-                cicloEditado.dias = try await NetworkManager.shared.syncDiasLote(cicloId: backendId, dias: diasRequest)
+                diasRemotos = try await NetworkManager.shared.syncDiasLote(cicloId: backendId, dias: diasRequest)
+                logger.info("sincronizarEdicaoCiclo: dias/lote ok backendId=\(backendId, privacy: .public)")
             }
+
+            // 2. Depois atualiza o ciclo, para que gasto_total ja reflita as
+            // remocoes de gastos feitas pelo lote.
+            let cicloEditado = try await NetworkManager.shared.putCiclo(cicloId: backendId, request: updateRequest)
+            logger.info("sincronizarEdicaoCiclo: PUT ok backendId=\(backendId, privacy: .public)")
 
             let houveReedicao = ciclo.titulo != tituloAntes
                 || ciclo.valor_total != valorTotalAntes
@@ -127,22 +242,34 @@ actor SyncActor {
             ciclo.syncStatus = .synced
             ciclo.syncError = nil
 
-            if let diasRemotos = cicloEditado.dias {
-                let descriptor = FetchDescriptor<DiaSoftex>(
-                    predicate: #Predicate { $0.ciclo?.backendId == backendId }
-                )
-                let locais = (try? modelContext.fetch(descriptor)) ?? []
+            if let diasRemotos {
                 let idsRemotos = Set(diasRemotos.compactMap { $0.backendId })
-                for local in locais where local.backendId != nil && !idsRemotos.contains(local.backendId!) {
-                    local.deletadoEm = Date()
-                    local.syncStatus = .pending
+                let clientIdsRemotos = Set(diasRemotos.compactMap { $0.clientId })
+
+                // Marca dias locais ativos que nao existem mais no backend
+                // (por backendId ou clientId). Isso evita dias orfaos caso
+                // o lote nao os tenha removido; syncDeletions se encarrega de
+                // enviar DELETE /dias/{id} individual.
+                for local in locais where local.deletadoEm == nil {
+                    let aindaExiste = (local.backendId != nil && idsRemotos.contains(local.backendId!))
+                        || (local.clientId != nil && clientIdsRemotos.contains(local.clientId))
+                    if !aindaExiste {
+                        local.deletadoEm = Date()
+                        local.syncStatus = .pending
+                    }
                 }
+
+                // Atualiza/insere dias remotos, casando por backendId ou clientId para evitar duplicatas
                 for diaRemoto in diasRemotos {
-                    if let local = locais.first(where: { $0.backendId == diaRemoto.backendId }) {
+                    if let local = locais.first(where: { $0.backendId == diaRemoto.backendId })
+                        ?? locais.first(where: { $0.clientId == diaRemoto.clientId }) {
                         local.data = diaRemoto.data
                         local.saldo = diaRemoto.saldo
+                        local.backendId = diaRemoto.backendId
+                        local.clientId = diaRemoto.clientId ?? local.clientId
+                        local.deletadoEm = nil
                         local.syncStatus = .synced
-                    } else if let remotoId = diaRemoto.backendId, !(ciclo.dias?.contains(where: { $0.backendId == remotoId }) ?? false) {
+                    } else if let remotoId = diaRemoto.backendId {
                         diaRemoto.ciclo = ciclo
                         diaRemoto.syncStatus = .synced
                         modelContext.insert(diaRemoto)
@@ -161,7 +288,8 @@ actor SyncActor {
         }
     }
 
-    private func deveTentar(_ item: any Syncavel, agora: Date) -> Bool {
+    private func deveTentar(_ item: any Syncavel, agora: Date, forcar: Bool = false) -> Bool {
+        if forcar { return true }
         guard let proxima = item.proximaTentativaEm else { return true }
         return proxima <= agora
     }
@@ -186,19 +314,21 @@ actor SyncActor {
         item.syncError = nil
     }
 
-    private func syncCiclos(agora: Date, userId: String) async {
+    private func syncCiclos(agora: Date, userId: String, forcar: Bool = false) async {
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<CicloSoftex>(
             predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm == nil && item.userId == userId },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
         let todos = (try? modelContext.fetch(descriptor)) ?? []
-        let ciclos = todos.filter { deveTentar($0, agora: agora) }
+        let ciclos = todos.filter { deveTentar($0, agora: agora, forcar: forcar) }
+        logger.info("syncCiclos: \(ciclos.count, privacy: .public) ciclo(s) pendente(s) para userId \(userId, privacy: .private)")
 
         for ciclo in ciclos {
             if ciclo.backendId != nil {
-                await sincronizarEdicaoCiclo(ciclo, agora: agora)
+                await sincronizarEdicaoCiclo(ciclo, agora: agora, forcar: forcar)
             } else {
+                logger.info("syncCiclos: POST ciclo clientId=\(ciclo.clientId, privacy: .private) titulo=\(ciclo.titulo, privacy: .private)")
                 do {
                     let createRequest = CicloCreateRequest(
                         client_id: ciclo.clientId,
@@ -211,9 +341,11 @@ actor SyncActor {
                     ciclo.backendId = response.backendId
                     ciclo.gasto_total = response.gasto_total
                     marcarSucesso(ciclo)
+                    logger.info("syncCiclos: POST ok, backendId=\(response.backendId.map(String.init) ?? "nil", privacy: .public)")
                 } catch {
                     ciclo.syncError = error.localizedDescription
                     marcarFalha(ciclo)
+                    logger.error("syncCiclos: POST falhou: \(error.localizedDescription, privacy: .public)")
                 }
             }
         }
@@ -221,14 +353,14 @@ actor SyncActor {
         salvarContexto("syncCiclos")
     }
 
-    private func syncDias(agora: Date, userId: String) async {
+    private func syncDias(agora: Date, userId: String, forcar: Bool = false) async {
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<DiaSoftex>(
-            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm == nil && item.ciclo?.userId == userId },
+            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm == nil },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
         let todos = (try? modelContext.fetch(descriptor)) ?? []
-        let dias = todos.filter { deveTentar($0, agora: agora) }
+        let dias = todos.filter { $0.ciclo?.userId == userId && deveTentar($0, agora: agora, forcar: forcar) }
 
         for dia in dias {
             guard let cicloId = dia.ciclo?.backendId else {
@@ -258,14 +390,14 @@ actor SyncActor {
         salvarContexto("syncDias")
     }
 
-    private func syncGastos(agora: Date, userId: String) async {
+    private func syncGastos(agora: Date, userId: String, forcar: Bool = false) async {
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<GastosDia>(
-            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm == nil && item.dia?.ciclo?.userId == userId },
+            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm == nil },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
         let todos = (try? modelContext.fetch(descriptor)) ?? []
-        let gastos = todos.filter { deveTentar($0, agora: agora) }
+        let gastos = todos.filter { $0.dia?.ciclo?.userId == userId && deveTentar($0, agora: agora, forcar: forcar) }
 
         for gasto in gastos {
             guard let diaIdReal = gasto.dia?.backendId else {
@@ -314,19 +446,18 @@ actor SyncActor {
         salvarContexto("syncGastos")
     }
 
-    private func syncComprovantes(agora: Date, userId: String) async {
+    private func syncComprovantes(agora: Date, userId: String, forcar: Bool = false) async {
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<GastosDia>(
             predicate: #Predicate { item in
                 item.syncStatusRaw != synced &&
                 (item.comprovanteDataCriptografado != nil || item.comprovanteParaRemover) &&
-                item.deletadoEm == nil &&
-                item.dia?.ciclo?.userId == userId
+                item.deletadoEm == nil
             },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
         let todos = (try? modelContext.fetch(descriptor)) ?? []
-        let gastos = todos.filter { $0.backendId != nil && deveTentar($0, agora: agora) }
+        let gastos = todos.filter { $0.dia?.ciclo?.userId == userId && $0.backendId != nil && deveTentar($0, agora: agora, forcar: forcar) }
 
         for gasto in gastos {
             guard let backendId = gasto.backendId else { continue }
@@ -382,19 +513,22 @@ actor SyncActor {
         return false
     }
 
-    private func syncDeletions(agora: Date, userId: String) async {
+    private func syncDeletions(agora: Date, userId: String, forcar: Bool = false) async {
         let synced = SyncStatus.synced.rawValue
 
         let gastoDescriptor = FetchDescriptor<GastosDia>(
-            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm != nil && item.dia?.ciclo?.userId == userId },
+            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm != nil },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
 
-        let gastos = ((try? modelContext.fetch(gastoDescriptor)) ?? []).filter { deveTentar($0, agora: agora) }
+        let todosGastos = ((try? modelContext.fetch(gastoDescriptor)) ?? [])
+        let gastos = todosGastos
+            .filter { $0.dia?.ciclo?.userId == userId && deveTentar($0, agora: agora, forcar: forcar) }
+        logger.info("syncDeletions: \(gastos.count, privacy: .public) gasto(s) para deletar")
 
         for gasto in gastos {
             guard let backendId = gasto.backendId else {
-                modelContext.delete(gasto)
+                marcarSucesso(gasto)
                 continue
             }
 
@@ -407,19 +541,22 @@ actor SyncActor {
                     continue
                 }
           }
-            modelContext.delete(gasto)
+            marcarSucesso(gasto)
         }
 
         let diaDescriptor = FetchDescriptor<DiaSoftex>(
-            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm != nil && item.ciclo?.userId == userId },
+            predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm != nil },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
-        let dias = ((try? modelContext.fetch(diaDescriptor)) ?? []).filter { deveTentar($0, agora: agora) }
+        let todosDias = ((try? modelContext.fetch(diaDescriptor)) ?? [])
+        let dias = todosDias
+            .filter { $0.ciclo?.userId == userId && deveTentar($0, agora: agora, forcar: forcar) }
+        logger.info("syncDeletions: \(dias.count, privacy: .public) dia(s) para deletar")
 
         for dia in dias {
 
             guard let backendId = dia.backendId else {
-                modelContext.delete(dia)
+                marcarSucesso(dia)
                 continue
             }
 
@@ -432,18 +569,20 @@ actor SyncActor {
                     continue
                 }
             }
-            modelContext.delete(dia)
+            marcarSucesso(dia)
         }
 
         let cicloDescriptor = FetchDescriptor<CicloSoftex>(
             predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm != nil && item.userId == userId },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
-        let ciclos = ((try? modelContext.fetch(cicloDescriptor)) ?? []).filter { deveTentar($0, agora: agora) }
+        let ciclos = ((try? modelContext.fetch(cicloDescriptor)) ?? [])
+            .filter { deveTentar($0, agora: agora, forcar: forcar) }
+        logger.info("syncDeletions: \(ciclos.count, privacy: .public) ciclo(s) para deletar")
 
         for ciclo in ciclos {
             guard let backendId = ciclo.backendId else {
-                modelContext.delete(ciclo)
+                marcarSucesso(ciclo)
                 continue
             }
 
@@ -456,7 +595,7 @@ actor SyncActor {
                     continue
                 }
             }
-            modelContext.delete(ciclo)
+            marcarSucesso(ciclo)
         }
 
         salvarContexto("syncDeletions")

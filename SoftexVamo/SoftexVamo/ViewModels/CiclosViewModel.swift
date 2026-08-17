@@ -9,6 +9,7 @@ import Foundation
 import Combine
 import SwiftUI
 import SwiftData
+import os
 
 @MainActor
 final class CiclosViewModel: ObservableObject {
@@ -19,6 +20,7 @@ final class CiclosViewModel: ObservableObject {
     @Published var isLoading: Bool = true
     @Published var selectedTab: Int = 0
     @Published var hasMorePages: Bool = true
+    @Published var isOffline: Bool = false
     
     var modelContext: ModelContext?
     weak var errorManager: ErrorManager?
@@ -33,11 +35,36 @@ final class CiclosViewModel: ObservableObject {
     private var hasMoreDias = true
     var isLoadingDias = false
     
+    private var loadCiclosTask: Task<Void, Never>?
+    private var loadMoreDiasTask: Task<Void, Never>?
+    private var networkObservationTask: Task<Void, Never>?
+    
     private var currentUser: UserModel? {
         AuthService.shared.currentUser
     }
     
+    private let viewModelLogger = Logger(subsystem: "br.com.softspend", category: "CiclosViewModel")
+
+    init() {
+        observeNetwork()
+    }
+
+    deinit {
+        networkObservationTask?.cancel()
+        loadCiclosTask?.cancel()
+        loadMoreDiasTask?.cancel()
+    }
+
+    private func observeNetwork() {
+        networkObservationTask = Task {
+            for await connected in NetworkMonitor.shared.$isConnected.values {
+                self.isOffline = !connected
+            }
+        }
+    }
+
     private func showError(_ error: Error) {
+        viewModelLogger.error("CiclosViewModel error: \(error.localizedDescription, privacy: .public)")
         errorManager?.show(error: error)
     }
 
@@ -54,6 +81,11 @@ final class CiclosViewModel: ObservableObject {
     }
     
     func reset() {
+        loadCiclosTask?.cancel()
+        loadMoreDiasTask?.cancel()
+        loadCiclosTask = nil
+        loadMoreDiasTask = nil
+        
         self.allCiclos = []
         self.atualCiclo = CicloSoftex.vazio
         self.index = 0
@@ -74,17 +106,149 @@ final class CiclosViewModel: ObservableObject {
         try? modelContext.save()
     }
 
-    func fetchCiclosResumo() async {
-        await loadCiclos(append: false)
+    func fetchCiclosResumo() {
+        loadCiclos(append: false)
     }
     
-    func loadMoreCiclos() async {
+    func loadMoreCiclos() {
         guard hasMorePages, !isLoading else { return }
         skip += limit
-        await loadCiclos(append: true)
+        loadCiclos(append: true)
     }
     
-     private func deduplicarCiclosLocais() {
+    private func loadCiclos(append: Bool) {
+        guard currentUser != nil else {
+            showError(APIError.serverError(message: "Usuario nao esta logado", requestId: "-", statusCode: 401))
+            self.isLoading = false
+            return
+        }
+        
+        if append, !hasMorePages { return }
+        if !append, hasLoadedOnce { return }
+        
+        loadCiclosTask?.cancel()
+        loadMoreDiasTask?.cancel()
+        loadCiclosTask = nil
+        loadMoreDiasTask = nil
+        
+        loadCiclosTask = Task {
+            isLoading = true
+            
+            if !append {
+                deduplicarCiclosLocais()
+            }
+            
+            let userId = currentUser?.id ?? ""
+            let descriptor = FetchDescriptor<CicloSoftex>(
+                predicate: #Predicate { $0.deletadoEm == nil && $0.userId == userId },
+                sortBy: [SortDescriptor(\.criadoEm, order: .reverse)]
+            )
+
+            let ciclosLocais: [CicloSoftex]
+            if let context = modelContext {
+                ciclosLocais = (try? context.fetch(descriptor)) ?? []
+            } else {
+                ciclosLocais = []
+            }
+            
+            if !ciclosLocais.isEmpty {
+                if !append {
+                    self.allCiclos = ciclosLocais
+                    self.atualCiclo = ciclosLocais[0]
+                    self.index = 0
+                } else {
+                    let idsExistentes = Set(self.allCiclos.map { $0.id })
+                    let novos = ciclosLocais.filter { !idsExistentes.contains($0.id) }
+                    self.allCiclos.append(contentsOf: novos)
+                }
+                self.isLoading = false
+            }
+
+            guard NetworkMonitor.shared.isConnected else {
+                if !append, !ciclosLocais.isEmpty {
+                    self.diasSkip = 0
+                    self.hasMoreDias = false
+                    carregarDiasLocais()
+                }
+                isLoading = false
+                hasLoadedOnce = true
+                return
+            }
+
+            do {
+                let ciclos = try await NetworkManager.shared.fetchCicloResumo(skip: skip, limit: limit)
+                
+                guard !Task.isCancelled else { return }
+                
+                hasMorePages = ciclos.count == limit
+                
+                for ciclo in ciclos {
+                    salvarOuAtualizarCicloLocal(ciclo)
+                }
+
+                salvarLocal()
+                
+                let ciclosAtualizados: [CicloSoftex]
+                if let context = modelContext {
+                    ciclosAtualizados = (try? context.fetch(descriptor)) ?? []
+                } else {
+                    ciclosAtualizados = []
+                }
+                
+                if !append {
+                    self.allCiclos = ciclosAtualizados
+                    self.index = 0
+                    
+                    if let primeiro = self.allCiclos.first {
+                        self.atualCiclo = primeiro
+                    } else {
+                        self.atualCiclo = CicloSoftex.vazio
+                    }
+                } else {
+                    self.allCiclos = ciclosAtualizados
+                }
+                
+                if !append, self.allCiclos.indices.contains(self.index) {
+                    let cicloParaSalvar = self.allCiclos[self.index]
+                    
+                    guard let cicloId = cicloParaSalvar.backendId else {
+                        isLoading = false
+                        hasLoadedOnce = true
+                        return
+                    }
+                    
+                    self.atualCiclo = cicloParaSalvar
+                    self.atualCiclo.dias = []
+                    self.diasSkip = 0
+                    self.hasMoreDias = true
+                    loadMoreDiasTask?.cancel()
+                    loadMoreDiasTask = nil
+                    loadMoreDiasTask = Task {
+                        await loadMoreDias(cicloId: cicloId)
+                    }
+                } else if !append {
+                    self.atualCiclo = CicloSoftex.vazio
+                }
+                
+                isLoading = false
+                hasLoadedOnce = true
+                
+            } catch {
+                guard !Task.isCancelled else { return }
+                showError(error)
+                
+                if !append, self.allCiclos.isEmpty {
+                    self.allCiclos = []
+                    self.atualCiclo = CicloSoftex.vazio
+                }
+                
+                isLoading = false
+                hasLoadedOnce = true
+            }
+        }
+    }
+    
+    private func deduplicarCiclosLocais() {
         guard let context = modelContext else { return }
         let userId = currentUser?.id ?? ""
         let descriptor = FetchDescriptor<CicloSoftex>(
@@ -130,7 +294,6 @@ final class CiclosViewModel: ObservableObject {
         guard !duplicatas.isEmpty else { return }
 
         for dup in duplicatas {
-            // Encontra o original: prefere por backendId, senão por clientId.
             let original: CicloSoftex?
             if let bid = dup.backendId {
                 original = originalPorBackendId[bid]
@@ -147,181 +310,58 @@ final class CiclosViewModel: ObservableObject {
         salvarLocal()
     }
     
-    private func loadCiclos(append: Bool) async {
-        
-        guard currentUser != nil else {
-            showError(APIError.serverError(message: "Usuario nao esta logado", requestId: "-", statusCode: 401))
-            self.isLoading = false
-            return
-        }
-        
-        if append, !hasMorePages { return }
-        if !append, hasLoadedOnce { return }
-        
-        isLoading = true
-        
-        if !append {
-            deduplicarCiclosLocais()
-        }
-        
-        let userId = currentUser?.id ?? ""
-        let descriptor = FetchDescriptor<CicloSoftex>(
-            predicate: #Predicate { $0.deletadoEm == nil && $0.userId == userId },
-            sortBy: [SortDescriptor(\.criadoEm, order: .reverse)]
-        )
-
-
-        let ciclosLocais: [CicloSoftex]
-        if let context = modelContext {
-            ciclosLocais = (try? context.fetch(descriptor)) ?? []
-        } else {
-            ciclosLocais = []
-        }
-        
-        if !ciclosLocais.isEmpty {
-            if !append {
-                self.allCiclos = ciclosLocais
-                self.atualCiclo = ciclosLocais[0]
-                self.index = 0
-            } else {
-                // Evita duplicar ciclos que já estão no array. O fetch local
-                // não é paginado por skip/limit, então retorna TODOS os ciclos
-                // a cada chamada. Quando online, o array é substituído depois
-                // por ciclosAtualizados; mas quando offline, o return early
-                // mantém o append — daí a duplicação.
-                let idsExistentes = Set(self.allCiclos.map { $0.id })
-                let novos = ciclosLocais.filter { !idsExistentes.contains($0.id) }
-                self.allCiclos.append(contentsOf: novos)
-            }
-            self.isLoading = false
-        }
-
-        // Se offline, usa apenas dados locais — não tenta rede (evita
-        // congelamento da UI por timeout de 15-30s).
-        guard NetworkMonitor.shared.isConnected else {
-            if !append, !ciclosLocais.isEmpty {
-                // atualCiclo já foi definido como ciclosLocais[0] acima.
-                // Carrega dias locais pelo UUID do ciclo — funciona mesmo
-                // para ciclos criados offline (sem backendId).
-                self.diasSkip = 0
-                self.hasMoreDias = false
-                carregarDiasLocais()
-            }
-            isLoading = false
-            hasLoadedOnce = true
-            return
-        }
-
-        do {
-            let ciclos = try await NetworkManager.shared.fetchCicloResumo(skip: skip, limit: limit)
-            
-            hasMorePages = ciclos.count == limit
-            
-            for ciclo in ciclos {
-                salvarOuAtualizarCicloLocal(ciclo)
-            }
-
-            salvarLocal()
-            
-            let ciclosAtualizados: [CicloSoftex]
-            if let context = modelContext {
-                ciclosAtualizados = (try? context.fetch(descriptor)) ?? []
-            } else {
-                ciclosAtualizados = []
-            }
-            
-            if !append {
-                self.allCiclos = ciclosAtualizados
-                self.index = 0
-                
-                if let primeiro = self.allCiclos.first {
-                    self.atualCiclo = primeiro
-                } else {
-                    self.atualCiclo = CicloSoftex.vazio
-                }
-            } else {
-                self.allCiclos = ciclosAtualizados
-            }
-            
-            if !append, self.allCiclos.indices.contains(self.index) {
-                let cicloParaSalvar = self.allCiclos[self.index]
-                
-                guard let cicloId = cicloParaSalvar.backendId else {
-                    isLoading = false
-                    return
-                }
-                
-                self.atualCiclo = cicloParaSalvar
-                self.atualCiclo.dias = []
-                self.diasSkip = 0
-                self.hasMoreDias = true
-                await loadMoreDias(cicloId: cicloId)
-            } else if !append {
-                self.atualCiclo = CicloSoftex.vazio
-            }
-            
-            isLoading = false
-            hasLoadedOnce = true
-            
-        } catch {
-            showError(error)
-            
-            if !append, self.allCiclos.isEmpty {
-                self.allCiclos = []
-                self.atualCiclo = CicloSoftex.vazio
-            }
-            
-            isLoading = false
-            hasLoadedOnce = true
-        }
-    }
-    
     func loadMoreDias(cicloId: Int) async {
-        guard hasMoreDias, !isLoadingDias else { return }
-        isLoadingDias = true
-        defer { isLoadingDias = false }
+        carregarDiasLocais()
 
-        // Se offline, carrega apenas do banco local — não tenta rede.
-        guard NetworkMonitor.shared.isConnected else {
-            carregarDiasLocais()
-            return
-        }
+        loadMoreDiasTask?.cancel()
+        loadMoreDiasTask = Task {
+            guard hasMoreDias, !isLoadingDias else { return }
+            isLoadingDias = true
+            defer { isLoadingDias = false }
+            
+            guard NetworkMonitor.shared.isConnected else { return }
+            
+            do {
+                let dias = try await NetworkManager.shared.fetchDias(cicloId: cicloId, skip: diasSkip, limit: diasLimit)
+                
+                await MainActor.run {
+                    guard !Task.isCancelled else { return }
+                    
+                    hasMoreDias = dias.count == diasLimit
+                    diasSkip += dias.count
 
-        do {
-            let dias = try await NetworkManager.shared.fetchDias(cicloId: cicloId, skip: diasSkip, limit: diasLimit)
-            hasMoreDias = dias.count == diasLimit
-            diasSkip += dias.count
+                    if atualCiclo.dias == nil {
+                        atualCiclo.dias = []
+                    }
 
-            if atualCiclo.dias == nil {
-                atualCiclo.dias = []
+                    for dia in dias {
+                        salvarOuAtualizarDiaLocal(dia, no: atualCiclo)
+                    }
+
+                    salvarLocal()
+                    carregarDiasLocais()
+                }
+            } catch {
+                await MainActor.run {
+                    guard !Task.isCancelled else { return }
+                    showError(error)
+                }
             }
-
-            for dia in dias {
-                salvarOuAtualizarDiaLocal(dia, no: atualCiclo)
-            }
-
-            salvarLocal()
-            carregarDiasLocais()
-
-        } catch {
-            showError(error)
         }
     }
 
-    /// Busca dias do banco local e atualiza atualCiclo.dias.
-    /// Usa o UUID local (id) do ciclo atual, não backendId — funciona
-    /// mesmo para ciclos criados offline que ainda não têm backendId.
-    /// Em caso de erro de fetch, mantém os dias existentes.
     private func carregarDiasLocais() {
         let cicloLocalId = self.atualCiclo.id
-        let descriptor = FetchDescriptor<DiaSoftex>(
-            predicate: #Predicate { $0.ciclo?.id == cicloLocalId && $0.deletadoEm == nil },
+        var descriptor = FetchDescriptor<DiaSoftex>(
+            predicate: #Predicate { $0.deletadoEm == nil },
             sortBy: [SortDescriptor(\.data)]
         )
+        descriptor.relationshipKeyPathsForPrefetching = [\.ciclo]
         let diasAtualizados: [DiaSoftex]
         if let context = modelContext {
             do {
-                diasAtualizados = try context.fetch(descriptor)
+                diasAtualizados = (try context.fetch(descriptor))
+                    .filter { $0.ciclo?.id == cicloLocalId }
             } catch {
                 showError(APIError.serverError(
                     message: "Erro ao buscar dias locais: \(error.localizedDescription)",
@@ -384,12 +424,6 @@ final class CiclosViewModel: ObservableObject {
         modelContext?.insert(gasto)
     }
     
-    /// Salva ou atualiza um ciclo no DB local. Retorna a instância
-    /// context-owned (a que está no ModelContext), seja ela a existente
-    /// atualizada ou a recém-inserida. O caller DEVE usar o retorno em vez
-    /// do parâmetro para evitar trabalhar com instâncias detached.
-    /// Sempre seta userId para o usuário logado — dados do backend
-    /// chegam filtrados pelo JWT, mas precisamos gravar o dono localmente.
     @discardableResult
     private func salvarOuAtualizarCicloLocal(_ ciclo: CicloSoftex) -> CicloSoftex? {
         let userId = currentUser?.id ?? ""
@@ -450,15 +484,52 @@ final class CiclosViewModel: ObservableObject {
     }
     
     func editCiclo(cicloId: Int, ciclo: CicloSoftex, dias: [DiaLoteRequest]? = nil) async {
-        guard let cicloLocal = self.allCiclos.first(where: { $0.backendId == cicloId }) else { return }
+        guard let cicloLocal = self.allCiclos.first(where: { $0.backendId == cicloId }) else {
+            viewModelLogger.warning("editCiclo: ciclo nao encontrado allCiclos backendId=\(cicloId, privacy: .public)")
+            return
+        }
 
-        // Atualiza localmente primeiro
+        viewModelLogger.info("editCiclo: atualizando cicloLocal backendId=\(cicloId, privacy: .public) titulo=\(ciclo.titulo, privacy: .private)")
         cicloLocal.titulo = ciclo.titulo
         cicloLocal.valor_total = ciclo.valor_total
         cicloLocal.diaria = ciclo.diaria
         cicloLocal.periodo = ciclo.periodo
         cicloLocal.syncStatus = .pending
         cicloLocal.syncError = nil
+
+        if let novasDatas = dias, !novasDatas.isEmpty {
+            let cal = Calendar.current
+            let datasNovas = novasDatas.map { $0.data }
+
+            if let diasExistentes = cicloLocal.dias {
+                for dia in diasExistentes where dia.deletadoEm == nil {
+                    if !datasNovas.contains(where: { cal.isDate($0, inSameDayAs: dia.data) }) {
+                        dia.deletadoEm = Date()
+                        dia.syncStatus = .pending
+                        for gasto in dia.gastos where gasto.deletadoEm == nil {
+                            gasto.deletadoEm = Date()
+                            gasto.syncStatus = .pending
+                            cicloLocal.gasto_total -= gasto.valor
+                        }
+                    }
+                }
+            }
+
+            let diasVivos = cicloLocal.dias?.filter { $0.deletadoEm == nil } ?? []
+            for novo in novasDatas {
+                if !diasVivos.contains(where: { cal.isDate($0.data, inSameDayAs: novo.data) }) {
+                    let dia = DiaSoftex(
+                        clientId: novo.clientId ?? UUID().uuidString,
+                        data: novo.data,
+                        saldo: cicloLocal.diaria,
+                        gastos: []
+                    )
+                    dia.ciclo = cicloLocal
+                    modelContext?.insert(dia)
+                    cicloLocal.dias?.append(dia)
+                }
+            }
+        }
 
         if let index = self.allCiclos.firstIndex(where: { $0.backendId == cicloId }) {
             self.allCiclos[index] = cicloLocal
@@ -470,23 +541,19 @@ final class CiclosViewModel: ObservableObject {
 
         salvarLocal()
 
-        // Sync em background — não bloqueia o MainActor.
-        // Se offline, o sync falha e marca syncStatus = .failed com backoff.
-        // O SyncManager retenta automaticamente quando a conexão volta.
         Task {
-            await SyncManager.shared.sync()
+            await SyncManager.shared.sync(forcar: true)
         }
     }
     
-    func deleteCiclo(cicloId: Int) async throws {
-        guard let ciclo = self.allCiclos.first(where: { $0.backendId == cicloId }) else { return }
-        
-        // Remove da UI imediatamente
-        if let index = self.allCiclos.firstIndex(where: { $0.backendId == cicloId }){
+    func deleteCiclo(ciclo: CicloSoftex) async throws {
+        let cicloId = ciclo.id
+
+        if let index = self.allCiclos.firstIndex(where: { $0.id == cicloId }) {
             self.allCiclos.remove(at: index)
         }
-        
-        if self.atualCiclo.backendId == cicloId {
+
+        if self.atualCiclo.id == cicloId {
             if let primeiroCiclo = self.allCiclos.first {
                 self.atualCiclo = primeiroCiclo
                 if let firstIndex = self.allCiclos.firstIndex(of: primeiroCiclo) {
@@ -499,15 +566,25 @@ final class CiclosViewModel: ObservableObject {
                 self.index = 0
             }
         }
-        
-        // Soft delete local
-        ciclo.deletadoEm = Date()
-        ciclo.syncStatus = .pending
-        salvarLocal()
-        
-        Task {
-            await SyncManager.shared.sync()
+
+        if let _ = ciclo.backendId {
+            ciclo.deletadoEm = Date()
+            ciclo.syncStatus = .pending
+            salvarLocal()
+
+            Task {
+                await SyncManager.shared.sync(forcar: true)
+            }
+        } else {
+            modelContext?.delete(ciclo)
+            salvarLocal()
         }
+    }
+
+    @available(*, deprecated, message: "Use deleteCiclo(ciclo:) com o objeto CicloSoftex")
+    func deleteCiclo(cicloId: Int) async throws {
+        guard let ciclo = self.allCiclos.first(where: { $0.backendId == cicloId }) else { return }
+        try await deleteCiclo(ciclo: ciclo)
     }
     
     private func salvarCicloLocal(_ ciclo: CicloSoftex) {
@@ -518,8 +595,9 @@ final class CiclosViewModel: ObservableObject {
     func createAllDiasLoteRequest(dayCount: Int, startDate: Date) -> [DiaLoteRequest] {
         var dias: [DiaLoteRequest] = []
         let calendar = Calendar.current
-        
-        for i in 0..<dayCount {
+        let count = max(dayCount, 1)
+
+        for i in 0..<count {
             if let date = calendar.date(byAdding: .day, value: i, to: startDate) {
                 dias.append(DiaLoteRequest(clientId: UUID().uuidString, data: date))
             }
@@ -540,8 +618,7 @@ final class CiclosViewModel: ObservableObject {
     }
     
     private func salvarNovoCicloLocal(_ ciclo: CicloSoftex, comDias diasRequests: [DiaLoteRequest]) {
-        // Insere o ciclo PRIMEIRO para que o relacionamento inverse
-        // (dia.ciclo) seja resolvido corretamente pelo SwiftData.
+        viewModelLogger.info("salvarNovoCicloLocal: inserindo ciclo id=\(ciclo.id, privacy: .public) clientId=\(ciclo.clientId, privacy: .private) userId=\(ciclo.userId, privacy: .private)")
         ciclo.syncStatus = .pending
         modelContext?.insert(ciclo)
 
@@ -554,6 +631,7 @@ final class CiclosViewModel: ObservableObject {
         }
         ciclo.dias = dias
         salvarLocal()
+        viewModelLogger.info("salvarNovoCicloLocal: save concluido, syncStatus=\(ciclo.syncStatus.rawValue, privacy: .public)")
     }
     
     private func postToNetwork(newCiclo: CicloSoftex, dias: [DiaLoteRequest]) async throws {
@@ -563,11 +641,8 @@ final class CiclosViewModel: ObservableObject {
         self.atualCiclo = newCiclo
         self.index = 0
 
-        // Sync em background — erros de sync são registrados no próprio model
-        // (syncStatus = .failed, syncError) pelo SyncManager, e a UI reage a
-        // essas mudanças via @Published/@Query. sync() não é throws.
         Task {
-            await SyncManager.shared.sync()
+            await SyncManager.shared.sync(forcar: true)
         }
     }
     
@@ -576,8 +651,6 @@ final class CiclosViewModel: ObservableObject {
             throw APIError.serverError(message: "Contexto do banco de dados não configurado", requestId: "-", statusCode: 500)
         }
 
-        // Valida o dia antes de criar o gasto — evita insert órfão se o
-        // dia não pertence mais ao ciclo atual (ex: ciclo trocou no meio).
         guard self.atualCiclo.dias?.contains(where: { $0.id == dia.id }) == true else {
             throw APIError.serverError(message: "Dia selecionado não encontrado no ciclo atual", requestId: "-", statusCode: 404)
         }
@@ -594,11 +667,6 @@ final class CiclosViewModel: ObservableObject {
 
         modelContext.insert(novoGasto)
 
-        // NÃO fazer append manual em dia.gastos: o init já setou
-        // novoGasto.dia = dia, e SwiftData estabelece a relação
-        // inversa automaticamente após o insert. O append manual
-        // criava uma duplicata na relação, causando crash quando o
-        // SyncActor fazia merge do contexto.
         self.atualCiclo.gasto_total += novoGasto.valor
         if self.index < self.allCiclos.count {
             self.allCiclos[self.index] = self.atualCiclo
@@ -607,7 +675,7 @@ final class CiclosViewModel: ObservableObject {
         try modelContext.save()
 
         Task {
-            await SyncManager.shared.sync()
+            await SyncManager.shared.sync(forcar: true)
         }
     }
 
@@ -623,9 +691,8 @@ final class CiclosViewModel: ObservableObject {
         gasto.syncStatus = .pending
         try modelContext.save()
 
-        // Sync em background — não bloqueia o MainActor.
         Task {
-            await SyncManager.shared.sync()
+            await SyncManager.shared.sync(forcar: true)
         }
     }
     
@@ -641,9 +708,8 @@ final class CiclosViewModel: ObservableObject {
         gasto.syncStatus = .pending
         try modelContext.save()
 
-        // Sync em background — não bloqueia o MainActor.
         Task {
-            await SyncManager.shared.sync()
+            await SyncManager.shared.sync(forcar: true)
         }
     }
     
@@ -664,32 +730,30 @@ final class CiclosViewModel: ObservableObject {
         }
         
         var gastoParaDeletar: GastosDia?
-        
-        for diaIndex in dias.indices {
-            if let gastoIndex = dias[diaIndex].gastos.firstIndex(where: { $0.id == gastoID }) {
-                let gasto = dias[diaIndex].gastos[gastoIndex]
+
+        for dia in dias {
+            if let gasto = dia.gastos.first(where: { $0.id == gastoID }) {
                 gastoParaDeletar = gasto
-                
-                self.atualCiclo.dias?[diaIndex].gastos.remove(at: gastoIndex)
-                self.atualCiclo.gasto_total -= gasto.valor
-                
-                if self.index < self.allCiclos.count {
-                    self.allCiclos[self.index] = self.atualCiclo
-                }
                 break
             }
         }
-        
+
         guard let gasto = gastoParaDeletar else {
             throw APIError.serverError(message: "Gasto não encontrado", requestId: "-", statusCode: 404)
         }
-        
+
+        self.atualCiclo.gasto_total -= gasto.valor
+
+        if self.index < self.allCiclos.count {
+            self.allCiclos[self.index] = self.atualCiclo
+        }
+
         gasto.deletadoEm = Date()
         gasto.syncStatus = .pending
         try modelContext.save()
-        
+
         Task {
-            await SyncManager.shared.sync()
+            await SyncManager.shared.sync(forcar: true)
         }
     }
     
@@ -752,7 +816,7 @@ final class CiclosViewModel: ObservableObject {
         try modelContext.save()
         
         Task {
-            await SyncManager.shared.sync()
+            await SyncManager.shared.sync(forcar: true)
         }
     }
 }

@@ -45,8 +45,11 @@ struct NewCicloView: View {
         _orcamento = State(initialValue: ciclo.valor_total)
         self.onBack = onBack
         self.ciclo = ciclo
-        
-        if let primeiraData = ciclo.dias?.first?.data, let ultimaData = ciclo.dias?.last?.data {
+
+        // Usa a menor e a maior data dos dias, não a ordem do array,
+        // que pode estar invertida dependendo da inserção/sync.
+        let datas = ciclo.dias?.map { $0.data } ?? []
+        if let primeiraData = datas.min(), let ultimaData = datas.max() {
             _dataInicio = State(initialValue: primeiraData)
             _dataFim = State(initialValue: ultimaData)
         } else {

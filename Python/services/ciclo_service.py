@@ -46,5 +46,15 @@ def incrementar_gasto_total(db: Session, ciclo_id: int, valor: float):
     return ciclo_repository.incrementar_gasto_total(db, ciclo_id, valor)
 
 
-def delete_ciclo(db: Session, ciclo_id: int):
-    return ciclo_repository.delete_ciclo(db, ciclo_id)
+def update_ciclo(db: Session, ciclo_id: int, user_id: str, ciclo_request: CicloRequest):
+    ciclo = ciclo_repository.get_user_ciclo_by_id(db, ciclo_id, user_id)
+    if not ciclo:
+        raise HTTPException(status_code=404, detail="Ciclo não encontrado")
+    return ciclo_repository.update_ciclo(db, ciclo, ciclo_request)
+
+
+def delete_ciclo(db: Session, ciclo_id: int, user_id: str):
+    ciclo = ciclo_repository.get_ciclo_by_id(db, ciclo_id)
+    if not ciclo or ciclo.id_usuario != user_id:
+        raise HTTPException(status_code=404, detail="Ciclo não encontrado")
+    return ciclo_repository.delete_ciclo(db, ciclo)

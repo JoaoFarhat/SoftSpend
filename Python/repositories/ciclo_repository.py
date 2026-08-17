@@ -45,6 +45,10 @@ def get_ciclo_by_id(db: Session, ciclo_id: int):
 def get_user_ciclo_by_id(db: Session, ciclo_id: int, user_id: str):
     return (
         db.query(models.Ciclo)
+        .options(
+            selectinload(models.Ciclo.dias)
+            .selectinload(models.Dia.gastos)
+        )
         .filter(models.Ciclo.id == ciclo_id, models.Ciclo.id_usuario == user_id)
         .first()
     )

@@ -7,15 +7,18 @@
 
 import Foundation
 import Combine
+import os
 
 final class NetworkManager: Sendable {
 
     nonisolated static let shared = NetworkManager()
+    nonisolated private let logger = Logger(subsystem: "br.com.softspend", category: "NetworkManager")
 
     private nonisolated let session: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 15
-        config.timeoutIntervalForResource = 30
+        config.waitsForConnectivity = false
+        config.timeoutIntervalForRequest = 8
+        config.timeoutIntervalForResource = 8
         return URLSession(
             configuration: config,
             delegate: InsecureSessionDelegate(),
@@ -58,11 +61,35 @@ final class NetworkManager: Sendable {
     
     @discardableResult
     nonisolated private func execute(_ request: URLRequest, logout401: Bool = true) async throws -> Data {
-        let (data, response) = try await session.data(for: request)
+        logger.info("execute: \(request.httpMethod ?? "?", privacy: .private) \(request.url?.absoluteString ?? "?", privacy: .private)")
+        let start = Date()
+        let requestTimeout: UInt64 = 8 * 1_000_000_000
+
+        let (data, response) = try await withThrowingTaskGroup(of: (Data, URLResponse).self) { group in
+            group.addTask {
+                var req = request
+                req.timeoutInterval = 8
+                return try await self.session.data(for: req)
+            }
+            group.addTask {
+                try await Task.sleep(nanoseconds: requestTimeout)
+                throw URLError(.timedOut)
+            }
+            guard let result = try await group.next() else {
+                throw APIError.unknown
+            }
+            group.cancelAll()
+            return result
+        }
+
+        let duration = Date().timeIntervalSince(start)
+        logger.info("execute: completed in \(duration, privacy: .public)s")
 
         guard let http = response as? HTTPURLResponse else {
             throw APIError.unknown
         }
+
+        logger.info("execute: status \(http.statusCode, privacy: .public) for \(request.url?.absoluteString ?? "?", privacy: .private)")
 
         if http.statusCode == 401, logout401 {
             Task { @MainActor in
@@ -120,6 +147,7 @@ final class NetworkManager: Sendable {
     }
     
     nonisolated func postCiclo(request: CicloCreateRequest) async throws -> CicloSoftex {
+        logger.info("postCiclo: client_id=\(request.client_id ?? "nil", privacy: .private) titulo=\(request.titulo, privacy: .private)")
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos") else {
             throw URLError(.badURL)
         }
@@ -129,6 +157,7 @@ final class NetworkManager: Sendable {
     }
     
     nonisolated func putCiclo(cicloId: Int, request: CicloUpdateRequest) async throws -> CicloSoftex {
+        logger.info("putCiclo: cicloId=\(cicloId, privacy: .public) titulo=\(request.titulo, privacy: .private)")
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)") else {
             throw URLError(.badURL)
         }
@@ -138,6 +167,7 @@ final class NetworkManager: Sendable {
     }
     
     nonisolated func deleteCiclo(cicloId: Int) async throws {
+        logger.info("deleteCiclo: cicloId=\(cicloId, privacy: .public)")
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)") else {
             throw URLError(.badURL)
         }
@@ -164,6 +194,7 @@ final class NetworkManager: Sendable {
     }
     
     nonisolated func deleteDia(diaId: Int) async throws {
+        logger.info("deleteDia: diaId=\(diaId, privacy: .public)")
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/dias/\(diaId)") else {
             throw URLError(.badURL)
         }
@@ -189,6 +220,7 @@ final class NetworkManager: Sendable {
     }
     
     nonisolated func deleteGasto(gastoId: Int) async throws {
+        logger.info("deleteGasto: gastoId=\(gastoId, privacy: .public)")
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/\(gastoId)") else {
             throw URLError(.badURL)
         }
