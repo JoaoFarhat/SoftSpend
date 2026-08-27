@@ -1,4 +1,5 @@
 import models
+from sqlalchemy.orm import Session
 from dtos.ciclo import CicloResponse, CicloRequest
 from repositories import ciclo_repository
 from fastapi import HTTPException
