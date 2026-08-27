@@ -17,6 +17,16 @@ def atualizar_gasto(db: Session, gasto: models.Gasto):
 def find_gasto(db: Session, gasto_id: int):
     return db.query(models.Gasto).filter(models.Gasto.id == gasto_id).first()
 
+
+def find_gasto_for_update(db: Session, gasto_id: int):
+    return (
+        db.query(models.Gasto)
+        .filter(models.Gasto.id == gasto_id)
+        .with_for_update()
+        .first()
+    )
+
+
 def find_by_client_id(db: Session, client_id: str, dia_id: int):
     return (
         db.query(models.Gasto)

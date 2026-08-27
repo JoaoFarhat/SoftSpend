@@ -17,9 +17,11 @@ cd SoftexVamo
   -configuration Debug build CODE_SIGNING_ALLOWED=NO
 ```
 
-Backend (checagem rápida de import e rotas):
+Backend:
 
 ```bash
+cd Python && python3 -m pip install -r requirements-dev.txt
+cd Python && pytest -q
 cd Python && python3 -c "import main; print(len(main.app.routes))"
 ```
 
@@ -290,6 +292,8 @@ AWS S3, Cloudflare R2, Supabase Storage e MinIO:
 | --- | --- | --- |
 | `ALLOWED_ORIGINS` | `https://softspend.com.br` | Origens CORS permitidas, separadas por vírgula |
 | `DOCS_ENABLED` | `false` | Se `true`, habilita `/docs`, `/redoc` e `/openapi.json` |
+| `TRUST_PROXY` | `false` | Habilita o uso de `X-Forwarded-For` somente quando o peer pertence a uma rede confiável |
+| `TRUSTED_PROXY_IPS` | `127.0.0.1,::1` | IPs ou redes CIDR dos proxies confiáveis, separados por vírgula |
 
 ## Deduplicação e `client_id`
 

@@ -23,6 +23,7 @@ from services import ocr_service
 from services import comprovante_cleanup
 
 setup_logging()
+logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager

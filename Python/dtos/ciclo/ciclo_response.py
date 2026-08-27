@@ -1,5 +1,5 @@
 from typing import List
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from dtos.dia.dia_response import DiaResponse
 from dtos.tipos import Dinheiro
 
@@ -14,5 +14,4 @@ class CicloResponse(BaseModel):
     periodo: str
     dias: List[DiaResponse]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

@@ -1,4 +1,5 @@
 import logging
+import re
 import time
 import uuid
 
@@ -7,22 +8,27 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from limiter import get_real_ip
 from logging_config import request_id_var
 
 logger = logging.getLogger(__name__)
+REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         request_id = request.headers.get("X-Request-ID")
-        if not request_id:
+        if not request_id or not REQUEST_ID_PATTERN.fullmatch(request_id):
             request_id = str(uuid.uuid4())
         request.state.request_id = request_id
-        request_id_var.set(request_id)
+        token = request_id_var.set(request_id)
 
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request_id
-        return response
+        try:
+            response = await call_next(request)
+            response.headers["X-Request-ID"] = request_id
+            return response
+        finally:
+            request_id_var.reset(token)
 
 
 class LoggingMiddleware(BaseHTTPMiddleware):
@@ -72,10 +78,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         return response
 
     def _get_client_ip(self, request: Request) -> str:
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[-1].strip()
-        return request.client.host if request.client else "-"
+        return get_real_ip(request)
 
 
 def get_request_id(request: Request) -> str:

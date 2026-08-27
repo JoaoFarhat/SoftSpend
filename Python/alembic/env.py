@@ -14,29 +14,14 @@ load_dotenv()
 import models
 from database import Base, DATABASE_URL
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
 config = context.config
 
-# Usa a mesma URL da aplicação (DATABASE_URL ou DB_USER/DB_PASS/DB_HOST/DB_NAME),
-# em vez da URL fixa do alembic.ini, que fica desatualizada.
-# O `%` precisa ser escapado: o alembic.ini passa pelo configparser, que trata
-# `%` como interpolação — e senhas url-encoded contêm `%`.
 config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
 target_metadata = Base.metadata
-
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
 
 
 def run_migrations_offline() -> None:

@@ -12,6 +12,8 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 
 if not SECRET_KEY:
     raise RuntimeError("SECRET_KEY não definida nas variáveis de ambiente")
+if len(SECRET_KEY) < 32:
+    raise RuntimeError("SECRET_KEY deve ter pelo menos 32 caracteres")
 
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_DAYS = 7

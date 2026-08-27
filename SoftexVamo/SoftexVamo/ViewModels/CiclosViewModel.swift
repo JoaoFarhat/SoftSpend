@@ -353,15 +353,14 @@ final class CiclosViewModel: ObservableObject {
     private func carregarDiasLocais() {
         let cicloLocalId = self.atualCiclo.id
         var descriptor = FetchDescriptor<DiaSoftex>(
-            predicate: #Predicate { $0.deletadoEm == nil },
+            predicate: #Predicate { $0.deletadoEm == nil && $0.ciclo?.id == cicloLocalId },
             sortBy: [SortDescriptor(\.data)]
         )
         descriptor.relationshipKeyPathsForPrefetching = [\.ciclo]
         let diasAtualizados: [DiaSoftex]
         if let context = modelContext {
             do {
-                diasAtualizados = (try context.fetch(descriptor))
-                    .filter { $0.ciclo?.id == cicloLocalId }
+                diasAtualizados = try context.fetch(descriptor)
             } catch {
                 showError(APIError.serverError(
                     message: "Erro ao buscar dias locais: \(error.localizedDescription)",

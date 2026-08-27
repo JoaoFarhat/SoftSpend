@@ -4,7 +4,10 @@ import models, dtos
 from dtos.gasto import GastoRequest
 from repositories import gasto_repository, dia_repository, ciclo_repository
 from services import storage_service
-from services.comprovante_cleanup import marcar_comprovante_para_remover
+from services.comprovante_cleanup import (
+    marcar_comprovante_para_remover,
+    marcar_comprovante_para_remover_no_rollback,
+)
 
 def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: str):
     dia = dia_repository.find_dia(db, dia_id)
@@ -34,7 +37,7 @@ def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: str):
     return gasto_repository.criar_gasto(db, novo_gasto)
 
 def atualizar_gasto(db: Session, gasto_id: int, gasto_request: GastoRequest, user_id: str):
-    gasto = gasto_repository.find_gasto(db, gasto_id)
+    gasto = gasto_repository.find_gasto_for_update(db, gasto_id)
 
     if not gasto:
         raise HTTPException(status_code=404, detail="Gasto não encontrado")
@@ -78,7 +81,7 @@ def atualizar_gasto(db: Session, gasto_id: int, gasto_request: GastoRequest, use
 
 
 def remover_gasto(db: Session, gasto_id: int, user_id: str):
-    gasto = gasto_repository.find_gasto(db, gasto_id)
+    gasto = gasto_repository.find_gasto_for_update(db, gasto_id)
 
     if not gasto:
         raise HTTPException(status_code=404, detail="Gasto não encontrado")
@@ -97,7 +100,7 @@ def remover_gasto(db: Session, gasto_id: int, user_id: str):
 
 
 def _buscar_gasto_do_usuario(db: Session, gasto_id: int, user_id: str) -> models.Gasto:
-    gasto = gasto_repository.find_gasto(db, gasto_id)
+    gasto = gasto_repository.find_gasto_for_update(db, gasto_id)
 
     if not gasto:
         raise HTTPException(status_code=404, detail="Gasto não encontrado")
@@ -116,7 +119,9 @@ def anexar_comprovante(db: Session, gasto_id: int, conteudo: bytes, content_type
     gasto = _buscar_gasto_do_usuario(db, gasto_id, user_id)
     key_anterior = gasto.comprovante_key
 
-    gasto.comprovante_key = storage_service.salvar_comprovante(user_id, gasto_id, conteudo, content_type)
+    nova_key = storage_service.salvar_comprovante(user_id, gasto_id, conteudo, content_type)
+    marcar_comprovante_para_remover_no_rollback(db, nova_key)
+    gasto.comprovante_key = nova_key
     gasto_repository.atualizar_gasto(db, gasto)
 
     # Não remove o arquivo antigo imediatamente: se o commit falhar, o banco
