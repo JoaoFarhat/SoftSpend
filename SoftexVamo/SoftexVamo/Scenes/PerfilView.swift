@@ -29,17 +29,18 @@ struct PerfilView: View {
         }.count
     }
     
-    private var totalGasto: Float {
-        viewModel.allCiclos.reduce(0) { $0 + $1.gasto_total }
+    private var totalGasto: Decimal {
+        viewModel.allCiclos.reduce(Decimal(0)) { $0 + $1.gasto_total }
     }
-    
-    private var totalOrcado: Float {
-        viewModel.allCiclos.reduce(0) { $0 + $1.valor_total }
+
+    private var totalOrcado: Decimal {
+        viewModel.allCiclos.reduce(Decimal(0)) { $0 + $1.valor_total }
     }
-    
+
     private var percentUtilizado: Int {
         guard totalOrcado > 0 else { return 0 }
-        return Int((totalGasto / totalOrcado) * 100)
+        let ratio = totalGasto / totalOrcado
+        return Int((Double(truncating: NSDecimalNumber(decimal: ratio))) * 100)
     }
     
     var body: some View {
@@ -227,12 +228,8 @@ struct PerfilView: View {
         }
     }
     
-    private func formatCurrency(_ value: Float) -> String {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.locale = Locale(identifier: "pt_BR")
-        formatter.maximumFractionDigits = 2
-        return formatter.string(from: NSNumber(value: value)) ?? "R$ 0,00"
+    private func formatCurrency(_ value: Decimal) -> String {
+        value.formattedAsCurrency()
     }
 }
 

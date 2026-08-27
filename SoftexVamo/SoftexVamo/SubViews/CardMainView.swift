@@ -17,8 +17,8 @@ struct CardMainView: View {
     var progresso: CGFloat {
         let percent = viewModel.atualCiclo.valor_total > 0
             ? viewModel.atualCiclo.gasto_total / viewModel.atualCiclo.valor_total
-            : 0
-        return CGFloat(min(max(percent, 0), 1))
+            : Decimal(0)
+        return CGFloat(min(max(Double(truncating: NSDecimalNumber(decimal: percent)), 0), 1))
     }
 
     var percentualUtilizado: Int {
@@ -73,8 +73,7 @@ struct CardMainView: View {
                 }
 
                 Text(
-                    viewModel.atualCiclo.valor_total - viewModel.atualCiclo.gasto_total,
-                    format: .currency(code: "BRL").locale(Locale(identifier: "pt_BR"))
+                    (viewModel.atualCiclo.valor_total - viewModel.atualCiclo.gasto_total).formattedAsCurrency()
                 )
                 .font(.system(size: 36, weight: .heavy))
                 .lineLimit(1)
@@ -83,10 +82,7 @@ struct CardMainView: View {
                 (Text("de ")
                     .font(.system(size: 12, weight: .regular))
                     .foregroundStyle(.white.opacity(0.8))
-                + Text(
-                    viewModel.atualCiclo.valor_total,
-                    format: .currency(code: "BRL").locale(Locale(identifier: "pt_BR"))
-                )
+                + Text(viewModel.atualCiclo.valor_total.formattedAsCurrency())
                 .font(.system(size: 12, weight: .bold)))
 
                 HStack {
@@ -130,25 +126,23 @@ struct CardMainView: View {
                     statItem(
                         icon: "dollarsign.circle",
                         label: "Gasto Total",
-                        value: viewModel.atualCiclo.gasto_total,
-                        format: .currency(code: "BRL").locale(Locale(identifier: "pt_BR")),
+                        value: viewModel.atualCiclo.gasto_total.formattedAsCurrency(),
                         subtitle: "\(percentualUtilizado)% do total"
                     )
-                    
+
                     Spacer()
 
                     Divider()
                         .frame(width: 1, height: 32)
                         .background(.white.opacity(0.3))
                         .padding(.horizontal, 8)
-                    
+
                     Spacer()
 
                     statItem(
                         icon: "chart.line.uptrend.xyaxis",
                         label: "Média diária",
-                        value: viewModel.atualCiclo.diaria,
-                        format: .currency(code: "BRL").locale(Locale(identifier: "pt_BR")),
+                        value: viewModel.atualCiclo.diaria.formattedAsCurrency(),
                         subtitle: "por dia"
                     )
                 }
@@ -165,7 +159,7 @@ struct CardMainView: View {
     }
 
     @ViewBuilder
-    private func statItem(icon: String, label: String, value: Any, format: FloatingPointFormatStyle<Float>.Currency? = nil, subtitle: String = "") -> some View {
+    private func statItem(icon: String, label: String, value: String, subtitle: String = "") -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon)
                 .font(.system(size: 11))
@@ -177,17 +171,10 @@ struct CardMainView: View {
                 Text(label)
                     .font(.system(size: 9, weight: .regular))
                     .foregroundStyle(.white.opacity(0.75))
-                if let format {
-                    Text(value as! Float, format: format)
-                        .font(.system(size: 10, weight: .bold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                } else {
-                    Text(value as! String)
-                        .font(.system(size: 10, weight: .bold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.75)
-                }
+                Text(value)
+                    .font(.system(size: 10, weight: .bold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 if !subtitle.isEmpty {
                     Text(subtitle)
                         .font(.system(size: 8, weight: .regular))

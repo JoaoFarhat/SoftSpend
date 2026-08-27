@@ -15,10 +15,10 @@ nonisolated final class CicloSoftex {
     var clientId: String
     var backendId: Int?
     var userId: String
-    var valor_total: Float
-    var gasto_total: Float
+    var valor_total: Decimal
+    var gasto_total: Decimal
     var periodo: String
-    var diaria: Float
+    var diaria: Decimal
     var titulo: String
 
     @Relationship(deleteRule: .cascade, inverse: \DiaSoftex.ciclo) var dias: [DiaSoftex]?
@@ -42,10 +42,10 @@ nonisolated final class CicloSoftex {
         id: UUID = UUID(),
         clientId: String = UUID().uuidString,
         userId: String = "",
-        valor_total: Float,
-        gasto_total: Float,
+        valor_total: Decimal,
+        gasto_total: Decimal,
         periodo: String,
-        diaria: Float,
+        diaria: Decimal,
         titulo: String,
         dias: [DiaSoftex]? = nil
     ) {

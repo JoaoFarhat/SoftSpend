@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Float, String, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, Numeric, String, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from database import Base
 
@@ -8,11 +8,11 @@ class Ciclo(Base):
     id = Column(Integer, primary_key=True, index=True)
     client_id = Column(String(50), index=True, nullable=True)
 
-    valor_total = Column(Float)
-    gasto_total = Column(Float)
+    valor_total = Column(Numeric(10, 2))
+    gasto_total = Column(Numeric(10, 2))
     titulo = Column(String(100))
     periodo = Column(String(100))
-    diaria = Column(Float)
+    diaria = Column(Numeric(10, 2))
 
     id_usuario = Column(String(36), ForeignKey("users.id"))
 

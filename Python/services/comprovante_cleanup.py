@@ -11,6 +11,18 @@ logger = logging.getLogger(__name__)
 CHAVE_PENDENTES = "comprovantes_para_remover"
 
 
+def marcar_comprovante_para_remover(session: Session, key: str | None) -> None:
+    """Marca uma key de comprovante para remoção do storage após o commit.
+
+    Use isto em atualizações/replace de comprovantes, em vez de remover o
+    arquivo do S3 antes de confirmar a transação. Se ocorrer rollback, a key
+    é descartada sem deletar o arquivo.
+    """
+    if not key:
+        return
+    session.info.setdefault(CHAVE_PENDENTES, []).append(key)
+
+
 @event.listens_for(models.Gasto, "after_delete")
 def _anotar_comprovante_removido(mapper, connection, target):
     if not target.comprovante_key:

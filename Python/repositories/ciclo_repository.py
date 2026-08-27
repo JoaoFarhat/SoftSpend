@@ -1,10 +1,11 @@
+from decimal import Decimal
 from sqlalchemy.orm import Session, selectinload
 import models
 
 
 def criar_ciclo(db: Session, ciclo: models.Ciclo):
     db.add(ciclo)
-    db.commit()
+    db.flush()
     db.refresh(ciclo)
     return ciclo
 
@@ -62,7 +63,7 @@ def find_by_client_id(db: Session, client_id: str, user_id: str):
     )
 
 
-def incrementar_gasto_total(db: Session, ciclo_id: int, valor: float):
+def incrementar_gasto_total(db: Session, ciclo_id: int, valor: Decimal):
     db.query(models.Ciclo).filter(models.Ciclo.id == ciclo_id).update(
         {models.Ciclo.gasto_total: models.Ciclo.gasto_total + valor},
         synchronize_session=False,
@@ -73,10 +74,9 @@ def update_ciclo(db: Session, ciclo: models.Ciclo, ciclo_request):
     ciclo.periodo = ciclo_request.periodo
     ciclo.diaria = ciclo_request.diaria
     ciclo.valor_total = ciclo_request.valor_total
-    db.commit()
+    db.flush()
     db.refresh(ciclo)
     return ciclo
 
 def delete_ciclo(db: Session, ciclo: models.Ciclo):
     db.delete(ciclo)
-    db.commit()

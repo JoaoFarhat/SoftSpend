@@ -2,12 +2,14 @@ from pydantic import BaseModel, field_validator
 from typing import List
 from datetime import datetime, date, timezone
 from dtos.gasto.gasto_response import GastoResponse
+from dtos.tipos import Dinheiro
+
 
 class DiaResponse(BaseModel):
     id: int
     client_id: str | None
     data: datetime
-    saldo: float
+    saldo: Dinheiro
     gastos: List[GastoResponse]
 
     @field_validator("data", mode="before")
@@ -23,4 +25,5 @@ class DiaResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
 

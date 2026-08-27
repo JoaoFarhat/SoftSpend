@@ -7,9 +7,12 @@
 
 import SwiftData
 import Foundation
+import os
 
 @Model
 nonisolated final class GastosDia {
+    private static let logger = Logger(subsystem: "br.com.softspend", category: "GastosDiaModel")
+
     @Attribute(.unique) var id: UUID
     
     var clientId: String
@@ -19,7 +22,7 @@ nonisolated final class GastosDia {
         return dia?.backendId
     }
     var dia: DiaSoftex?
-    var valor: Float
+    var valor: Decimal
     var titulo: String
     var categoria: Categoria
     var comprovanteUrl: String?
@@ -32,7 +35,7 @@ nonisolated final class GastosDia {
             do {
                 return try ComprovanteCrypto.shared.descriptografar(comprovanteDataCriptografado)
             } catch {
-                print("ComprovanteCrypto: falha ao descriptografar comprovante: \(error.localizedDescription)")
+                GastosDia.logger.error("ComprovanteCrypto: falha ao descriptografar comprovante: \(error.localizedDescription, privacy: .public)")
                 return nil
             }
         }
@@ -41,7 +44,7 @@ nonisolated final class GastosDia {
                 do {
                     comprovanteDataCriptografado = try ComprovanteCrypto.shared.criptografar(newValue)
                 } catch {
-                    print("ComprovanteCrypto: falha ao criptografar comprovante: \(error.localizedDescription)")
+                    GastosDia.logger.error("ComprovanteCrypto: falha ao criptografar comprovante: \(error.localizedDescription, privacy: .public)")
                     comprovanteDataCriptografado = nil
                 }
             } else {
@@ -67,7 +70,7 @@ nonisolated final class GastosDia {
     init(
         id: UUID = UUID(),
         clientId: String = UUID().uuidString,
-        valor: Float,
+        valor: Decimal,
         titulo: String,
         categoria: Categoria,
         dia: DiaSoftex? = nil,
@@ -132,6 +135,6 @@ nonisolated final class GastosDia {
 
 nonisolated struct GastoExtraidoResponse: Codable, Sendable {
     let titulo: String
-    let valor: Float
+    let valor: Decimal
     let categoria: Categoria
 }

@@ -115,6 +115,5 @@ struct EmptyCicloView: View {
 
 #Preview {
     EmptyCicloView {
-        print("Criar ciclo")
     }
 }

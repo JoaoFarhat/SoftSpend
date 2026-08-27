@@ -3,16 +3,14 @@ import models
 
 def criar_gasto(db: Session, gasto: models.Gasto):
     db.add(gasto)
-    db.commit()
+    db.flush()
     return gasto
 
 def remover_gasto(db: Session, gasto: models.Gasto):
     db.delete(gasto)
-    db.commit()
-    return gasto
 
 def atualizar_gasto(db: Session, gasto: models.Gasto):
-    db.commit()
+    db.flush()
     db.refresh(gasto)
     return gasto
 

@@ -42,10 +42,21 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
         except Exception:
-            raise
-        finally:
             duration_ms = round((time.perf_counter() - start) * 1000, 2)
+            logger.error(
+                "Request failed",
+                extra={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": 500,
+                    "duration_ms": duration_ms,
+                    "ip": self._get_client_ip(request),
+                    "user_agent": request.headers.get("User-Agent", "-"),
+                },
+            )
+            raise
 
+        duration_ms = round((time.perf_counter() - start) * 1000, 2)
         logger.info(
             "Request finished",
             extra={

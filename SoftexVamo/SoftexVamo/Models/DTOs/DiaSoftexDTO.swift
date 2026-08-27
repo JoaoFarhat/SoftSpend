@@ -11,7 +11,7 @@ nonisolated struct DiaSoftexResponse: Codable, Sendable {
     let id: Int?
     let clientId: String?
     let data: Date
-    let saldo: Float
+    let saldo: Decimal
     let gastos: [GastosDiaResponse]?
     
     enum CodingKeys: String, CodingKey {

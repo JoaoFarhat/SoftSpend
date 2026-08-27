@@ -10,7 +10,7 @@ nonisolated struct GastosDiaResponse: Codable, Sendable {
     let id: Int?
     let clientId: String?
     let dia_id: Int?
-    let valor: Float
+    let valor: Decimal
     let titulo: String
     let categoria: Categoria
     let comprovante_url: String?
@@ -44,14 +44,14 @@ nonisolated struct GastosDiaResponse: Codable, Sendable {
 nonisolated struct GastoCreateRequest: Codable, Sendable {
     let client_id: String?
     let titulo: String
-    let valor: Float
+    let valor: Decimal
     let categoria: Categoria
     let dia_id: Int
 }
 
 nonisolated struct GastoUpdateRequest: Codable, Sendable {
     let titulo: String
-    let valor: Float
+    let valor: Decimal
     let categoria: Categoria
     let dia_id: Int?
 }

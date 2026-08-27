@@ -71,7 +71,6 @@ struct EmptyHistoricoView: View {
 }
 
 #Preview {
-    EmptyHistoricoView{
-        print("Criar ciclo")
+    EmptyHistoricoView {
     }
 }

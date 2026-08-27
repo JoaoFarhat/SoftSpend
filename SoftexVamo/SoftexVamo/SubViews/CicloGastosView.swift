@@ -234,7 +234,7 @@ struct CicloGastosView: View {
             Spacer()
             
             HStack(spacing: 8) {
-                Text(gasto.valor, format: .currency(code: "BRL"))
+                Text(gasto.valor.formattedAsCurrency())
                     .font(.system(size: 16, weight: .bold))
                     .foregroundColor(Color("textPrimary"))
                 
@@ -267,11 +267,8 @@ struct CicloGastosView: View {
 
 #Preview {
     CicloGastosView() {
-        print("ok")
     } editAction: { _, _ in
-        print("edit")
     } deleteAction: { _,_ in
-        print("")
     }
     .environmentObject(GastosViewModel(dias: CicloSoftex.example.dias ?? []))
     .environmentObject(CiclosViewModel())

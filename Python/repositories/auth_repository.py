@@ -17,7 +17,7 @@ def buscar_por_id(db: Session, user_id: str) -> models.User | None:
 
 def criar_usuario(db: Session, usuario: models.User) -> models.User:
     db.add(usuario)
-    db.commit()
+    db.flush()
     db.refresh(usuario)
     return usuario
 
@@ -27,4 +27,3 @@ def excluir_usuario_por_id(db: Session, user_id: str) -> None:
     if not usuario:
         raise ValueError("Usuario nao encontrado")
     db.delete(usuario)
-    db.commit()

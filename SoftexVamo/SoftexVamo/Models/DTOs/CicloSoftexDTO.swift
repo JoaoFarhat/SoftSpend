@@ -10,25 +10,25 @@ import Foundation
 nonisolated struct CicloCreateRequest: Codable, Sendable {
     let client_id: String?
     let titulo: String
-    let valor_total: Float
-    let diaria: Float
+    let valor_total: Decimal
+    let diaria: Decimal
     let periodo: String
 }
 
 nonisolated struct CicloUpdateRequest: Codable, Sendable {
     let titulo: String
-    let valor_total: Float
-    let diaria: Float
+    let valor_total: Decimal
+    let diaria: Decimal
     let periodo: String
 }
 
 nonisolated struct CicloResponse: Codable, Sendable {
     let id: Int?
     let clientId: String?
-    let valor_total: Float
-    let gasto_total: Float
+    let valor_total: Decimal
+    let gasto_total: Decimal
     let periodo: String
-    let diaria: Float
+    let diaria: Decimal
     let titulo: String
     let dias: [DiaSoftexResponse]?
     

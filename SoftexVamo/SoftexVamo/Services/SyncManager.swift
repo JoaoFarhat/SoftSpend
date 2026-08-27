@@ -179,8 +179,6 @@ actor SyncActor {
 
         logger.info("sincronizarEdicaoCiclo: iniciando backendId=\(backendId, privacy: .public) titulo=\(ciclo.titulo, privacy: .private)")
 
-        // Carrega os dias do ciclo explicitamente no contexto do SyncActor,
-        // pois `ciclo.dias` pode nao estar faultado e retornar vazio.
         let cicloId = ciclo.id
         var diasDesc = FetchDescriptor<DiaSoftex>(
             predicate: #Predicate { _ in true },
@@ -194,8 +192,6 @@ actor SyncActor {
         }
         let diasAtivos = locais.filter { $0.deletadoEm == nil }
 
-        // Envia TODOS os dias nao deletados para o backend, nao apenas os pendentes,
-        // para que o PUT /ciclos/{id}/dias/lote sincronize adicoes/remocoes de datas.
         let diasRequest: [DiaLoteRequest]? = diasAtivos.isEmpty ? nil : diasAtivos.map {
             DiaLoteRequest(clientId: $0.clientId, data: $0.data)
         }
@@ -213,16 +209,12 @@ actor SyncActor {
                 periodo: ciclo.periodo
             )
 
-            // 1. Sincroniza datas primeiro: cria novos dias e deleta os que
-            // sairam do periodo (com seus gastos) em cascata no backend.
             var diasRemotos: [DiaSoftex]?
             if let diasRequest {
                 diasRemotos = try await NetworkManager.shared.syncDiasLote(cicloId: backendId, dias: diasRequest)
                 logger.info("sincronizarEdicaoCiclo: dias/lote ok backendId=\(backendId, privacy: .public)")
             }
 
-            // 2. Depois atualiza o ciclo, para que gasto_total ja reflita as
-            // remocoes de gastos feitas pelo lote.
             let cicloEditado = try await NetworkManager.shared.putCiclo(cicloId: backendId, request: updateRequest)
             logger.info("sincronizarEdicaoCiclo: PUT ok backendId=\(backendId, privacy: .public)")
 
@@ -246,20 +238,18 @@ actor SyncActor {
                 let idsRemotos = Set(diasRemotos.compactMap { $0.backendId })
                 let clientIdsRemotos = Set(diasRemotos.compactMap { $0.clientId })
 
-                // Marca dias locais ativos que nao existem mais no backend
-                // (por backendId ou clientId). Isso evita dias orfaos caso
-                // o lote nao os tenha removido; syncDeletions se encarrega de
-                // enviar DELETE /dias/{id} individual.
                 for local in locais where local.deletadoEm == nil {
                     let aindaExiste = (local.backendId != nil && idsRemotos.contains(local.backendId!))
-                        || (local.clientId != nil && clientIdsRemotos.contains(local.clientId))
-                    if !aindaExiste {
+                        || clientIdsRemotos.contains(local.clientId)
+                    // Só marcamos como deletado se o dia já tinha backendId (já foi sincronizado
+                    // alguma vez). Dias criados offline ainda não enviados não devem ser apagados
+                    // só porque o servidor ainda não os conhece.
+                    if local.backendId != nil && !aindaExiste {
                         local.deletadoEm = Date()
                         local.syncStatus = .pending
                     }
                 }
 
-                // Atualiza/insere dias remotos, casando por backendId ou clientId para evitar duplicatas
                 for diaRemoto in diasRemotos {
                     if let local = locais.first(where: { $0.backendId == diaRemoto.backendId })
                         ?? locais.first(where: { $0.clientId == diaRemoto.clientId }) {
@@ -269,11 +259,12 @@ actor SyncActor {
                         local.clientId = diaRemoto.clientId ?? local.clientId
                         local.deletadoEm = nil
                         local.syncStatus = .synced
-                    } else if let remotoId = diaRemoto.backendId {
+                    } else if diaRemoto.backendId != nil {
                         diaRemoto.ciclo = ciclo
                         diaRemoto.syncStatus = .synced
                         modelContext.insert(diaRemoto)
-                        ciclo.dias?.append(diaRemoto)
+                        // Não faça append manual na relação inversa: ao setar diaRemoto.ciclo,
+                        // o SwiftData atualiza ciclo.dias automaticamente.
                     } else if diaRemoto.backendId == nil {
                         logger.warning("Dia remoto sem backendId ignorado no ciclo \(String(describing: backendId), privacy: .public)")
                     }

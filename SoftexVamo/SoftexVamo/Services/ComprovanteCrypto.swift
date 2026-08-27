@@ -6,6 +6,7 @@
 import Foundation
 import CryptoKit
 import Security
+import os
 
 enum ComprovanteCryptoError: Error {
     case keyNotAvailable
@@ -17,7 +18,8 @@ enum ComprovanteCryptoError: Error {
 nonisolated struct ComprovanteCrypto {
     static let shared = ComprovanteCrypto()
     private let keyTag = "br.com.softspend.comprovantekey".data(using: .utf8)!
-    
+    private let logger = Logger(subsystem: "br.com.softspend", category: "ComprovanteCrypto")
+
     private init() {}
     
     func criptografar(_ data: Data) throws -> Data {
@@ -71,7 +73,7 @@ nonisolated struct ComprovanteCrypto {
         ]
         let deleteStatus = SecItemDelete(query as CFDictionary)
         if deleteStatus != errSecSuccess && deleteStatus != errSecItemNotFound {
-            print("ComprovanteCrypto: SecItemDelete retornou status inesperado \(deleteStatus)")
+            logger.warning("ComprovanteCrypto: SecItemDelete retornou status inesperado \(deleteStatus, privacy: .public)")
         }
         let status = SecItemAdd(query as CFDictionary, nil)
         guard status == errSecSuccess else {

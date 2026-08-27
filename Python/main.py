@@ -3,8 +3,12 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.orm import Session
+from sqlalchemy import text
+from database import get_db
 from controllers.ciclo_controller import router as ciclo_router
 from controllers.dia_controller import router as dia_router
 from controllers.gasto_controller import router as gasto_router
@@ -40,8 +44,8 @@ app = FastAPI(
 ALLOWED_ORIGINS_STR = os.getenv("ALLOWED_ORIGINS", "https://softspend.com.br")
 ALLOWED_ORIGINS = [o.strip() for o in ALLOWED_ORIGINS_STR.split(",") if o.strip()]
 
-app.add_middleware(RequestIDMiddleware)
 app.add_middleware(LoggingMiddleware)
+app.add_middleware(RequestIDMiddleware)
 app.add_middleware(SlowAPIMiddleware)
 
 app.add_middleware(
@@ -60,3 +64,13 @@ app.include_router(auth_router)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 setup_exception_handlers(app)
+
+
+@app.get("/health", include_in_schema=False)
+def health_check(db: Session = Depends(get_db)):
+    try:
+        db.execute(text("SELECT 1"))
+        return JSONResponse(content={"status": "ok"})
+    except Exception as exc:
+        logger.error("Health check falhou: %s", exc)
+        raise HTTPException(status_code=503, detail="Database unavailable")

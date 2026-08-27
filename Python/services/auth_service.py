@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 from passlib.context import CryptContext
-from datetime import datetime, timedelta
-from jose import JWTError, jwt
+from datetime import datetime, timedelta, timezone
+import jwt
 import os
 
 import models
@@ -32,7 +32,7 @@ JWT_AUDIENCE = os.getenv("JWT_AUDIENCE", "softspend-mobile")
 
 
 def criar_token(user_id: str) -> str:
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     expire = now + timedelta(days=ACCESS_TOKEN_EXPIRE_DAYS)
     payload = {
         "sub": user_id,
@@ -82,7 +82,7 @@ def validar_token(token: str) -> str | None:
             audience=JWT_AUDIENCE,
         )
         return payload.get("sub")
-    except JWTError:
+    except jwt.InvalidTokenError:
         return None
 
 

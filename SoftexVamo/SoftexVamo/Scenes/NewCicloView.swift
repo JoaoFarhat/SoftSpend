@@ -20,7 +20,7 @@ struct NewCicloView: View {
     
     @State private var nomeCiclo: String
     @State private var orcamentoString: String
-    @State private var orcamento: Float
+    @State private var orcamento: Decimal
     @State private var dataInicio: Date
     @State private var dataFim: Date
     @State private var erroSalvar: String?
@@ -41,7 +41,8 @@ struct NewCicloView: View {
     
     init(ciclo: CicloSoftex, onBack: (() -> Void)? = nil) {
         _nomeCiclo = State(initialValue: ciclo.titulo)
-        _orcamentoString = State(initialValue: String(ciclo.valor_total))
+        let valorNumerico = Double(truncating: NSDecimalNumber(decimal: ciclo.valor_total))
+        _orcamentoString = State(initialValue: String(format: "%.2f", valorNumerico).replacingOccurrences(of: ".", with: ","))
         _orcamento = State(initialValue: ciclo.valor_total)
         self.onBack = onBack
         self.ciclo = ciclo
@@ -61,7 +62,7 @@ struct NewCicloView: View {
     init() {
         _nomeCiclo = State(initialValue: "")
         _orcamentoString = State(initialValue: "")
-        _orcamento = State(initialValue: 0.0)
+        _orcamento = State(initialValue: Decimal(0))
         _dataInicio = State(initialValue: Date())
         _dataFim = State(initialValue: Date().addingTimeInterval(86400 * 7))
     }
@@ -154,15 +155,15 @@ struct NewCicloView: View {
                                 cicloEditado.titulo = nomeCiclo
                                 cicloEditado.valor_total = orcamento
                                 cicloEditado.periodo = createPeriodoString(from: dataInicio, to: dataFim)
-                                cicloEditado.diaria = orcamento / Float(safeDayCount)
-                                
+                                cicloEditado.diaria = orcamento / Decimal(safeDayCount)
+
                                 let novosDias = cicloViewModel.createAllDiasLoteRequest(dayCount: dayCount, startDate: dataInicio)
 
                                 await cicloViewModel.editCiclo(cicloId: cicloId, ciclo: cicloEditado, dias: novosDias)
                             }
                             else {
                                 do {
-                                    try await cicloViewModel.createNewCiclo(startDate: dataInicio, endDate: dataFim, totalValue: Float(orcamento), titulo: nomeCiclo)
+                                    try await cicloViewModel.createNewCiclo(startDate: dataInicio, endDate: dataFim, totalValue: orcamento, titulo: nomeCiclo)
                                 } catch {
                                     await MainActor.run {
                                         erroSalvar = "Não foi possível criar o ciclo. Tente novamente."
@@ -246,17 +247,19 @@ struct NewCicloView: View {
         return "\(dateFormatter.string(from: from)) - \(dateFormatter.string(from: to))"
     }
     
-    func verificarNumeros(orcamento: String) -> Float{
-        
-        let orcamentoFiltrado = orcamento.filter { "0123456789,.".contains($0) }
-        
-        let orcamentoCerto = orcamentoFiltrado.replacingOccurrences(of: ",", with: ".")
-        
-        if let valorConvertido = Float(orcamentoCerto){
-            return valorConvertido
+    func verificarNumeros(orcamento: String) -> Decimal {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.locale = Locale(identifier: "pt_BR")
+        formatter.currencySymbol = ""
+        formatter.isLenient = true
+        formatter.maximumFractionDigits = 2
+
+        if let number = formatter.number(from: orcamento) {
+            return number.decimalValue
         }
-        
-        return 0.0
+
+        return Decimal(0)
     }
 }
 

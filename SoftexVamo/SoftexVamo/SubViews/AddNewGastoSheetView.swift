@@ -7,6 +7,7 @@
 
 import SwiftUI
 import PhotosUI
+import os
 
 struct AddNewGastoSheetView: View {
     @Environment(\.dismiss) var dismiss
@@ -26,7 +27,7 @@ struct AddNewGastoSheetView: View {
     
     @State var title: String = ""
     @State var valueString: String = ""
-    @State private var value: Float = 0.0
+    @State private var value: Decimal = Decimal(0)
     @State private var selectedCategoria: Categoria = .ALIMENTACAO
     
     let dias: [DiaSoftex]
@@ -61,7 +62,8 @@ struct AddNewGastoSheetView: View {
         if let gastoToEdit {
             _title = State(initialValue: gastoToEdit.titulo)
             _value = State(initialValue: gastoToEdit.valor)
-            _valueString = State(initialValue: String(format: "%.2f", gastoToEdit.valor).replacingOccurrences(of: ".", with: ","))
+            let valorNumerico = Double(truncating: NSDecimalNumber(decimal: gastoToEdit.valor))
+            _valueString = State(initialValue: String(format: "%.2f", valorNumerico).replacingOccurrences(of: ".", with: ","))
             _selectedCategoria = State(initialValue: gastoToEdit.categoria)
             _comprovanteUrlSalva = State(initialValue: gastoToEdit.comprovanteUrl)
         }
@@ -87,6 +89,8 @@ struct AddNewGastoSheetView: View {
     @State private var tarefaRefinamento: Task<Void, Never>?
     @State private var campoEditadoPeloUsuario: Set<Campo> = []
     @State private var ignorarEdicaoAutomatica: Bool = false
+
+    private let logger = Logger(subsystem: "br.com.softspend", category: "AddNewGastoSheetView")
     
     @State private var comprovanteImagem: UIImage?
     @State private var comprovanteData: Data?
@@ -669,7 +673,7 @@ struct AddNewGastoSheetView: View {
                 erroExtracao = teveLeituraLocal
                     ? "Leitura feita no dispositivo. Confira os valores antes de salvar."
                     : "Nao foi possivel extrair os dados. Preencha manualmente."
-                print("Erro ao extrair gasto:", error)
+                logger.error("Erro ao extrair gasto: \(error.localizedDescription, privacy: .public)")
             }
 
             isExtraindo = false
@@ -677,7 +681,7 @@ struct AddNewGastoSheetView: View {
     }
 
     @MainActor
-    private func aplicar(titulo: String?, valor: Float?, categoria: Categoria?) {
+    private func aplicar(titulo: String?, valor: Decimal?, categoria: Categoria?) {
         ignorarEdicaoAutomatica = true
         withAnimation {
             if let titulo, !titulo.isEmpty, !campoEditadoPeloUsuario.contains(.titulo) {
@@ -685,7 +689,8 @@ struct AddNewGastoSheetView: View {
             }
             if let valor, valor > 0, !campoEditadoPeloUsuario.contains(.valor) {
                 self.value = valor
-                self.valueString = String(format: "%.2f", valor)
+                let valorNumerico = Double(truncating: NSDecimalNumber(decimal: valor))
+                self.valueString = String(format: "%.2f", valorNumerico)
                     .replacingOccurrences(of: ".", with: ",")
             }
             if let categoria, !campoEditadoPeloUsuario.contains(.categoria) {
@@ -702,17 +707,19 @@ struct AddNewGastoSheetView: View {
         campoEditadoPeloUsuario.insert(campo)
     }
     
-    func verificarNumeros(orcamento: String) -> Float{
-        
-        let orcamentoFiltrado = orcamento.filter { "0123456789,.".contains($0) }
-        
-        let orcamentoCerto = orcamentoFiltrado.replacingOccurrences(of: ",", with: ".")
-        
-        if let valorConvertido = Float(orcamentoCerto){
-            return valorConvertido
+    func verificarNumeros(orcamento: String) -> Decimal {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.locale = Locale(identifier: "pt_BR")
+        formatter.currencySymbol = ""
+        formatter.isLenient = true
+        formatter.maximumFractionDigits = 2
+
+        if let number = formatter.number(from: orcamento) {
+            return number.decimalValue
         }
-        
-        return 0.0
+
+        return Decimal(0)
     }
     
     func iconName(for categoria: Categoria) -> String {

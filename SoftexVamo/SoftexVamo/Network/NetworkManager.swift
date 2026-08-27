@@ -25,6 +25,20 @@ final class NetworkManager: Sendable {
             delegateQueue: nil
         )
     }()
+
+    /// Sessão dedicada a uploads de imagem (OCR/comprovantes).
+    /// O timeout é maior para não abortar envios de notas fiscais.
+    private nonisolated let uploadSession: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.waitsForConnectivity = false
+        config.timeoutIntervalForRequest = 90
+        config.timeoutIntervalForResource = 300
+        return URLSession(
+            configuration: config,
+            delegate: InsecureSessionDelegate(),
+            delegateQueue: nil
+        )
+    }()
     
     private nonisolated let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -60,16 +74,21 @@ final class NetworkManager: Sendable {
     }
     
     @discardableResult
-    nonisolated private func execute(_ request: URLRequest, logout401: Bool = true) async throws -> Data {
+    nonisolated private func execute(
+        _ request: URLRequest,
+        logout401: Bool = true,
+        session: URLSession,
+        timeoutSeconds: UInt64
+    ) async throws -> Data {
         logger.info("execute: \(request.httpMethod ?? "?", privacy: .private) \(request.url?.absoluteString ?? "?", privacy: .private)")
         let start = Date()
-        let requestTimeout: UInt64 = 8 * 1_000_000_000
+        let requestTimeout: UInt64 = timeoutSeconds * 1_000_000_000
 
         let (data, response) = try await withThrowingTaskGroup(of: (Data, URLResponse).self) { group in
             group.addTask {
                 var req = request
-                req.timeoutInterval = 8
-                return try await self.session.data(for: req)
+                req.timeoutInterval = TimeInterval(timeoutSeconds)
+                return try await session.data(for: req)
             }
             group.addTask {
                 try await Task.sleep(nanoseconds: requestTimeout)
@@ -106,6 +125,16 @@ final class NetworkManager: Sendable {
         }
 
         return data
+    }
+
+    @discardableResult
+    nonisolated private func execute(_ request: URLRequest, logout401: Bool = true) async throws -> Data {
+        try await execute(request, logout401: logout401, session: session, timeoutSeconds: 8)
+    }
+
+    @discardableResult
+    nonisolated private func executeUpload(_ request: URLRequest, logout401: Bool = true) async throws -> Data {
+        try await execute(request, logout401: logout401, session: uploadSession, timeoutSeconds: 90)
     }
     
     nonisolated func fetchCicloResumo(skip: Int = 0, limit: Int = 5) async throws -> [CicloSoftex] {
@@ -245,20 +274,20 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/extrair") else {
             throw URLError(.badURL)
         }
-        
+
         let request = makeImageUploadRequest(url: url, imageData: imageData)
-        
-        return try decoder.decode(GastoExtraidoResponse.self, from: try await execute(request))
+
+        return try decoder.decode(GastoExtraidoResponse.self, from: try await executeUpload(request))
     }
-    
+
     nonisolated func uploadComprovante(gastoId: Int, imageData: Data) async throws -> GastosDia {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/\(gastoId)/comprovante") else {
             throw URLError(.badURL)
         }
-        
+
         let request = makeImageUploadRequest(url: url, imageData: imageData)
-        
-        let response = try decoder.decode(GastosDiaResponse.self, from: try await execute(request))
+
+        let response = try decoder.decode(GastosDiaResponse.self, from: try await executeUpload(request))
         return GastosDia(from: response)
     }
     

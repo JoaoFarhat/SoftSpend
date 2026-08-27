@@ -20,8 +20,8 @@ struct CardCiclosView: View {
     let corFundoTela = LinearGradient.appPurple
     
     var progresso: CGFloat {
-        let percent = ciclo.valor_total > 0 ? ciclo.gasto_total / ciclo.valor_total : 0
-        return CGFloat(min(max(percent, 0), 1))
+        let percent = ciclo.valor_total > 0 ? ciclo.gasto_total / ciclo.valor_total : Decimal(0)
+        return CGFloat(min(max(Double(truncating: NSDecimalNumber(decimal: percent)), 0), 1))
     }
     
     private var isAtual: Bool {
@@ -85,7 +85,7 @@ struct CardCiclosView: View {
                         .foregroundStyle(isAtual ? Color.white.opacity(0.75) : Color("textSecondary"))
                         .font(.system(size: 14, weight: .bold))
                     Spacer()
-                    Text("\(ciclo.gasto_total, format: .currency(code: "BRL").locale(Locale(identifier: "pt_BR")))")
+                    Text(ciclo.gasto_total.formattedAsCurrency())
                         .font(.system(size: 20, weight: .bold))
                 }
                 .padding(.top, 10)

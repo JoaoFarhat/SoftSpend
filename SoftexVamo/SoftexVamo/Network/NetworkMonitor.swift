@@ -15,12 +15,18 @@ import Combine
 final class NetworkMonitor: ObservableObject {
     static let shared = NetworkMonitor()
 
-    @Published private(set) var isConnected = true
+    @Published private(set) var isConnected: Bool
 
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "br.com.softspend.networkmonitor")
 
     private init() {
+        // currentPath antes de start() não reflete o estado real da rede
+        // (costuma ser .requiresConnection). Iniciar como true preserva o
+        // comportamento anterior de tentar sync na primeira carga; o handler
+        // corrige assim que o monitor publica o path real.
+        isConnected = true
+
         monitor.pathUpdateHandler = { [weak self] path in
             let connected = path.status == .satisfied
             Task { @MainActor in

@@ -62,7 +62,7 @@ struct CiclosListView: View {
         let diaHoje = viewModel.atualCiclo.dias?.first(where: {
             Calendar.current.isDate(Calendar.current.startOfDay(for: $0.data), inSameDayAs: hoje)
         })
-        let gastoHoje = diaHoje?.gastos.reduce(0) { $0 + $1.valor } ?? 0
+        let gastoHoje = diaHoje?.gastos.reduce(Decimal(0)) { $0 + $1.valor } ?? Decimal(0)
         let orcamentoDiario = viewModel.atualCiclo.diaria
         let restanteHoje = orcamentoDiario - gastoHoje
         
@@ -75,7 +75,7 @@ struct CiclosListView: View {
         .padding(.top, 12)
     }
     
-    private func resumoItem(icon: String, title: String, value: Float, color: Color) -> some View {
+    private func resumoItem(icon: String, title: String, value: Decimal, color: Color) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: icon)
@@ -89,7 +89,7 @@ struct CiclosListView: View {
             Text(title)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(Color("textSecondary"))
-            Text(value, format: .currency(code: "BRL").locale(Locale(identifier: "pt_BR")))
+            Text(value.formattedAsCurrency())
                 .font(.system(size: 15, weight: .bold))
                 .foregroundColor(Color("textPrimary"))
         }
@@ -173,7 +173,7 @@ struct CiclosListView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             if viewModel.isLoading || !isEmpty {
-                ScrollView() {
+                ScrollView(showsIndicators: false) {
                     header(isLoading: viewModel.isLoading)
                     
                     if viewModel.isLoading {
@@ -209,6 +209,7 @@ struct CiclosListView: View {
                         .environmentObject(gastosViewModel)
                     }
                 }
+                
             } else {
                 header(showTitle: false)
                 EmptyCicloView {

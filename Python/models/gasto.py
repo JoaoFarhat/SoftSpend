@@ -1,4 +1,4 @@
-from sqlalchemy import *
+from sqlalchemy import Column, Enum, ForeignKey, Integer, Numeric, String, UniqueConstraint
 from enums.categoria_enum import Categoria
 from database import Base
 from sqlalchemy.orm import relationship
@@ -10,7 +10,7 @@ class Gasto(Base):
     client_id = Column(String(50), index=True, nullable=True)
     dia_id = Column(Integer, ForeignKey("dias.id"))
     titulo = Column(String(100))
-    valor = Column(Float)
+    valor = Column(Numeric(10, 2))
     categoria = Column(Enum(Categoria, values_callable=lambda obj: [e.name for e in obj]))
     comprovante_key = Column(String(255), nullable=True)
 

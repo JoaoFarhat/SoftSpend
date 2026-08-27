@@ -4,7 +4,7 @@ import Foundation
 
 struct GastoLocalExtraido {
     var titulo: String?
-    var valor: Float?
+    var valor: Decimal?
     var categoria: Categoria?
 
     var temAlgoUtil: Bool {
@@ -49,7 +49,7 @@ enum InterpretadorComprovante {
         )
     }
 
-    static func encontrarValor(em linhas: [String]) -> Float? {
+    static func encontrarValor(em linhas: [String]) -> Decimal? {
         for rotulo in rotulosDeTotal {
             for (indice, linha) in linhas.enumerated() {
                 let normalizada = normalizar(linha)
@@ -106,7 +106,7 @@ enum InterpretadorComprovante {
         return nil
     }
 
-    static func valoresMonetarios(em linha: String) -> [Float] {
+    static func valoresMonetarios(em linha: String) -> [Decimal] {
         let padrao = #"\d{1,3}(?:\.\d{3})+,\d{2}|\d+,\d{2}|\d+\.\d{2}"#
 
         guard let regex = try? NSRegularExpression(pattern: padrao) else { return [] }
@@ -122,7 +122,7 @@ enum InterpretadorComprovante {
                 texto = texto.replacingOccurrences(of: ",", with: ".")
             }
 
-            guard let valor = Float(texto), valor > 0 else { return nil }
+            guard let valor = Decimal(string: texto), valor > 0 else { return nil }
             return valor
         }
     }

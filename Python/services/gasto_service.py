@@ -4,6 +4,7 @@ import models, dtos
 from dtos.gasto import GastoRequest
 from repositories import gasto_repository, dia_repository, ciclo_repository
 from services import storage_service
+from services.comprovante_cleanup import marcar_comprovante_para_remover
 
 def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: str):
     dia = dia_repository.find_dia(db, dia_id)
@@ -118,7 +119,10 @@ def anexar_comprovante(db: Session, gasto_id: int, conteudo: bytes, content_type
     gasto.comprovante_key = storage_service.salvar_comprovante(user_id, gasto_id, conteudo, content_type)
     gasto_repository.atualizar_gasto(db, gasto)
 
-    storage_service.remover_comprovante(key_anterior)
+    # Não remove o arquivo antigo imediatamente: se o commit falhar, o banco
+    # continuaria apontando para uma key deletada. A remoção real acontece no
+    # listener after_commit de comprovante_cleanup.
+    marcar_comprovante_para_remover(db, key_anterior)
 
     return gasto
 
@@ -130,7 +134,7 @@ def remover_comprovante(db: Session, gasto_id: int, user_id: str):
     if key:
         gasto.comprovante_key = None
         gasto_repository.atualizar_gasto(db, gasto)
-        storage_service.remover_comprovante(key)
+        marcar_comprovante_para_remover(db, key)
 
     return gasto
 

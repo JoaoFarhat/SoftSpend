@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
+import filetype
 from database import get_db
 from dependencies import get_current_user_id
 from dtos.gasto import GastoResponse, GastoRequest, GastoExtraidoResponse
@@ -30,14 +31,32 @@ def deletar_gasto(request: Request, gasto_id: int, db: Session = Depends(get_db)
     return gasto_service.remover_gasto(db, gasto_id, user_id)
 
 
+MIME_TYPES_PERMITIDOS = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
+
+
 async def _ler_imagem(imagem: UploadFile) -> bytes:
-    if not imagem.content_type or not imagem.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Arquivo deve ser uma imagem")
+    if not imagem.content_type or imagem.content_type not in MIME_TYPES_PERMITIDOS:
+        raise HTTPException(status_code=400, detail="Arquivo deve ser uma imagem (JPEG, PNG ou WEBP)")
 
-    conteudo = await imagem.read()
-
-    if len(conteudo) > TAMANHO_MAXIMO_IMAGEM:
+    # Aborta o mais cedo possível se o client declarar Content-Length
+    if imagem.size is not None and imagem.size > TAMANHO_MAXIMO_IMAGEM:
         raise HTTPException(status_code=413, detail="Imagem muito grande (max 5MB)")
+
+    # Lê em chunks para não carregar arquivos gigantes inteiros em memória/disco
+    # caso o Content-Length esteja ausente ou seja mentiroso.
+    conteudo = b""
+    chunk_size = 64 * 1024
+    while True:
+        chunk = await imagem.read(chunk_size)
+        if not chunk:
+            break
+        conteudo += chunk
+        if len(conteudo) > TAMANHO_MAXIMO_IMAGEM:
+            raise HTTPException(status_code=413, detail="Imagem muito grande (max 5MB)")
+
+    kind = filetype.guess(conteudo)
+    if kind is None or kind.mime not in MIME_TYPES_PERMITIDOS:
+        raise HTTPException(status_code=400, detail="Conteúdo do arquivo não corresponde a uma imagem permitida")
 
     return conteudo
 

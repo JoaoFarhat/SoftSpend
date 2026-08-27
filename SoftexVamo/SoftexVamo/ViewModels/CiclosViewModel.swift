@@ -374,6 +374,7 @@ final class CiclosViewModel: ObservableObject {
             diasAtualizados = []
         }
         self.atualCiclo.dias = diasAtualizados
+        self.objectWillChange.send()
     }
     
     private func salvarOuAtualizarDiaLocal(_ dia: DiaSoftex, no ciclo: CicloSoftex) {
@@ -470,14 +471,14 @@ final class CiclosViewModel: ObservableObject {
         return ciclo
     }
     
-    func createNewCiclo(startDate: Date, endDate: Date, totalValue: Float, titulo: String) async throws {
+    func createNewCiclo(startDate: Date, endDate: Date, totalValue: Decimal, titulo: String) async throws {
         let dayCount = Calendar.current.datesBetween(startDate, and: endDate)
         let safeDayCount = max(dayCount, 1)
 
-        let saldo = totalValue / Float(safeDayCount)
+        let saldo = totalValue / Decimal(safeDayCount)
         let periodo = createPeriodoString(from: startDate, to: endDate)
 
-        let newCiclo = CicloSoftex(userId: currentUser?.id ?? "", valor_total: totalValue, gasto_total: 0, periodo: periodo, diaria: saldo, titulo: titulo, dias: nil)
+        let newCiclo = CicloSoftex(userId: currentUser?.id ?? "", valor_total: totalValue, gasto_total: Decimal(0), periodo: periodo, diaria: saldo, titulo: titulo, dias: nil)
         let dias: [DiaLoteRequest] = createAllDiasLoteRequest(dayCount: dayCount, startDate: startDate)
         
         try await postToNetwork(newCiclo: newCiclo, dias: dias)
@@ -526,7 +527,7 @@ final class CiclosViewModel: ObservableObject {
                     )
                     dia.ciclo = cicloLocal
                     modelContext?.insert(dia)
-                    cicloLocal.dias?.append(dia)
+                    // Não faça append manual em relação inversa: definir dia.ciclo basta.
                 }
             }
         }
@@ -646,7 +647,7 @@ final class CiclosViewModel: ObservableObject {
         }
     }
     
-    func createNewGasto(title: String, value: Float, dia: DiaSoftex, categoria: Categoria, comprovante: Data? = nil) async throws {
+    func createNewGasto(title: String, value: Decimal, dia: DiaSoftex, categoria: Categoria, comprovante: Data? = nil) async throws {
         guard let modelContext else {
             throw APIError.serverError(message: "Contexto do banco de dados não configurado", requestId: "-", statusCode: 500)
         }
@@ -757,7 +758,7 @@ final class CiclosViewModel: ObservableObject {
         }
     }
     
-    func editGasto(gastoId: UUID, novoDia: DiaSoftex, titulo: String, value: Float, categoria: Categoria) async throws {
+    func editGasto(gastoId: UUID, novoDia: DiaSoftex, titulo: String, value: Decimal, categoria: Categoria) async throws {
         guard let modelContext else {
             throw APIError.serverError(message: "Contexto do banco de dados não configurado", requestId: "-", statusCode: 500)
         }
@@ -802,10 +803,9 @@ final class CiclosViewModel: ObservableObject {
             self.atualCiclo.dias?[oldDiaIndex].saldo -= diferenca
         } else {
             self.atualCiclo.dias?[oldDiaIndex].saldo += gastoAntigoValor
-            self.atualCiclo.dias?[oldDiaIndex].gastos.remove(at: oldGastoIndex)
-
             self.atualCiclo.dias?[newDiaIndex].saldo -= value
-            self.atualCiclo.dias?[newDiaIndex].gastos.append(gastoLocal)
+            // Apenas alteramos o relacionamento; não manipulamos o array
+            // `gastos` manualmente, para evitar duplicatas no SwiftData.
             gastoLocal.dia = self.atualCiclo.dias?[newDiaIndex]
         }
 

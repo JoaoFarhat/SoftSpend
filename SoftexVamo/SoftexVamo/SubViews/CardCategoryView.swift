@@ -11,7 +11,7 @@ struct CardCategoryView: View {
     let percent: Float
     let category: String
     let systemImage: String
-    let totalGasto: Float
+    let totalGasto: Decimal
     
     let corFundoTela = LinearGradient.appPurple
     
@@ -57,7 +57,7 @@ struct CardCategoryView: View {
                             .foregroundStyle(Color.white.opacity(0.75))
                             .font(.system(size: 14, weight: .bold))
                         Spacer()
-                        Text("\(totalGasto, format: .currency(code: "BRL").locale(Locale(identifier: "pt_BR")))")
+                        Text(totalGasto.formattedAsCurrency())
                             .font(.system(size: 20, weight: .bold))
                     }
                     .padding(.top, 10)

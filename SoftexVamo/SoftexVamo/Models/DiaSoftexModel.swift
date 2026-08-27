@@ -16,7 +16,7 @@ nonisolated final class DiaSoftex {
     var ciclo: CicloSoftex?
     @Relationship(deleteRule: .cascade, inverse: \GastosDia.dia) var gastos: [GastosDia]
     var data: Date
-    var saldo: Float
+    var saldo: Decimal
     
     var syncStatusRaw: String = SyncStatus.pending.rawValue
 
@@ -37,7 +37,7 @@ nonisolated final class DiaSoftex {
         id: UUID = UUID(),
         clientId: String = UUID().uuidString,
         data: Date,
-        saldo: Float,
+        saldo: Decimal,
         gastos: [GastosDia] = []
     ) {
         self.id = id
