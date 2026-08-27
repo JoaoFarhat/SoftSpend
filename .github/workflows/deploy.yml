@@ -55,8 +55,34 @@ jobs:
             # precisamos fazer backup em /tmp (que é legível por todos).
             git fetch origin
             git reset --hard origin/main
+
+            # Garante dependencias de build do Pillow (especialmente em Python 3.14)
+            sudo apt-get update
+            sudo apt-get install -y \
+              python3-venv python3-pil \
+              libjpeg-dev libpng-dev libwebp-dev libtiff-dev zlib1g-dev
+
             cd Python
+
+            # Se a venv nao existe, cria com acesso a pacotes do sistema.
+            # Isso permite usar o python3-pil do sistema se Pillow nao compilar.
+            if [ ! -d .venv ]; then
+              python3 -m venv .venv --system-site-packages
+            fi
+
+            # Se a venv existente nao consegue importar Pillow (ex: Python 3.14
+            # sem wheel oficial), recria-la com acesso aos pacotes do sistema.
+            # O python3-pil instalado via apt sera usado, evitando compilacao.
+            if [ -d .venv ] && ! .venv/bin/python -c "import PIL" 2>/dev/null; then
+              rm -rf .venv
+            fi
+
+            if [ ! -d .venv ]; then
+              python3 -m venv .venv --system-site-packages
+            fi
+
             source .venv/bin/activate
+            pip install --upgrade pip
             pip install -r requirements.txt
             alembic upgrade head
             sudo systemctl restart softspend
