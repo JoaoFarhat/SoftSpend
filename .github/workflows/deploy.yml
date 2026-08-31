@@ -13,6 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       SECRET_KEY: ci-only-secret-key-32-characters-minimum
+      REFRESH_TOKEN_SECRET_KEY: ci-only-refresh-secret-32-chars-diff
     defaults:
       run:
         working-directory: ./Python
