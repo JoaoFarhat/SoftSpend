@@ -35,7 +35,7 @@ jobs:
         run: python -c "import main; print('routes:', len(main.app.routes))"
 
       - name: Run tests
-        run: pytest
+        run: python3 -m pytest -q
 
   deploy:
     needs: test
