@@ -71,3 +71,78 @@ def test_receipt_cleanup_follows_transaction_outcome():
         marcar_comprovante_para_remover_no_rollback(session, "new-key")
         session.commit()
         remover.assert_called_once_with("old-key")
+
+
+def test_refresh_token_rotation_reuse_detection_and_logout(monkeypatch):
+    import importlib
+    import sys
+
+    monkeypatch.setenv("SECRET_KEY", "access-token-secret-with-at-least-32-characters")
+    monkeypatch.setenv(
+        "REFRESH_TOKEN_SECRET_KEY",
+        "different-refresh-secret-with-at-least-32-characters",
+    )
+
+    sys.modules.pop("services.auth_service", None)
+    auth_service = importlib.import_module("services.auth_service")
+
+    from database import Base
+    from dtos.auth import LoginRequest, RegisterRequest
+
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+
+    with Session(engine) as session:
+        usuario = auth_service.registrar(
+            session,
+            RegisterRequest(
+                nome="Teste",
+                username="usuario_teste",
+                email="teste@example.com",
+                senha="Senha123!",
+            ),
+        )
+        session.commit()
+
+        _, access_token, refresh_token = auth_service.login(
+            session,
+            LoginRequest(email="teste@example.com", senha="Senha123!"),
+        )
+        session.commit()
+
+        assert auth_service.validar_token(access_token) == usuario.id
+        assert refresh_token != access_token
+
+        _, novo_access_token, novo_refresh_token = auth_service.refresh_access_token(
+            session, refresh_token
+        )
+        session.commit()
+
+        assert auth_service.validar_token(novo_access_token) == usuario.id
+        assert novo_refresh_token != refresh_token
+
+        try:
+            auth_service.refresh_access_token(session, refresh_token)
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("Refresh token rotacionado deveria ser rejeitado")
+
+        token_novo = auth_service._hash_token(novo_refresh_token)
+        registro_novo = auth_service.auth_repository.buscar_refresh_token_por_hash(
+            session, token_novo
+        )
+        assert registro_novo.revoked_at is not None
+
+        _, _, token_logout = auth_service.login(
+            session,
+            LoginRequest(email="teste@example.com", senha="Senha123!"),
+        )
+        session.commit()
+        auth_service.logout(session, token_logout)
+        session.commit()
+
+        registro_logout = auth_service.auth_repository.buscar_refresh_token_por_hash(
+            session, auth_service._hash_token(token_logout)
+        )
+        assert registro_logout.revoked_at is not None

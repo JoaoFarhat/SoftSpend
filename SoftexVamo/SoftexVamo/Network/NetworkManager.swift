@@ -9,10 +9,43 @@ import Foundation
 import Combine
 import os
 
+private actor TokenRefresher {
+    private var currentTask: Task<AuthResponse, Error>?
+
+    func refresh() async throws -> AuthResponse {
+        if let task = currentTask {
+            return try await task.value
+        }
+
+        guard let refreshToken = KeychainManager.getRefreshToken() else {
+            throw APIError.authentication
+        }
+
+        let task = Task {
+            let response = try await NetworkManager.shared.refreshAccessToken(refreshToken: refreshToken)
+            KeychainManager.saveAccessToken(response.accessToken)
+            KeychainManager.saveRefreshToken(response.refreshToken)
+            return response
+        }
+
+        currentTask = task
+
+        do {
+            let response = try await task.value
+            currentTask = nil
+            return response
+        } catch {
+            currentTask = nil
+            throw error
+        }
+    }
+}
+
 final class NetworkManager: Sendable {
 
     nonisolated static let shared = NetworkManager()
     nonisolated private let logger = Logger(subsystem: "br.com.softspend", category: "NetworkManager")
+    private let refresher = TokenRefresher()
 
     private nonisolated let session: URLSession = {
         let config = URLSessionConfiguration.default
@@ -39,46 +72,48 @@ final class NetworkManager: Sendable {
             delegateQueue: nil
         )
     }()
-    
+
     private nonisolated let decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601
         return d
     }()
-    
+
     private nonisolated let encoder: JSONEncoder = {
         let e = JSONEncoder()
         e.dateEncodingStrategy = .iso8601
         return e
     }()
-    
+
     nonisolated private func makeRequest(
         url: URL,
         method: String = "GET",
         body: Data? = nil,
-        contentType: String = "application/json"
+        contentType: String = "application/json",
+        includeToken: Bool = true
     ) -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.httpBody = body
-        
+
         if body != nil {
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
-        
-        if let token = KeychainManager.getToken() {
+
+        if includeToken, let token = KeychainManager.getAccessToken() {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
-        
+
         return request
     }
-    
+
     @discardableResult
     nonisolated private func execute(
         _ request: URLRequest,
         logout401: Bool = true,
         session: URLSession,
-        timeoutSeconds: UInt64
+        timeoutSeconds: UInt64,
+        allowRefresh: Bool = true
     ) async throws -> Data {
         logger.info("execute: \(request.httpMethod ?? "?", privacy: .private) \(request.url?.absoluteString ?? "?", privacy: .private)")
         let start = Date()
@@ -111,10 +146,32 @@ final class NetworkManager: Sendable {
         logger.info("execute: status \(http.statusCode, privacy: .public) for \(request.url?.absoluteString ?? "?", privacy: .private)")
 
         if http.statusCode == 401, logout401 {
-            Task { @MainActor in
-                AuthService.shared.logout()
+            if allowRefresh {
+                do {
+                    let authResponse = try await refresher.refresh()
+                    var retryRequest = request
+                    retryRequest.setValue(
+                        "Bearer \(authResponse.accessToken)",
+                        forHTTPHeaderField: "Authorization"
+                    )
+                    return try await execute(
+                        retryRequest,
+                        logout401: true,
+                        session: session,
+                        timeoutSeconds: timeoutSeconds,
+                        allowRefresh: false
+                    )
+                } catch {
+                    // O refresh token tambem nao vale mais: o backend ja o
+                    // revogou (ou nunca existiu), entao nao adianta chamar
+                    // /auth/logout.
+                    Task { @MainActor in AuthService.shared.logout(revogandoNoServidor: false) }
+                    throw APIError.authentication
+                }
+            } else {
+                Task { @MainActor in AuthService.shared.logout(revogandoNoServidor: false) }
+                throw APIError.authentication
             }
-            throw APIError.authentication
         }
 
         guard 200...299 ~= http.statusCode else {
@@ -128,15 +185,15 @@ final class NetworkManager: Sendable {
     }
 
     @discardableResult
-    nonisolated private func execute(_ request: URLRequest, logout401: Bool = true) async throws -> Data {
-        try await execute(request, logout401: logout401, session: session, timeoutSeconds: 8)
+    nonisolated private func execute(_ request: URLRequest, logout401: Bool = true, allowRefresh: Bool = true) async throws -> Data {
+        try await execute(request, logout401: logout401, session: session, timeoutSeconds: 8, allowRefresh: allowRefresh)
     }
 
     @discardableResult
-    nonisolated private func executeUpload(_ request: URLRequest, logout401: Bool = true) async throws -> Data {
-        try await execute(request, logout401: logout401, session: uploadSession, timeoutSeconds: 90)
+    nonisolated private func executeUpload(_ request: URLRequest, logout401: Bool = true, allowRefresh: Bool = true) async throws -> Data {
+        try await execute(request, logout401: logout401, session: uploadSession, timeoutSeconds: 90, allowRefresh: allowRefresh)
     }
-    
+
     nonisolated func fetchCicloResumo(skip: Int = 0, limit: Int = 5) async throws -> [CicloSoftex] {
         guard var components = URLComponents(string: "\(APIConfig.shared.baseURL)/usuario/ciclos/resumo") else {
             throw URLError(.badURL)
@@ -151,7 +208,7 @@ final class NetworkManager: Sendable {
         let response = try decoder.decode([CicloResponse].self, from: try await execute(makeRequest(url: url)))
         return response.map { CicloSoftex(from: $0) }
     }
-    
+
     nonisolated func fetchCicloById(cicloId: Int) async throws -> CicloSoftex {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)") else {
             throw URLError(.badURL)
@@ -159,7 +216,7 @@ final class NetworkManager: Sendable {
         let response = try decoder.decode(CicloResponse.self, from: try await execute(makeRequest(url: url)))
         return CicloSoftex(from: response)
     }
-    
+
     nonisolated func fetchDias(cicloId: Int, skip: Int = 0, limit: Int = 20) async throws -> [DiaSoftex] {
         guard var components = URLComponents(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)/dias") else {
             throw URLError(.badURL)
@@ -174,7 +231,7 @@ final class NetworkManager: Sendable {
         let response = try decoder.decode([DiaSoftexResponse].self, from: try await execute(makeRequest(url: url)))
         return response.map { DiaSoftex(from: $0) }
     }
-    
+
     nonisolated func postCiclo(request: CicloCreateRequest) async throws -> CicloSoftex {
         logger.info("postCiclo: client_id=\(request.client_id ?? "nil", privacy: .private) titulo=\(request.titulo, privacy: .private)")
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos") else {
@@ -184,7 +241,7 @@ final class NetworkManager: Sendable {
         let response = try decoder.decode(CicloResponse.self, from: try await execute(req))
         return CicloSoftex(from: response)
     }
-    
+
     nonisolated func putCiclo(cicloId: Int, request: CicloUpdateRequest) async throws -> CicloSoftex {
         logger.info("putCiclo: cicloId=\(cicloId, privacy: .public) titulo=\(request.titulo, privacy: .private)")
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)") else {
@@ -194,16 +251,16 @@ final class NetworkManager: Sendable {
         let response = try decoder.decode(CicloResponse.self, from: try await execute(req))
         return CicloSoftex(from: response)
     }
-    
+
     nonisolated func deleteCiclo(cicloId: Int) async throws {
         logger.info("deleteCiclo: cicloId=\(cicloId, privacy: .public)")
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)") else {
             throw URLError(.badURL)
         }
-        
+
         try await execute(makeRequest(url: url, method: "DELETE"))
     }
-    
+
     nonisolated func postDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex] {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)/dias/lote") else {
             throw URLError(.badURL)
@@ -212,7 +269,7 @@ final class NetworkManager: Sendable {
         let response = try decoder.decode([DiaSoftexResponse].self, from: try await execute(request))
         return response.map { DiaSoftex(from: $0) }
     }
-    
+
     nonisolated func syncDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex] {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)/dias/lote") else {
             throw URLError(.badURL)
@@ -221,7 +278,7 @@ final class NetworkManager: Sendable {
         let response = try decoder.decode([DiaSoftexResponse].self, from: try await execute(request))
         return response.map { DiaSoftex(from: $0) }
     }
-    
+
     nonisolated func deleteDia(diaId: Int) async throws {
         logger.info("deleteDia: diaId=\(diaId, privacy: .public)")
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/dias/\(diaId)") else {
@@ -229,7 +286,7 @@ final class NetworkManager: Sendable {
         }
         try await execute(makeRequest(url: url, method: "DELETE"))
     }
-    
+
     nonisolated func postGasto(request: GastoCreateRequest) async throws -> GastosDia {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/dias/\(request.dia_id)/gastos") else {
             throw URLError(.badURL)
@@ -238,7 +295,7 @@ final class NetworkManager: Sendable {
         let response = try decoder.decode(GastosDiaResponse.self, from: try await execute(req))
         return GastosDia(from: response)
     }
-    
+
     nonisolated func putGasto(gastoId: Int, request: GastoUpdateRequest) async throws -> GastosDia {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/\(gastoId)") else {
             throw URLError(.badURL)
@@ -247,7 +304,7 @@ final class NetworkManager: Sendable {
         let response = try decoder.decode(GastosDiaResponse.self, from: try await execute(req))
         return GastosDia(from: response)
     }
-    
+
     nonisolated func deleteGasto(gastoId: Int) async throws {
         logger.info("deleteGasto: gastoId=\(gastoId, privacy: .public)")
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/\(gastoId)") else {
@@ -255,7 +312,7 @@ final class NetworkManager: Sendable {
         }
         try await execute(makeRequest(url: url, method: "DELETE"))
     }
-    
+
     nonisolated private func makeImageUploadRequest(url: URL, imageData: Data) -> URLRequest {
         let boundary = "Boundary-\(UUID().uuidString)"
         var body = Data()
@@ -264,12 +321,12 @@ final class NetworkManager: Sendable {
         body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
         body.append(imageData)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
-        
+
         var request = makeRequest(url: url, method: "POST", body: body, contentType: "multipart/form-data; boundary=\(boundary)")
         request.timeoutInterval = 90
         return request
     }
-    
+
     nonisolated func extrairGastoDeImagem(imageData: Data) async throws -> GastoExtraidoResponse {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/extrair") else {
             throw URLError(.badURL)
@@ -290,21 +347,26 @@ final class NetworkManager: Sendable {
         let response = try decoder.decode(GastosDiaResponse.self, from: try await executeUpload(request))
         return GastosDia(from: response)
     }
-    
+
     nonisolated func deleteComprovante(gastoId: Int) async throws -> GastosDia {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/\(gastoId)/comprovante") else {
             throw URLError(.badURL)
         }
-        
+
         let response = try decoder.decode(GastosDiaResponse.self, from: try await execute(makeRequest(url: url, method: "DELETE")))
         return response.toGastosDia()
     }
-    
+
     nonisolated func login(dados: LoginRequest) async throws -> AuthResponse {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/login") else {
             throw URLError(.badURL)
         }
-        let request = makeRequest(url: url, method: "POST", body: try encoder.encode(dados))
+        let request = makeRequest(
+            url: url,
+            method: "POST",
+            body: try encoder.encode(dados),
+            includeToken: false
+        )
         return try decoder.decode(AuthResponse.self, from: try await execute(request, logout401: false))
     }
 
@@ -312,10 +374,41 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/register") else {
             throw URLError(.badURL)
         }
-        let request = makeRequest(url: url, method: "POST", body: try encoder.encode(dados))
+        let request = makeRequest(
+            url: url,
+            method: "POST",
+            body: try encoder.encode(dados),
+            includeToken: false
+        )
         return try decoder.decode(AuthResponse.self, from: try await execute(request, logout401: false))
     }
-    
+
+    nonisolated func refreshAccessToken(refreshToken: String) async throws -> AuthResponse {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/refresh") else {
+            throw URLError(.badURL)
+        }
+        let request = makeRequest(
+            url: url,
+            method: "POST",
+            body: try encoder.encode(RefreshTokenRequest(refreshToken: refreshToken)),
+            includeToken: false
+        )
+        return try decoder.decode(AuthResponse.self, from: try await execute(request, logout401: false))
+    }
+
+    nonisolated func logout(refreshToken: String) async throws {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/logout") else {
+            throw URLError(.badURL)
+        }
+        let request = makeRequest(
+            url: url,
+            method: "POST",
+            body: try encoder.encode(LogoutRequest(refreshToken: refreshToken)),
+            includeToken: false
+        )
+        try await execute(request, logout401: false)
+    }
+
     nonisolated func deleteAccount() async throws {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/conta") else {
             throw URLError(.badURL)
@@ -325,7 +418,7 @@ final class NetworkManager: Sendable {
 }
 
 final class InsecureSessionDelegate: NSObject, URLSessionDelegate, Sendable {
-    
+
     func urlSession(
         _ session: URLSession,
         didReceive challenge: URLAuthenticationChallenge,
@@ -343,4 +436,3 @@ final class InsecureSessionDelegate: NSObject, URLSessionDelegate, Sendable {
         #endif
     }
 }
-

@@ -21,8 +21,9 @@ Backend:
 
 ```bash
 cd Python && python3 -m pip install -r requirements-dev.txt
-cd Python && pytest -q
-cd Python && python3 -c "import main; print(len(main.app.routes))"
+# REFRESH_TOKEN_SECRET_KEY precisa estar exportada para os testes passarem.
+cd Python && SECRET_KEY="..." REFRESH_TOKEN_SECRET_KEY="..." pytest -q
+cd Python && SECRET_KEY="..." REFRESH_TOKEN_SECRET_KEY="..." python3 -c "import main; print(len(main.app.routes))"
 ```
 
 ## Arquitetura iOS — SwiftData e offline-first
@@ -294,6 +295,16 @@ AWS S3, Cloudflare R2, Supabase Storage e MinIO:
 | `DOCS_ENABLED` | `false` | Se `true`, habilita `/docs`, `/redoc` e `/openapi.json` |
 | `TRUST_PROXY` | `false` | Habilita o uso de `X-Forwarded-For` somente quando o peer pertence a uma rede confiável |
 | `TRUSTED_PROXY_IPS` | `127.0.0.1,::1` | IPs ou redes CIDR dos proxies confiáveis, separados por vírgula |
+
+Autenticação OAuth2 / refresh tokens (`services/auth_service.py`):
+
+| Variável | Default | Descrição |
+| --- | --- | --- |
+| `SECRET_KEY` | — | Chave para assinar JWTs (>= 32 caracteres) |
+| `REFRESH_TOKEN_SECRET_KEY` | — | **Obrigatória** — chave separada para HMAC dos refresh tokens; deve ser diferente de `SECRET_KEY` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `15` | Tempo de vida do access token |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Tempo de vida do refresh token |
+| `REVOKE_OLD_REFRESH_TOKENS_ON_LOGIN` | `false` | Se `true`, login invalida refresh tokens antigos (apenas uma sessão ativa) |
 
 ## Deduplicação e `client_id`
 

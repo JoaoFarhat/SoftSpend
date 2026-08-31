@@ -13,3 +13,6 @@ class User(Base):
     senha_hash = Column(String(255), nullable=False)
 
     ciclos = relationship("Ciclo", back_populates="usuario", cascade="all, delete-orphan")
+    refresh_tokens = relationship(
+        "RefreshToken", back_populates="user", cascade="all, delete-orphan"
+    )

@@ -30,9 +30,20 @@ class LoginRequest(BaseModel):
     senha: str
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(..., min_length=1, max_length=512)
+
+
+class LogoutRequest(BaseModel):
+    refresh_token: str = Field(..., min_length=1, max_length=512)
+
+
 class AuthResponse(BaseModel):
     id: str
     nome: str
     username: str
     email: str
-    token: str
+    access_token: str
+    refresh_token: str
+    token_type: str
+    expires_in: int
