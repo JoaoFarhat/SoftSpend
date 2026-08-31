@@ -89,7 +89,7 @@ jobs:
             # --system-site-packages para acessar o python3-pil do sistema
             # caso nao haja wheel do Pillow 11.x para a plataforma.
             pip install -r requirements.txt
-            alembic upgrade head
+            alembic -c alembic/alembic.ini upgrade head
             sudo systemctl restart softspend
             # Health check com retry antes de declarar sucesso
             for i in {1..10}; do
