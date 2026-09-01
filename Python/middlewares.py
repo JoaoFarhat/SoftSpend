@@ -1,11 +1,12 @@
 import logging
+import os
 import re
 import time
 import uuid
 
 from fastapi import Request, HTTPException
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from limiter import get_real_ip
@@ -13,6 +14,8 @@ from logging_config import request_id_var
 
 logger = logging.getLogger(__name__)
 REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
+
+HSTS_MAX_AGE = int(os.getenv("HSTS_MAX_AGE", "31536000"))
 
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
@@ -79,6 +82,37 @@ class LoggingMiddleware(BaseHTTPMiddleware):
 
     def _get_client_ip(self, request: Request) -> str:
         return get_real_ip(request)
+
+
+class EnforceHTTPSMiddleware(BaseHTTPMiddleware):
+    """Redireciona HTTP para HTTPS quando o proxy informa X-Forwarded-Proto.
+
+    Em producao o nginx/ALB termina TLS e repassa o protocolo real no header
+    X-Forwarded-Proto. Requisicoes diretas (ex: health check local) nao tem esse
+    header, entao nao sao redirecionadas — isso permite health checks HTTP
+    internos sem quebrar o CI/deploy.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        forwarded_proto = request.headers.get("X-Forwarded-Proto")
+        is_https = request.url.scheme == "https" or forwarded_proto == "https"
+
+        if not is_https and forwarded_proto == "http":
+            https_url = str(request.url.replace(scheme="https"))
+            response = RedirectResponse(url=https_url, status_code=308)
+            response.headers["Strict-Transport-Security"] = (
+                f"max-age={HSTS_MAX_AGE}; includeSubDomains"
+            )
+            return response
+
+        response = await call_next(request)
+
+        if is_https:
+            response.headers["Strict-Transport-Security"] = (
+                f"max-age={HSTS_MAX_AGE}; includeSubDomains"
+            )
+
+        return response
 
 
 def get_request_id(request: Request) -> str:

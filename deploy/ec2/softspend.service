@@ -9,7 +9,7 @@ Group=ubuntu
 WorkingDirectory=/home/ubuntu/SoftSpend/Python
 Environment=PATH=/home/ubuntu/SoftSpend/Python/.venv/bin
 EnvironmentFile=/home/ubuntu/SoftSpend/Python/.env
-ExecStart=/home/ubuntu/SoftSpend/Python/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8000 --no-access-log
+ExecStart=/home/ubuntu/SoftSpend/Python/.venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000 --no-access-log
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:/var/log/softspend/app.log

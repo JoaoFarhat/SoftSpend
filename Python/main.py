@@ -18,7 +18,12 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from limiter import limiter
 from logging_config import setup_logging
-from middlewares import RequestIDMiddleware, LoggingMiddleware, setup_exception_handlers
+from middlewares import (
+    RequestIDMiddleware,
+    LoggingMiddleware,
+    EnforceHTTPSMiddleware,
+    setup_exception_handlers,
+)
 from services import ocr_service
 from services import comprovante_cleanup
 
@@ -46,6 +51,7 @@ ALLOWED_ORIGINS_STR = os.getenv("ALLOWED_ORIGINS", "https://softspend.com.br")
 ALLOWED_ORIGINS = [o.strip() for o in ALLOWED_ORIGINS_STR.split(",") if o.strip()]
 
 app.add_middleware(LoggingMiddleware)
+app.add_middleware(EnforceHTTPSMiddleware)
 app.add_middleware(RequestIDMiddleware)
 app.add_middleware(SlowAPIMiddleware)
 

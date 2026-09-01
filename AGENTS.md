@@ -305,6 +305,37 @@ Autenticação OAuth2 / refresh tokens (`services/auth_service.py`):
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `15` | Tempo de vida do access token |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Tempo de vida do refresh token |
 | `REVOKE_OLD_REFRESH_TOKENS_ON_LOGIN` | `false` | Se `true`, login invalida refresh tokens antigos (apenas uma sessão ativa) |
+| `HSTS_MAX_AGE` | `31536000` | Valor do header `Strict-Transport-Security` em segundos |
+
+## TLS/HTTPS
+
+O backend nao forca TLS no codigo; isso e responsabilidade da camada de proxy.
+Foram adicionados dois mecanismos:
+
+1. **Middleware `EnforceHTTPSMiddleware`** (`middlewares/enforce_https.py`):
+   - Le `X-Forwarded-Proto` do proxy.
+   - Se for `http`, redireciona `308` para `https://`.
+   - Adiciona `Strict-Transport-Security` nas respostas HTTPS.
+   - Requisicoes diretas (sem o header) nao sao redirecionadas, permitindo
+     health checks locais HTTP.
+
+2. **Config nginx** (`deploy/ec2/nginx-softspend.conf`):
+   - Escuta `80` e redireciona tudo para HTTPS.
+   - Escuta `443` com SSL, repassa `X-Forwarded-Proto` e adiciona HSTS.
+   - O uvicorn no `softspend.service` foi alterado para bind em `127.0.0.1:8000`
+     (nao e mais exposto publicamente).
+
+Para rodar o setup com certificado SSL na EC2:
+
+```bash
+export DOMAIN="softspend.com.br"
+export CERTBOT_EMAIL="seu-email@example.com"
+cd ~/SoftSpend/deploy/ec2 && ./setup.sh
+```
+
+O `certbot` e executado automaticamente quando `DOMAIN` e `CERTBOT_EMAIL` estao
+exportados. Sem eles, o setup instala o nginx mas emite um aviso para voce
+rodar o certbot manualmente.
 
 ## Deduplicação e `client_id`
 

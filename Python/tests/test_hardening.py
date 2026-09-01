@@ -1,6 +1,7 @@
 import ipaddress
 from unittest.mock import patch
 
+from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from starlette.requests import Request
@@ -146,3 +147,34 @@ def test_refresh_token_rotation_reuse_detection_and_logout(monkeypatch):
             session, auth_service._hash_token(token_logout)
         )
         assert registro_logout.revoked_at is not None
+
+
+def test_http_behind_proxy_is_redirected_to_https():
+    from main import app
+
+    client = TestClient(app)
+    response = client.get(
+        "/health",
+        headers={"X-Forwarded-Proto": "http", "Host": "softspend.com.br"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 308
+    assert response.headers["Location"].startswith("https://")
+    assert "Strict-Transport-Security" in response.headers
+
+
+def test_https_behind_proxy_includes_hsts_header():
+    from main import app
+
+    client = TestClient(app)
+    response = client.get(
+        "/health",
+        headers={"X-Forwarded-Proto": "https", "Host": "softspend.com.br"},
+        follow_redirects=False,
+    )
+
+    # A rota /health pode falhar por falta de banco no CI, mas a resposta deve
+    # trafegar pelo middleware e incluir o cabecalho HSTS.
+    assert response.status_code in (200, 503)
+    assert "Strict-Transport-Security" in response.headers
