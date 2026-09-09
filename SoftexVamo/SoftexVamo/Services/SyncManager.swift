@@ -474,7 +474,11 @@ actor SyncActor {
         guard gasto.comprovanteData != nil || gasto.comprovanteParaRemover else { return }
 
         if let comprovanteData = gasto.comprovanteData {
-            let atualizado = try await NetworkManager.shared.uploadComprovante(gastoId: backendId, imageData: comprovanteData)
+            let atualizado = try await NetworkManager.shared.uploadComprovante(
+                gastoId: backendId,
+                imageData: comprovanteData,
+                mime: gasto.comprovanteMime
+            )
             gasto.comprovanteUrl = atualizado.comprovanteUrl
             gasto.comprovanteData = nil
         } else if gasto.comprovanteParaRemover {

@@ -313,12 +313,19 @@ final class NetworkManager: Sendable {
         try await execute(makeRequest(url: url, method: "DELETE"))
     }
 
-    nonisolated private func makeImageUploadRequest(url: URL, imageData: Data) -> URLRequest {
+    nonisolated private func makeImageUploadRequest(
+        url: URL,
+        imageData: Data,
+        mime: String = "image/jpeg"
+    ) -> URLRequest {
+        // O backend valida os magic bytes, então o Content-Type da parte precisa
+        // corresponder ao conteúdo real (JPEG ou PDF).
+        let nomeArquivo = mime == "application/pdf" ? "comprovante.pdf" : "comprovante.jpg"
         let boundary = "Boundary-\(UUID().uuidString)"
         var body = Data()
         body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"imagem\"; filename=\"comprovante.jpg\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: image/jpeg\r\n\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"imagem\"; filename=\"\(nomeArquivo)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mime)\r\n\r\n".data(using: .utf8)!)
         body.append(imageData)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
 
@@ -337,15 +344,39 @@ final class NetworkManager: Sendable {
         return try decoder.decode(GastoExtraidoResponse.self, from: try await executeUpload(request))
     }
 
-    nonisolated func uploadComprovante(gastoId: Int, imageData: Data) async throws -> GastosDia {
+    nonisolated func uploadComprovante(
+        gastoId: Int,
+        imageData: Data,
+        mime: String = "image/jpeg"
+    ) async throws -> GastosDia {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/\(gastoId)/comprovante") else {
             throw URLError(.badURL)
         }
 
-        let request = makeImageUploadRequest(url: url, imageData: imageData)
+        let request = makeImageUploadRequest(url: url, imageData: imageData, mime: mime)
 
         let response = try decoder.decode(GastosDiaResponse.self, from: try await executeUpload(request))
         return GastosDia(from: response)
+    }
+
+    /// Baixa o relatório de gastos de um ciclo.
+    nonisolated func exportarCiclo(
+        cicloId: Int,
+        formato: ExportFormato,
+        comprovantes: ExportComprovantes = .imagem
+    ) async throws -> Data {
+        guard var components = URLComponents(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)/export") else {
+            throw URLError(.badURL)
+        }
+        components.queryItems = [
+            URLQueryItem(name: "formato", value: formato.rawValue),
+            URLQueryItem(name: "comprovantes", value: comprovantes.rawValue)
+        ]
+        guard let url = components.url else {
+            throw URLError(.badURL)
+        }
+
+        return try await executeUpload(makeRequest(url: url))
     }
 
     nonisolated func deleteComprovante(gastoId: Int) async throws -> GastosDia {

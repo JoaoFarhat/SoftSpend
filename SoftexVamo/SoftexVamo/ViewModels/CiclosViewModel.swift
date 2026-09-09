@@ -139,10 +139,11 @@ final class CiclosViewModel: ObservableObject {
             }
             
             let userId = currentUser?.id ?? ""
-            let descriptor = FetchDescriptor<CicloSoftex>(
+            var descriptor = FetchDescriptor<CicloSoftex>(
                 predicate: #Predicate { $0.deletadoEm == nil && $0.userId == userId },
                 sortBy: [SortDescriptor(\.criadoEm, order: .reverse)]
             )
+            descriptor.relationshipKeyPathsForPrefetching = [\.dias]
 
             let ciclosLocais: [CicloSoftex]
             if let context = modelContext {
@@ -212,6 +213,9 @@ final class CiclosViewModel: ObservableObject {
                     let cicloParaSalvar = self.allCiclos[self.index]
                     
                     guard let cicloId = cicloParaSalvar.backendId else {
+                        // Ciclo ainda não sincronizado (offline) — carrega os dias
+                        // do SwiftData para que seja possível adicionar gastos.
+                        carregarDiasLocais()
                         isLoading = false
                         hasLoadedOnce = true
                         return
@@ -301,7 +305,8 @@ final class CiclosViewModel: ObservableObject {
                 original = originalPorClientId[dup.clientId]
             }
             guard let original, original !== dup else { continue }
-            for dia in dup.dias ?? [] {
+            let diasParaMover = Array(dup.dias ?? [])
+            for dia in diasParaMover {
                 dia.ciclo = original
             }
             context.delete(dup)
@@ -357,7 +362,7 @@ final class CiclosViewModel: ObservableObject {
             sortBy: [SortDescriptor(\.data)]
         )
         descriptor.relationshipKeyPathsForPrefetching = [\.ciclo]
-        let diasAtualizados: [DiaSoftex]
+        var diasAtualizados: [DiaSoftex]
         if let context = modelContext {
             do {
                 diasAtualizados = try context.fetch(descriptor)
@@ -372,8 +377,54 @@ final class CiclosViewModel: ObservableObject {
         } else {
             diasAtualizados = []
         }
+
+        // Recuperação defensiva: ciclos antigos/corrompidos podem ter perdido
+        // seus dias. Se o ciclo tem um periodo valido, re-gera os dias localmente
+        // para o usuario nao ficar bloqueado.
+        if diasAtualizados.isEmpty, !atualCiclo.periodo.isEmpty {
+            diasAtualizados = reconstruirDiasParaCicloAtual()
+        }
+
         self.atualCiclo.dias = diasAtualizados
         self.objectWillChange.send()
+    }
+
+    /// Gera `DiaSoftex` para o `atualCiclo` a partir do string `periodo`.
+    /// Usado como fallback quando o array `dias` esta vazio/corrompido.
+    @discardableResult
+    private func reconstruirDiasParaCicloAtual() -> [DiaSoftex] {
+        let periodo = atualCiclo.periodo
+        let partes = periodo
+            .split(separator: "-")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+
+        guard partes.count == 2 else { return [] }
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "dd/MM"
+        formatter.locale = Locale(identifier: "pt_BR")
+        let anoAtual = Calendar.current.component(.year, from: Date())
+        formatter.defaultDate = Calendar.current.date(from: DateComponents(year: anoAtual))
+
+        guard let dataInicio = formatter.date(from: partes[0]),
+              let dataFim = formatter.date(from: partes[1]) else {
+            return []
+        }
+
+        let dayCount = Calendar.current.datesBetween(dataInicio, and: dataFim)
+        let safeDayCount = max(dayCount, 1)
+        var dias: [DiaSoftex] = []
+
+        for i in 0..<safeDayCount {
+            guard let data = Calendar.current.date(byAdding: .day, value: i, to: dataInicio) else { continue }
+            let dia = DiaSoftex(clientId: UUID().uuidString, data: data, saldo: atualCiclo.diaria)
+            dia.ciclo = atualCiclo
+            modelContext?.insert(dia)
+            dias.append(dia)
+        }
+
+        salvarLocal()
+        return dias
     }
     
     private func salvarOuAtualizarDiaLocal(_ dia: DiaSoftex, no ciclo: CicloSoftex) {
@@ -646,7 +697,7 @@ final class CiclosViewModel: ObservableObject {
         }
     }
     
-    func createNewGasto(title: String, value: Decimal, dia: DiaSoftex, categoria: Categoria, comprovante: Data? = nil) async throws {
+    func createNewGasto(title: String, value: Decimal, dia: DiaSoftex, categoria: Categoria, comprovante: Data? = nil, comprovanteMime: String = "image/jpeg") async throws {
         guard let modelContext else {
             throw APIError.serverError(message: "Contexto do banco de dados não configurado", requestId: "-", statusCode: 500)
         }
@@ -662,7 +713,8 @@ final class CiclosViewModel: ObservableObject {
             dia: dia,
             backendId: nil,
             comprovanteUrl: nil,
-            comprovanteData: comprovante
+            comprovanteData: comprovante,
+            comprovanteMime: comprovanteMime
         )
 
         modelContext.insert(novoGasto)
@@ -679,7 +731,7 @@ final class CiclosViewModel: ObservableObject {
         }
     }
 
-    func anexarComprovante(gastoId: UUID, imageData: Data) async throws {
+    func anexarComprovante(gastoId: UUID, imageData: Data, mime: String = "image/jpeg") async throws {
         guard let modelContext else {
             throw APIError.serverError(message: "Contexto do banco de dados não configurado", requestId: "-", statusCode: 500)
         }
@@ -687,6 +739,7 @@ final class CiclosViewModel: ObservableObject {
             throw APIError.serverError(message: "Gasto não encontrado", requestId: "-", statusCode: 404)
         }
         gasto.comprovanteData = imageData
+        gasto.comprovanteMime = mime
         gasto.comprovanteParaRemover = false
         gasto.syncStatus = .pending
         try modelContext.save()
@@ -817,5 +870,22 @@ final class CiclosViewModel: ObservableObject {
         Task {
             await SyncManager.shared.sync(forcar: true)
         }
+    }
+
+    func exportarCiclo(formato: ExportFormato, comprovantes: ExportComprovantes = .imagem) async throws -> URL {
+        guard let cicloId = atualCiclo.backendId else {
+            throw APIError.serverError(message: "Ciclo ainda não sincronizado com o servidor", requestId: "-", statusCode: 400)
+        }
+
+        let data = try await NetworkManager.shared.exportarCiclo(
+            cicloId: cicloId,
+            formato: formato,
+            comprovantes: comprovantes
+        )
+
+        let nome = "relatorio_\(atualCiclo.titulo.filter { !$0.isWhitespace }).\(formato.extensao)"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(nome)
+        try data.write(to: url, options: .atomic)
+        return url
     }
 }

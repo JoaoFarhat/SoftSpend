@@ -53,6 +53,19 @@ nonisolated final class GastosDia {
         }
     }
     var comprovanteParaRemover: Bool = false
+
+    /// MIME do comprovante pendente de upload.
+    ///
+    /// Precisa ser persistido porque o backend valida os magic bytes: enviar um
+    /// PDF declarado como `image/jpeg` volta 400. Tem default para a migração
+    /// leve do SwiftData nos registros que já existem.
+    var comprovanteMime: String = "image/jpeg"
+
+    @Transient
+    var comprovanteEhPdf: Bool {
+        comprovanteMime == "application/pdf" || (comprovanteUrl?.contains(".pdf") ?? false)
+    }
+
     
     var syncStatusRaw: String = SyncStatus.pending.rawValue
     @Transient
@@ -77,6 +90,7 @@ nonisolated final class GastosDia {
         backendId: Int? = nil,
         comprovanteUrl: String? = nil,
         comprovanteData: Data? = nil,
+        comprovanteMime: String = "image/jpeg",
         comprovanteParaRemover: Bool = false
     ) {
         self.id = id
@@ -89,6 +103,7 @@ nonisolated final class GastosDia {
         self.comprovanteUrl = comprovanteUrl
         self.comprovanteDataCriptografado = nil
         self.comprovanteData = comprovanteData
+        self.comprovanteMime = comprovanteMime
         self.comprovanteParaRemover = comprovanteParaRemover
 
         self.tentativas = 0

@@ -26,6 +26,8 @@ struct CiclosListView: View {
     @State private var gastoToEdit: GastosDia? = nil
     @State private var diaDoGasto: DiaSoftex? = nil
     @State var addNewCicloSheet: Bool = false
+    @State private var isExporting: Bool = false
+    @State private var exportedFileURL: URL? = nil
     
     private var saudacao: String {
         let nome = authService.currentUser?.nome ?? ""
@@ -109,6 +111,43 @@ struct CiclosListView: View {
         viewModel.allCiclos.isEmpty
     }
 
+    private func exportar(formato: ExportFormato) {
+        guard !isExporting else { return }
+        isExporting = true
+
+        Task {
+            do {
+                let url = try await viewModel.exportarCiclo(formato: formato)
+                exportedFileURL = url
+            } catch {
+                if let urlError = error as? URLError {
+                    tratarErroDeRede(urlError)
+                } else {
+                    viewModel.errorManager?.show(error: error)
+                }
+            }
+            isExporting = false
+        }
+    }
+
+    private func tratarErroDeRede(_ urlError: URLError) {
+        switch urlError.code {
+        case .notConnectedToInternet:
+            viewModel.errorManager?.show(
+                title: "Sem conexão",
+                message: "Você precisa estar online para exportar o relatório."
+            )
+        case .cannotFindHost, .cannotConnectToHost:
+            let baseURL = APIConfig.shared.baseURL
+            viewModel.errorManager?.show(
+                title: "Servidor não encontrado",
+                message: "Não foi possível conectar em \(baseURL). Verifique se o backend está rodando e o endereço configurado."
+            )
+        default:
+            viewModel.errorManager?.show(error: urlError)
+        }
+    }
+
     private func header(showTitle: Bool = true, isLoading: Bool = false) -> some View {
         HStack(alignment: showTitle ? .center : .top) {
             VStack(alignment: .leading, spacing: 4) {
@@ -130,30 +169,53 @@ struct CiclosListView: View {
 
             Spacer()
 
-            ZStack(alignment: .topTrailing) {
-                Button {
-                    withAnimation(.spring()) {
-                        showMenu.toggle()
+            HStack(spacing: 12) {
+                Menu {
+                    Button {
+                        exportar(formato: .pdf)
+                    } label: {
+                        Label("Exportar PDF", systemImage: "doc.text")
+                    }
+                    Button {
+                        exportar(formato: .csv)
+                    } label: {
+                        Label("Exportar CSV", systemImage: "tablecells")
                     }
                 } label: {
-                    HStack {
-                        Text(currentUser?.nome.prefix(2).uppercased() ?? "??")
-                            .font(.system(size: 14, weight: .bold))
-                            .foregroundStyle(.white)
-                            .padding(10)
-                            .background(Color.appPurple)
-                            .clipShape(Circle())
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(Color("textPrimary"))
+                        .padding(10)
+                        .background(Color("cardBackground"))
+                        .clipShape(Circle())
+                        .shadow(color: .black.opacity(0.1), radius: 4)
+                }
 
-                        Image(systemName: "chevron.up")
-                            .font(.system(size: 12, weight: .bold))
-                            .rotationEffect(.degrees(showMenu ? 0 : 180))
-                            .foregroundStyle(Color("textPrimary"))
+                ZStack(alignment: .topTrailing) {
+                    Button {
+                        withAnimation(.spring()) {
+                            showMenu.toggle()
+                        }
+                    } label: {
+                        HStack {
+                            Text(currentUser?.nome.prefix(2).uppercased() ?? "??")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(10)
+                                .background(Color.appPurple)
+                                .clipShape(Circle())
+
+                            Image(systemName: "chevron.up")
+                                .font(.system(size: 12, weight: .bold))
+                                .rotationEffect(.degrees(showMenu ? 0 : 180))
+                                .foregroundStyle(Color("textPrimary"))
+                        }
+                        .padding(8)
+                        .background(Color("cardBackground"))
+                        .clipShape(Capsule())
+                        .shadow(color: .black.opacity(0.1), radius: 4)
+
                     }
-                    .padding(8)
-                    .background(Color("cardBackground"))
-                    .clipShape(Capsule())
-                    .shadow(color: .black.opacity(0.1), radius: 4)
-
                 }
             }
 
@@ -252,7 +314,26 @@ struct CiclosListView: View {
         .fullScreenCover(isPresented: $addNewCicloSheet) {
             NewCicloView()
         }
+        .sheet(isPresented: Binding(
+            get: { exportedFileURL != nil },
+            set: { if !$0 { exportedFileURL = nil } }
+        )) {
+            if let url = exportedFileURL {
+                ActivityViewController(activityItems: [url])
+            }
+        }
     }
+}
+
+struct ActivityViewController: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    let applicationActivities: [UIActivity]? = nil
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: applicationActivities)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 #Preview {

@@ -1,5 +1,20 @@
 import Foundation
 
+nonisolated enum ExportFormato: String, Sendable, CaseIterable {
+    case pdf
+    case csv
+
+    var extensao: String { rawValue }
+}
+
+nonisolated enum ExportComprovantes: String, Sendable {
+    /// Autocontido: a imagem vai embutida no PDF.
+    case imagem
+    /// Geração instantânea, mas os links expiram junto com a URL pré-assinada.
+    case link
+    case nenhum
+}
+
 nonisolated struct UserDTO: Codable, Sendable {
     let id: String
     let nome: String

@@ -11,14 +11,20 @@ import os
 
 @main
 struct SoftexVamoApp: App {
-    @StateObject var listViewModel = CiclosViewModel()
+    @StateObject var listViewModel: CiclosViewModel
     @StateObject var authService = AuthService.shared
     @StateObject private var networkMonitor = NetworkMonitor.shared
+    @StateObject var errorManager = ErrorManager()
 
     let modelContainer: ModelContainer
 
     init() {
         self.modelContainer = Self.createModelContainer()
+        let viewModel = CiclosViewModel()
+        let errorManager = ErrorManager()
+        viewModel.errorManager = errorManager
+        self._listViewModel = StateObject(wrappedValue: viewModel)
+        self._errorManager = StateObject(wrappedValue: errorManager)
     }
 
     var body: some Scene {
@@ -34,6 +40,7 @@ struct SoftexVamoApp: App {
                 }
             }
             .environmentObject(authService)
+            .environmentObject(errorManager)
             .onChange(of: authService.currentUser?.id) { _, _ in
                 // Com userId nos models, não precisa limpar dados no logout —
                 // cada usuário só vê os próprios dados via filtro por userId.

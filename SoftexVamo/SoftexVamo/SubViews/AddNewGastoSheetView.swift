@@ -7,6 +7,7 @@
 
 import SwiftUI
 import PhotosUI
+import UniformTypeIdentifiers
 import os
 
 struct AddNewGastoSheetView: View {
@@ -66,6 +67,7 @@ struct AddNewGastoSheetView: View {
             _valueString = State(initialValue: String(format: "%.2f", valorNumerico).replacingOccurrences(of: ".", with: ","))
             _selectedCategoria = State(initialValue: gastoToEdit.categoria)
             _comprovanteUrlSalva = State(initialValue: gastoToEdit.comprovanteUrl)
+            _comprovanteMime = State(initialValue: gastoToEdit.comprovanteMime)
         }
     }
     
@@ -95,9 +97,11 @@ struct AddNewGastoSheetView: View {
     @State private var comprovanteImagem: UIImage?
     @State private var comprovanteData: Data?
     @State private var comprovanteUrlSalva: String?
+    @State private var comprovanteMime: String = "image/jpeg"
     @State private var removerComprovanteSalvo: Bool = false
     @State private var modoImagem: ModoImagem = .escanear
     @State private var isSalvando: Bool = false
+    @State private var showFileImporter: Bool = false
     
     enum Campo: Hashable {
         case titulo, valor, categoria
@@ -108,18 +112,31 @@ struct AddNewGastoSheetView: View {
     }
     
     private var temComprovante: Bool {
-        comprovanteImagem != nil || (comprovanteUrlSalva != nil && !removerComprovanteSalvo)
+        comprovanteData != nil || comprovanteImagem != nil || (comprovanteUrlSalva != nil && !removerComprovanteSalvo)
+    }
+
+    private var comprovanteEhPdf: Bool {
+        comprovanteMime == "application/pdf" || (comprovanteUrlSalva?.contains(".pdf") ?? false)
     }
     
-    var body: some View {
-        let topInset = (UIApplication.shared.connectedScenes
+    private var safeAreaTopInset: CGFloat {
+        UIApplication.shared.connectedScenes
             .compactMap { ($0 as? UIWindowScene)?.windows.first?.safeAreaInsets.top }
-            .first) ?? 0
-        let bottomInset = (UIApplication.shared.connectedScenes
+            .first ?? 0
+    }
+
+    private var safeAreaBottomInset: CGFloat {
+        UIApplication.shared.connectedScenes
             .compactMap { ($0 as? UIWindowScene)?.windows.first?.safeAreaInsets.bottom }
-            .first) ?? 0
-        
-        let headerHeight = 280 + topInset
+            .first ?? 0
+    }
+
+    private var headerAltura: CGFloat { 280 + safeAreaTopInset }
+
+    var body: some View {
+        let topInset: CGFloat = safeAreaTopInset
+        let bottomInset: CGFloat = safeAreaBottomInset
+        let headerHeight: CGFloat = headerAltura
 
         ZStack(alignment: .top) {
             GeometryReader { scrollProxy in
@@ -258,7 +275,7 @@ struct AddNewGastoSheetView: View {
                 }
             }
 
-            let clampedOffset = min(0, scrollOffset)
+            let clampedOffset: CGFloat = min(0, scrollOffset)
 
             ZStack(alignment: .top){
                 LinearGradient(
@@ -408,6 +425,9 @@ struct AddNewGastoSheetView: View {
             Button("Escolher da galeria") {
                 showPhotosPicker = true
             }
+            Button("Selecionar arquivo") {
+                showFileImporter = true
+            }
             Button("Cancelar", role: .cancel) {}
         }
         .photosPicker(isPresented: $showPhotosPicker, selection: $photoItem, matching: .images)
@@ -436,6 +456,20 @@ struct AddNewGastoSheetView: View {
                 }
             }
         }
+        .fileImporter(
+            isPresented: $showFileImporter,
+            allowedContentTypes: [.image, .pdf],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let url = urls.first else { return }
+                processarArquivoImportado(url: url)
+            case .failure(let error):
+                erroExtracao = error.localizedDescription
+                logger.error("Erro no fileImporter: \(error.localizedDescription, privacy: .public)")
+            }
+        }
     }
     
     private var notaFiscalSection: some View {
@@ -448,10 +482,10 @@ struct AddNewGastoSheetView: View {
                     comprovanteThumbnail
                     
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(comprovanteImagem != nil ? "Nota anexada" : "Nota salva")
+                        Text(comprovanteData != nil ? "Nota anexada" : "Nota salva")
                             .font(.system(size: 15, weight: .bold))
                             .foregroundStyle(Color("textPrimary"))
-                        Text(comprovanteImagem != nil
+                        Text(comprovanteData != nil
                              ? "Será enviada ao salvar o gasto"
                              : "Já disponível para exportação")
                             .font(.system(size: 12))
@@ -519,8 +553,15 @@ struct AddNewGastoSheetView: View {
     @ViewBuilder
     private var comprovanteThumbnail: some View {
         let forma = RoundedRectangle(cornerRadius: 14)
-        
-        if let imagem = comprovanteImagem {
+
+        if comprovanteEhPdf {
+            Image(systemName: "doc.fill")
+                .font(.system(size: 24))
+                .foregroundStyle(.white)
+                .frame(width: 52, height: 52)
+                .background(Color.appPurple)
+                .clipShape(forma)
+        } else if let imagem = comprovanteImagem {
             Image(uiImage: imagem)
                 .resizable()
                 .scaledToFill()
@@ -543,9 +584,10 @@ struct AddNewGastoSheetView: View {
     }
     
     private func removerNotaFiscal() {
-        if comprovanteImagem != nil {
+        if comprovanteImagem != nil || comprovanteData != nil {
             comprovanteImagem = nil
             comprovanteData = nil
+            comprovanteMime = "image/jpeg"
         } else if comprovanteUrlSalva != nil {
             removerComprovanteSalvo = true
         }
@@ -562,7 +604,7 @@ struct AddNewGastoSheetView: View {
                     try await viewModel.editGasto(gastoId: gastoLocalId, novoDia: selectedDia, titulo: title, value: value, categoria: selectedCategoria)
 
                     if let data = comprovanteData {
-                        try await viewModel.anexarComprovante(gastoId: gastoLocalId, imageData: data)
+                        try await viewModel.anexarComprovante(gastoId: gastoLocalId, imageData: data, mime: comprovanteMime)
                     } else if removerComprovanteSalvo {
                         try await viewModel.removerComprovante(gastoId: gastoLocalId)
                     }
@@ -572,7 +614,8 @@ struct AddNewGastoSheetView: View {
                         value: value,
                         dia: selectedDia,
                         categoria: selectedCategoria,
-                        comprovante: comprovanteData
+                        comprovante: comprovanteData,
+                        comprovanteMime: comprovanteMime
                     )
                 }
 
@@ -637,13 +680,50 @@ struct AddNewGastoSheetView: View {
     private func processarImagem(imagem: UIImage) {
         comprovanteImagem = imagem
         comprovanteData = codificarNotaFiscal(imagem)
+        comprovanteMime = "image/jpeg"
         removerComprovanteSalvo = false
-        
+
         guard modoImagem == .escanear, let dataOCR = comprimirParaOCR(imagem) else { return }
-        
+
         extrairComIA(imagem: imagem, data: dataOCR)
     }
-    
+
+    @MainActor
+    private func processarArquivoImportado(url: URL) {
+        Task {
+            guard url.startAccessingSecurityScopedResource() else {
+                erroExtracao = "Não foi possível ler o arquivo selecionado."
+                return
+            }
+            defer { url.stopAccessingSecurityScopedResource() }
+
+            do {
+                let data = try Data(contentsOf: url)
+                let extensao = url.pathExtension.lowercased()
+                let utType = UTType(filenameExtension: extensao) ?? .data
+
+                if utType.conforms(to: .pdf) || extensao == "pdf" {
+                    guard data.count <= Self.tamanhoMaximoNota else {
+                        erroExtracao = "PDF excede o tamanho máximo permitido."
+                        return
+                    }
+                    comprovanteData = data
+                    comprovanteMime = "application/pdf"
+                    comprovanteImagem = nil
+                    removerComprovanteSalvo = false
+                } else {
+                    guard let imagem = UIImage(data: data) else {
+                        erroExtracao = "Arquivo de imagem não reconhecido."
+                        return
+                    }
+                    processarImagem(imagem: imagem)
+                }
+            } catch {
+                erroExtracao = error.localizedDescription
+            }
+        }
+    }
+
     @MainActor
     private func extrairComIA(imagem: UIImage, data: Data) {
         isExtraindo = true
