@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 import models, dtos
 from dtos.gasto import GastoRequest
 from repositories import gasto_repository, dia_repository, ciclo_repository
-from services import storage_service
+from services import open_finance_reconciliation_service, storage_service
 from services.comprovante_cleanup import (
     marcar_comprovante_para_remover,
     marcar_comprovante_para_remover_no_rollback,
@@ -21,6 +21,9 @@ def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: str):
     if gasto.client_id:
         existente = gasto_repository.find_by_client_id(db, gasto.client_id, dia_id)
         if existente:
+            open_finance_reconciliation_service.conciliar_gasto(
+                db, existente, user_id
+            )
             return existente
 
     novo_gasto = models.Gasto(
@@ -34,7 +37,9 @@ def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: str):
     dia_repository.incrementar_saldo(db, dia.id, -gasto.valor)
     ciclo_repository.incrementar_gasto_total(db, dia.ciclo_id, gasto.valor)
 
-    return gasto_repository.criar_gasto(db, novo_gasto)
+    novo_gasto = gasto_repository.criar_gasto(db, novo_gasto)
+    open_finance_reconciliation_service.conciliar_gasto(db, novo_gasto, user_id)
+    return novo_gasto
 
 def atualizar_gasto(db: Session, gasto_id: int, gasto_request: GastoRequest, user_id: str):
     gasto = gasto_repository.find_gasto_for_update(db, gasto_id)
@@ -76,6 +81,7 @@ def atualizar_gasto(db: Session, gasto_id: int, gasto_request: GastoRequest, use
     gasto.categoria = gasto_request.categoria
 
     gasto_repository.atualizar_gasto(db, gasto)
+    open_finance_reconciliation_service.conciliar_gasto(db, gasto, user_id)
 
     return gasto
 

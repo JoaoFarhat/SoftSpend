@@ -14,6 +14,7 @@ struct MenuView: View {
     @State private var selectedEnv: APIEnvironment = APIConfig.shared.current
     
     @State private var showPerfil = false
+    @State private var showOpenFinance = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -92,6 +93,33 @@ struct MenuView: View {
             .background(Color("cardBackground"))
             
             Divider()
+
+            Button {
+                showMenu = false
+                showOpenFinance = true
+            } label: {
+                HStack(spacing: 15) {
+                    Image(systemName: "creditcard")
+                        .foregroundColor(Color.appPurple)
+                        .padding(10)
+                        .background(Color.appPurple.opacity(0.1))
+                        .clipShape(Circle())
+
+                    VStack(alignment: .leading) {
+                        Text("Cartão corporativo")
+                            .font(.system(size: 16, weight: .bold))
+                            .foregroundColor(Color("textPrimary"))
+                        Text("Fatura e conciliação")
+                            .font(.system(size: 12))
+                            .foregroundColor(.gray)
+                    }
+                    Spacer()
+                }
+                .padding()
+            }
+            .background(Color("cardBackground"))
+
+            Divider()
             
             Button {
                 withAnimation {
@@ -125,5 +153,8 @@ struct MenuView: View {
         .shadow(color: .black.opacity(0.2), radius: 15, x: 0, y: 10)
         .transition(.asymmetric(insertion: .scale(scale: 0.8, anchor: .topTrailing).combined(with: .opacity),
                                  removal: .opacity))
+        .sheet(isPresented: $showOpenFinance) {
+            OpenFinanceView()
+        }
     }
 }

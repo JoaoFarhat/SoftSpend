@@ -62,7 +62,15 @@ struct SoftexVamoApp: App {
     /// TODO: substituir por VersionedSchema + SchemaMigrationPlan antes do
     /// release para usuários reais.
     private static func createModelContainer() -> ModelContainer {
-        let models: [any PersistentModel.Type] = [CicloSoftex.self, DiaSoftex.self, GastosDia.self, UserModel.self]
+        let models: [any PersistentModel.Type] = [
+            CicloSoftex.self,
+            DiaSoftex.self,
+            GastosDia.self,
+            UserModel.self,
+            CartaoOpenFinance.self,
+            FaturaCartao.self,
+            TransacaoCartao.self,
+        ]
         let schema = Schema(models)
 
         let supportDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!

@@ -405,6 +405,7 @@ actor SyncActor {
                     )
                     let response = try await NetworkManager.shared.putGasto(gastoId: backendId, request: updateRequest)
                     gasto.comprovanteUrl = response.comprovanteUrl
+                    gasto.copiarOpenFinance(de: response)
                     // Só marca sucesso se não há comprovante pendente; syncComprovantes resolve o resto
                     if gasto.comprovanteData == nil && !gasto.comprovanteParaRemover {
                         marcarSucesso(gasto)
@@ -423,6 +424,7 @@ actor SyncActor {
                     }
                     gasto.backendId = novoGastoId
                     gasto.comprovanteUrl = response.comprovanteUrl
+                    gasto.copiarOpenFinance(de: response)
                     // Só marca sucesso se não há comprovante pendente; syncComprovantes resolve o resto
                     if gasto.comprovanteData == nil && !gasto.comprovanteParaRemover {
                         marcarSucesso(gasto)

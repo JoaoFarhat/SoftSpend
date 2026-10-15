@@ -14,6 +14,8 @@ nonisolated struct GastosDiaResponse: Codable, Sendable {
     let titulo: String
     let categoria: Categoria
     let comprovante_url: String?
+    let openFinanceStatus: String?
+    let openFinanceMatch: ExpenseTransactionMatchResponse?
     
     enum CodingKeys: String, CodingKey {
         case id
@@ -23,6 +25,8 @@ nonisolated struct GastosDiaResponse: Codable, Sendable {
         case titulo
         case categoria
         case comprovante_url
+        case openFinanceStatus = "open_finance_status"
+        case openFinanceMatch = "open_finance_match"
     }
     
     // Cria um GastosDia a partir do DTO.

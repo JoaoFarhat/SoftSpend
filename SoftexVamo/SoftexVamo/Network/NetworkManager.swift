@@ -388,6 +388,78 @@ final class NetworkManager: Sendable {
         return response.toGastosDia()
     }
 
+    nonisolated func fetchOpenFinanceConnections() async throws -> [OpenFinanceConnectionResponse] {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/open-finance/connections") else {
+            throw URLError(.badURL)
+        }
+        return try decoder.decode([OpenFinanceConnectionResponse].self, from: try await execute(makeRequest(url: url)))
+    }
+
+    nonisolated func sincronizarOpenFinanceItem(itemId: String) async throws -> ImportacaoOpenFinanceResponse {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/open-finance/items/\(itemId)/sync") else {
+            throw URLError(.badURL)
+        }
+        return try decoder.decode(
+            ImportacaoOpenFinanceResponse.self,
+            from: try await executeUpload(makeRequest(url: url, method: "POST"))
+        )
+    }
+
+    nonisolated func fetchOpenFinanceCards() async throws -> [CreditCardAccountResponse] {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/open-finance/cards") else {
+            throw URLError(.badURL)
+        }
+        return try decoder.decode([CreditCardAccountResponse].self, from: try await execute(makeRequest(url: url)))
+    }
+
+    nonisolated func fetchOpenFinanceBills(cartaoId: Int) async throws -> [CreditCardBillResponse] {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/open-finance/cards/\(cartaoId)/bills") else {
+            throw URLError(.badURL)
+        }
+        return try decoder.decode([CreditCardBillResponse].self, from: try await execute(makeRequest(url: url)))
+    }
+
+    nonisolated func fetchOpenFinanceBill(faturaId: Int) async throws -> CreditCardBillDetailResponse {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/open-finance/bills/\(faturaId)") else {
+            throw URLError(.badURL)
+        }
+        return try decoder.decode(CreditCardBillDetailResponse.self, from: try await execute(makeRequest(url: url)))
+    }
+
+    nonisolated func fetchOpenFinanceTransactions(cartaoId: Int) async throws -> [CreditCardTransactionResponse] {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/open-finance/cards/\(cartaoId)/transactions") else {
+            throw URLError(.badURL)
+        }
+        return try decoder.decode([CreditCardTransactionResponse].self, from: try await execute(makeRequest(url: url)))
+    }
+
+    nonisolated func fetchOpenFinanceMatches() async throws -> [ExpenseTransactionMatchResponse] {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/open-finance/matches") else {
+            throw URLError(.badURL)
+        }
+        return try decoder.decode([ExpenseTransactionMatchResponse].self, from: try await execute(makeRequest(url: url)))
+    }
+
+    nonisolated func confirmarOpenFinanceMatch(matchId: Int) async throws -> ExpenseTransactionMatchResponse {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/open-finance/matches/\(matchId)/confirm") else {
+            throw URLError(.badURL)
+        }
+        return try decoder.decode(
+            ExpenseTransactionMatchResponse.self,
+            from: try await execute(makeRequest(url: url, method: "POST"))
+        )
+    }
+
+    nonisolated func removerOpenFinanceMatch(matchId: Int) async throws -> ExpenseTransactionMatchResponse {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/open-finance/matches/\(matchId)") else {
+            throw URLError(.badURL)
+        }
+        return try decoder.decode(
+            ExpenseTransactionMatchResponse.self,
+            from: try await execute(makeRequest(url: url, method: "DELETE"))
+        )
+    }
+
     nonisolated func login(dados: LoginRequest) async throws -> AuthResponse {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/login") else {
             throw URLError(.badURL)

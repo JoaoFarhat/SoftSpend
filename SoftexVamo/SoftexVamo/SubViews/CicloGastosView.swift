@@ -228,6 +228,15 @@ struct CicloGastosView: View {
                             .background(Color.appPurple.opacity(0.15))
                             .cornerRadius(6)
                     }
+
+                    let status = gasto.openFinanceStatus
+                    Label(status.titulo, systemImage: status.icon)
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(status.color)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 4)
+                        .background(status.color.opacity(0.12))
+                        .cornerRadius(6)
                 }
             }
             

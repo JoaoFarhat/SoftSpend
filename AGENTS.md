@@ -232,7 +232,7 @@ url-encoded contêm `%`.
 Migrations (aplica no banco apontado pelo `.env`):
 
 ```bash
-cd Python && alembic upgrade head
+cd Python && alembic -c alembic/alembic.ini upgrade head
 ```
 
 Para rodar na AWS, ajuste `DB_HOST`/`DATABASE_URL` antes do comando. Migration
@@ -255,6 +255,12 @@ Cadeia de migrations:
 4. `b2c4d6e8f0a1` — muda `users.id` de Integer auto-increment para String(36)
    UUID. Gera UUIDs para usuários existentes e atualiza `ciclos.id_usuario`.
    **Sem downgrade** — UUIDs não podem ser revertidos para inteiros sequenciais.
+5. `335cdb5f77dd` — converte valores monetários para `DECIMAL(10, 2)`.
+6. `97ea189fc3da` — adiciona `refresh_tokens`.
+7. `c4d8f2a6b9e0` — adiciona as tabelas Open Finance: conexões Pluggy,
+   cartões de crédito, faturas e transações.
+8. `d6f1a9c3b8e4` — adiciona `expense_transaction_matches`, o vínculo entre
+   gastos do SoftSpend e transações da fatura.
 
 ## Isolamento por usuário (UUID)
 
@@ -299,6 +305,39 @@ Open Finance com Pluggy (`services/open_finance_service.py`):
 | `PLUGGY_WEBHOOK_URL` | — | URL pública HTTPS enviada no connect token; deve apontar para `/api/webhooks/pluggy` |
 | `PLUGGY_WEBHOOK_SECRET` | — | **Obrigatória** para habilitar o webhook; use no header `X-Pluggy-Webhook-Secret` ao registrar o webhook pela API do Pluggy ou como `?token=` em `PLUGGY_WEBHOOK_URL` |
 | `PLUGGY_TIMEOUT_SECONDS` | `10` | Timeout das chamadas HTTP ao Pluggy |
+
+A importação roda em background nos eventos `item/created`, `item/updated`,
+`transactions/created` e `transactions/updated`. Também existe sincronização
+manual em `POST /api/open-finance/items/{item_id}/sync`, que valida o
+`clientUserId` do Item contra o usuário autenticado. O app pode consultar:
+
+- `GET /api/open-finance/connections`
+- `GET /api/open-finance/cards`
+- `GET /api/open-finance/cards/{cartao_id}/bills`
+- `GET /api/open-finance/cards/{cartao_id}/transactions`
+- `GET /api/open-finance/bills/{fatura_id}` — fatura com suas transações e o
+  vínculo de cada transação com um gasto do usuário
+- `GET /api/open-finance/matches` — vínculos gasto/transação do usuário
+- `POST /api/open-finance/matches/{match_id}/confirm` — confirma um match
+  ambíguo, mudando o status para `CONFIRMED`
+- `DELETE /api/open-finance/matches/{match_id}` — remove o vínculo para o
+  gasto voltar a `PENDENTE`
+
+Somente contas `type=CREDIT` e `subtype=CREDIT_CARD` são importadas. Transações
+são buscadas por `GET /v2/transactions` e vinculadas à fatura por
+`creditCardMetadata.billId` quando o Pluggy envia esse campo. Após a
+importação, `services/open_finance_reconciliation_service.py` compara gastos
+ainda não vinculados com transações do mesmo usuário usando valor exato,
+janela de data e similaridade textual. `GastoResponse` expõe
+`open_finance_status` (`PENDENTE`, `AUTO_MATCHED`, `REVIEW` ou `CONFIRMED`) e
+o detalhe em `open_finance_match`.
+
+No iOS, `CartaoOpenFinance`, `FaturaCartao` e `TransacaoCartao` são models
+SwiftData somente de leitura cacheados por `backendId`. `OpenFinanceViewModel`
+faz upsert a partir dos DTOs, apaga registros que sumiram no backend e
+reaplica os matches em `GastosDia`. A tela `OpenFinanceView` (menu → "Cartão
+corporativo") lista cartões e faturas; `FaturaDetalheView` permite confirmar
+ou remover um vínculo em revisão.
 
 | Variável | Default | Descrição |
 | --- | --- | --- |

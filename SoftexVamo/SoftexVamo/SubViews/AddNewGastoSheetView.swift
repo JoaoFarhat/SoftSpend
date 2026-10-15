@@ -229,6 +229,38 @@ struct AddNewGastoSheetView: View {
                     .frame(minHeight: 150)
                     
                     notaFiscalSection
+
+                    if let gastoToEdit, gastoToEdit.openFinanceMatchBackendId != nil {
+                        let status = gastoToEdit.openFinanceStatus
+                        VStack(alignment: .leading, spacing: 8) {
+                            Label(status.titulo, systemImage: status.icon)
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundStyle(status.color)
+
+                            Text(gastoToEdit.openFinanceTransactionDescription ?? "Transação da fatura")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(Color("textPrimary"))
+
+                            HStack {
+                                if let valorTransacao = gastoToEdit.openFinanceTransactionAmount {
+                                    Text(valorTransacao.formattedAsCurrency())
+                                }
+                                if let dataTransacao = gastoToEdit.openFinanceTransactionDate {
+                                    Text(dataTransacao.formatted(date: .numeric, time: .omitted))
+                                }
+                            }
+                            .font(.system(size: 12))
+                            .foregroundStyle(Color("textSecondary"))
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                        .background(status.color.opacity(0.08))
+                        .cornerRadius(16)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16)
+                                .stroke(status.color.opacity(0.2), lineWidth: 1)
+                        )
+                    }
                     
                     Spacer()
                     

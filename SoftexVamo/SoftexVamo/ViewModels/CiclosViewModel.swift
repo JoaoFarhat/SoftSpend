@@ -102,6 +102,9 @@ final class CiclosViewModel: ObservableObject {
         try? modelContext.delete(model: GastosDia.self)
         try? modelContext.delete(model: DiaSoftex.self)
         try? modelContext.delete(model: CicloSoftex.self)
+        try? modelContext.delete(model: CartaoOpenFinance.self)
+        try? modelContext.delete(model: FaturaCartao.self)
+        try? modelContext.delete(model: TransacaoCartao.self)
         try? modelContext.delete(model: UserModel.self)
         try? modelContext.save()
     }
@@ -463,6 +466,15 @@ final class CiclosViewModel: ObservableObject {
                 existente.valor = gasto.valor
                 existente.categoria = gasto.categoria
                 existente.comprovanteUrl = gasto.comprovanteUrl
+                existente.openFinanceStatusRaw = gasto.openFinanceStatusRaw
+                existente.openFinanceMatchBackendId = gasto.openFinanceMatchBackendId
+                existente.openFinanceTransactionBackendId = gasto.openFinanceTransactionBackendId
+                existente.openFinanceProviderTransactionId = gasto.openFinanceProviderTransactionId
+                existente.openFinanceTransactionDescription = gasto.openFinanceTransactionDescription
+                existente.openFinanceTransactionAmount = gasto.openFinanceTransactionAmount
+                existente.openFinanceTransactionDate = gasto.openFinanceTransactionDate
+                existente.openFinanceMatchScore = gasto.openFinanceMatchScore
+                existente.openFinanceMatchConfirmed = gasto.openFinanceMatchConfirmed
                 existente.dia = dia
                 existente.syncStatus = .synced
                 existente.syncError = nil

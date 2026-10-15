@@ -79,6 +79,22 @@ nonisolated final class GastosDia {
     var criadoEm: Date = Date.now
     var atualizadoEm: Date = Date.now
     var deletadoEm: Date?
+
+    var openFinanceStatusRaw: String = OpenFinanceMatchStatus.pendente.rawValue
+    var openFinanceMatchBackendId: Int?
+    var openFinanceTransactionBackendId: Int?
+    var openFinanceProviderTransactionId: String?
+    var openFinanceTransactionDescription: String?
+    var openFinanceTransactionAmount: Decimal?
+    var openFinanceTransactionDate: Date?
+    var openFinanceMatchScore: Int?
+    var openFinanceMatchConfirmed: Bool = false
+
+    @Transient
+    var openFinanceStatus: OpenFinanceMatchStatus {
+        get { OpenFinanceMatchStatus(rawValue: openFinanceStatusRaw) ?? .pendente }
+        set { openFinanceStatusRaw = newValue.rawValue }
+    }
     
     init(
         id: UUID = UUID(),
@@ -120,6 +136,35 @@ nonisolated final class GastosDia {
             comprovanteUrl: dto.comprovante_url
         )
         self.syncStatus = .synced
+        aplicarOpenFinanceStatus(dto.openFinanceStatus, match: dto.openFinanceMatch)
+    }
+
+    func aplicarOpenFinanceStatus(_ status: String?, match: ExpenseTransactionMatchResponse?) {
+        openFinanceStatusRaw = status ?? OpenFinanceMatchStatus.pendente.rawValue
+        openFinanceMatchBackendId = match?.id
+        openFinanceTransactionBackendId = match?.cartaoTransacaoId
+        openFinanceProviderTransactionId = match?.providerTransactionId
+        openFinanceTransactionDescription = match?.transactionDescription
+        openFinanceTransactionAmount = match?.transactionAmount
+        openFinanceTransactionDate = match?.transactionDate
+        openFinanceMatchScore = match?.score
+        openFinanceMatchConfirmed = match?.confirmedByUser ?? false
+    }
+
+    func limparOpenFinanceMatch() {
+        aplicarOpenFinanceStatus(OpenFinanceMatchStatus.pendente.rawValue, match: nil)
+    }
+
+    func copiarOpenFinance(de outro: GastosDia) {
+        openFinanceStatusRaw = outro.openFinanceStatusRaw
+        openFinanceMatchBackendId = outro.openFinanceMatchBackendId
+        openFinanceTransactionBackendId = outro.openFinanceTransactionBackendId
+        openFinanceProviderTransactionId = outro.openFinanceProviderTransactionId
+        openFinanceTransactionDescription = outro.openFinanceTransactionDescription
+        openFinanceTransactionAmount = outro.openFinanceTransactionAmount
+        openFinanceTransactionDate = outro.openFinanceTransactionDate
+        openFinanceMatchScore = outro.openFinanceMatchScore
+        openFinanceMatchConfirmed = outro.openFinanceMatchConfirmed
     }
     
     @Transient
@@ -135,7 +180,24 @@ nonisolated final class GastosDia {
             valor: valor,
             titulo: titulo,
             categoria: categoria,
-            comprovante_url: comprovanteUrl
+            comprovante_url: comprovanteUrl,
+            openFinanceStatus: openFinanceStatusRaw,
+            openFinanceMatch: openFinanceMatchBackendId.map {
+                ExpenseTransactionMatchResponse(
+                    id: $0,
+                    gastoId: backendId ?? 0,
+                    cartaoTransacaoId: openFinanceTransactionBackendId ?? 0,
+                    providerTransactionId: openFinanceProviderTransactionId,
+                    transactionDescription: openFinanceTransactionDescription,
+                    transactionAmount: openFinanceTransactionAmount,
+                    transactionDate: openFinanceTransactionDate,
+                    status: openFinanceStatusRaw,
+                    score: openFinanceMatchScore ?? 0,
+                    method: "RULES",
+                    confirmedByUser: openFinanceMatchConfirmed,
+                    matchedAt: Date.now
+                )
+            }
         )
     }
     

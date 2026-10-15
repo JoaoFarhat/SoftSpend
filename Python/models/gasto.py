@@ -15,10 +15,20 @@ class Gasto(Base):
     comprovante_key = Column(String(255), nullable=True)
 
     dia = relationship("Dia", back_populates="gastos")
+    open_finance_match = relationship(
+        "ExpenseTransactionMatch",
+        back_populates="gasto",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         UniqueConstraint("client_id", "dia_id", name="uix_gasto_client_id_dia"),
     )
+
+    @property
+    def open_finance_status(self) -> str:
+        return self.open_finance_match.status if self.open_finance_match else "PENDENTE"
 
     @property
     def comprovante_url(self) -> str | None:
