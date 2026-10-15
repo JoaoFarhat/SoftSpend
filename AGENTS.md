@@ -289,6 +289,17 @@ AWS S3, Cloudflare R2, Supabase Storage e MinIO:
 | `S3_PUBLIC_BASE_URL` | — | Se definida, a URL é `{base}/{key}`; senão gera URL assinada |
 | `S3_URL_EXPIRACAO` | `3600` | Validade da URL assinada, em segundos. Recomenda-se 1h em produção |
 
+Open Finance com Pluggy (`services/open_finance_service.py`):
+
+| Variável | Default | Descrição |
+| --- | --- | --- |
+| `PLUGGY_CLIENT_ID` | — | Credencial da aplicação no Pluggy; sem ela `/api/connect-token` responde 503 |
+| `PLUGGY_CLIENT_SECRET` | — | Segredo da aplicação no Pluggy; somente no backend |
+| `PLUGGY_API_URL` | `https://api.pluggy.ai` | Base URL da API |
+| `PLUGGY_WEBHOOK_URL` | — | URL pública HTTPS enviada no connect token; deve apontar para `/api/webhooks/pluggy` |
+| `PLUGGY_WEBHOOK_SECRET` | — | **Obrigatória** para habilitar o webhook; use no header `X-Pluggy-Webhook-Secret` ao registrar o webhook pela API do Pluggy ou como `?token=` em `PLUGGY_WEBHOOK_URL` |
+| `PLUGGY_TIMEOUT_SECONDS` | `10` | Timeout das chamadas HTTP ao Pluggy |
+
 | Variável | Default | Descrição |
 | --- | --- | --- |
 | `ALLOWED_ORIGINS` | `https://softspend.com.br` | Origens CORS permitidas, separadas por vírgula |

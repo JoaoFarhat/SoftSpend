@@ -178,3 +178,138 @@ def test_https_behind_proxy_includes_hsts_header():
     # trafegar pelo middleware e incluir o cabecalho HSTS.
     assert response.status_code in (200, 503)
     assert "Strict-Transport-Security" in response.headers
+
+
+def test_pluggy_webhook_requires_configured_secret(monkeypatch):
+    from main import app
+
+    monkeypatch.delenv("PLUGGY_WEBHOOK_SECRET", raising=False)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/webhooks/pluggy",
+        json={"event": "item/created", "eventId": "event-1", "itemId": "item-1"},
+    )
+
+    assert response.status_code == 503
+
+
+def test_pluggy_webhook_processes_valid_event_in_background(monkeypatch):
+    from main import app
+    from services import open_finance_service
+
+    eventos = []
+
+    async def processar(evento):
+        eventos.append(evento)
+
+    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "webhook-secret")
+    monkeypatch.setattr(open_finance_service, "processar_evento", processar)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/webhooks/pluggy",
+        headers={"X-Pluggy-Webhook-Secret": "webhook-secret"},
+        json={
+            "event": "item/created",
+            "eventId": "event-1",
+            "itemId": "item-1",
+            "clientUserId": "user-1",
+            "triggeredBy": "USER",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"received": True}
+    assert eventos[0]["event"] == "item/created"
+    assert eventos[0]["itemId"] == "item-1"
+
+
+def test_pluggy_webhook_rejects_invalid_secret(monkeypatch):
+    from main import app
+
+    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "webhook-secret")
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/webhooks/pluggy",
+        headers={"X-Pluggy-Webhook-Secret": "wrong"},
+        json={"event": "item/created", "eventId": "event-1"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_pluggy_webhook_accepts_secret_in_url_token(monkeypatch):
+    from main import app
+    from services import open_finance_service
+
+    eventos = []
+
+    async def processar(evento):
+        eventos.append(evento)
+
+    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "webhook-secret")
+    monkeypatch.setattr(open_finance_service, "processar_evento", processar)
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/webhooks/pluggy?token=webhook-secret",
+        json={"event": "item/updated", "eventId": "event-2", "itemId": "item-1"},
+    )
+
+    assert response.status_code == 200
+    assert eventos[0]["event"] == "item/updated"
+
+
+def test_pluggy_webhook_accepts_dashboard_probe_with_empty_body(monkeypatch):
+    from main import app
+
+    monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "webhook-secret")
+    client = TestClient(app)
+
+    response = client.post(
+        "/api/webhooks/pluggy?token=webhook-secret",
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"received": True, "ignored": "empty_body"}
+
+
+def test_connect_token_uses_authenticated_user(monkeypatch):
+    from dependencies import get_current_user_id
+    from main import app
+    from services import open_finance_service
+
+    chamadas = []
+
+    async def criar_connect_token(**kwargs):
+        chamadas.append(kwargs)
+        return "connect-token"
+
+    monkeypatch.setattr(open_finance_service, "criar_connect_token", criar_connect_token)
+    app.dependency_overrides[get_current_user_id] = lambda: "user-1"
+    try:
+        client = TestClient(app)
+        response = client.post(
+            "/api/connect-token",
+            json={
+                "itemId": "item-1",
+                "oauthRedirectUri": "softspend://oauth",
+                "avoidDuplicates": False,
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"accessToken": "connect-token"}
+    assert chamadas == [
+        {
+            "client_user_id": "user-1",
+            "item_id": "item-1",
+            "oauth_redirect_uri": "softspend://oauth",
+            "avoid_duplicates": False,
+        }
+    ]
