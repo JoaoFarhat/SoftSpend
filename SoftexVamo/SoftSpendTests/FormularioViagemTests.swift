@@ -62,14 +62,45 @@ struct FormularioViagemTests {
         #expect(f.total == nil)
     }
 
-    @Test func mudarDatasRecalculaDiariaAPartirDoTotal() {
+    /// Diária digitada (diária fixa): mudar as datas mantém a diária e recalcula o total.
+    @Test func mudarDatasComDiariaDigitadaMantemADiaria() {
         var f = formulario()
         f.editarDiaria("450")
+        f.mudarVolta(d(28)) // 9 dias
+        #expect(f.diaria == 450)
+        #expect(f.totalTexto == "4.050,00")
+        f.mudarIda(d(26)) // 26 a 28 = 3 dias
+        #expect(f.diaria == 450)
+        #expect(f.totalTexto == "1.350,00")
+    }
+
+    /// Total digitado (valor cheio da viagem): mudar as datas mantém o total e recalcula a diária.
+    @Test func mudarDatasComTotalDigitadoMantemOTotal() {
+        var f = formulario()
+        f.editarTotal("2700")
         f.mudarVolta(d(28)) // 9 dias
         #expect(f.total == 2700)
         #expect(f.diariaTexto == "300,00")
         f.mudarIda(d(26)) // 26 a 28 = 3 dias
         #expect(f.diariaTexto == "900,00")
+    }
+
+    /// Viagem antiga aberta para editar (nada digitado ainda): vale o total, como antes.
+    @Test func mudarDatasSemCampoDigitadoMantemOTotal() {
+        var f = FormularioViagem(ida: d(20), volta: d(25), total: 2700, calendario: cal)
+        f.mudarVolta(d(28))
+        #expect(f.total == 2700)
+        #expect(f.diariaTexto == "300,00")
+    }
+
+    /// A última edição é a que vale: digitou a diária e depois o total, o total fica.
+    @Test func ultimaEdicaoDecideQualCampoFica() {
+        var f = formulario()
+        f.editarDiaria("450")
+        f.editarTotal("2700")
+        f.mudarVolta(d(28))
+        #expect(f.total == 2700)
+        #expect(f.diariaTexto == "300,00")
     }
 
     @Test func idaDepoisDaVoltaEmpurraAVolta() {

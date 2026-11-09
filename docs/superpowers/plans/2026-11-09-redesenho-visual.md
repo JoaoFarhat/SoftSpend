@@ -219,7 +219,7 @@ xcrun simctl io booted screenshot capturas/<tela>-<tema>.png
 **Interfaces:**
 - Consumes: `ValoresViagem`, `codigoCidade` (Tarefa 2), `abrirViagem` (Tarefa 3).
 
-- [ ] **Passo 1:** Nova viagem (tela 4): destino, ida, volta, "N dias, contando ida e volta", seletor Diária | Cartão corporativo ("em breve", desabilitado), campos ligados **Total da viagem** (principal, borda `Tema.marca`) ⇅ **Diária**: editar um recalcula o outro com `ValoresViagem`; mudar as datas recalcula a diária a partir do total. Salvar chama `createNewCiclo(startDate:endDate:totalValue:titulo:)` como hoje. Editar viagem antiga continua pelo total.
+- [ ] **Passo 1:** Nova viagem (tela 4): destino, ida, volta, "N dias, contando ida e volta", seletor Diária | Cartão corporativo ("em breve", desabilitado), campos ligados **Total da viagem** (principal, borda `Tema.marca`) ⇅ **Diária**: editar um recalcula o outro com `ValoresViagem`; mudar as datas mantém o campo digitado por último e recalcula o outro (digitou a diária: o total acompanha; digitou o total ou nada, como ao editar viagem antiga: a diária acompanha; decisão do usuário, 09/11). Salvar chama `createNewCiclo(startDate:endDate:totalValue:titulo:)` como hoje. Editar viagem antiga continua pelo total.
 - [ ] **Passo 2:** Viagens (tela 16): "AGORA" (a de `cicloInicio`, com barra de progresso) e "ANTERIORES" (DE→PARA, cidade e período, total, link "PDF" → `.fecharViagem`); "＋" → `.novaViagem`. Tocar numa viagem → `abrirViagem` (não troca o início).
 - [ ] **Passo 3:** Build, capturas 4 e 16 nos dois temas; criar uma viagem de 6 dias digitando só a diária 450 e conferir total 2.700 salvo.
 - [ ] **Passo 4:** Commit `feat: nova viagem com total e diária ligados; tela de viagens`.

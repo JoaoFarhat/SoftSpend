@@ -27,8 +27,9 @@ nonisolated func lerValorDigitado(_ texto: String) -> Decimal? {
 
 /// Estado do formulário de Nova viagem (tela 4): destino, datas e os campos
 /// ligados total ⇅ diária. Editar um recalcula o outro com `ValoresViagem`;
-/// mudar as datas recalcula a diária a partir do total. O campo que o usuário
-/// está digitando nunca é reescrito, só o outro.
+/// mudar as datas mantém o campo digitado por último e recalcula o outro (sem
+/// nenhum digitado, como ao editar viagem antiga, vale o total). O campo que o
+/// usuário está digitando nunca é reescrito, só o outro.
 struct FormularioViagem: Equatable {
     enum Campo { case total, diaria }
 
@@ -107,9 +108,13 @@ struct FormularioViagem: Equatable {
 
     // MARK: Privado
 
+    /// O campo que a pessoa digitou por último fica e o outro acompanha as datas: quem tem diária
+    /// fixa (R$ 450/dia) quer ver o total subir ao ganhar um dia, não a diária cair (decisão do João, 09/11).
     private mutating func datasMudaram() {
         guard dias > 0 else { return }
-        if let total, total > 0 {
+        if ultimoEditado == .diaria, let diaria, diaria > 0 {
+            totalTexto = formatarValorSemSimbolo(ValoresViagem.total(diaria: diaria, dias: dias))
+        } else if let total, total > 0 {
             recalcularDiaria()
         } else if let diaria, diaria > 0 {
             totalTexto = formatarValorSemSimbolo(ValoresViagem.total(diaria: diaria, dias: dias))
