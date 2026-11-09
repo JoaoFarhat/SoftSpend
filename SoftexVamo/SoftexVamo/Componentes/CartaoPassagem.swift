@@ -30,6 +30,7 @@ struct CartaoPassagem: View {
 
     @ScaledMetric(relativeTo: .largeTitle) private var tamanhoCodigo: CGFloat = 30
     @ScaledMetric(relativeTo: .body) private var tamanhoAviao: CGFloat = 18
+    @ScaledMetric(relativeTo: .largeTitle) private var tamanhoDestaque: CGFloat = 38
 
     /// Diâmetro dos recortes laterais.
     private let recorte: CGFloat = 20
@@ -207,14 +208,14 @@ struct CartaoPassagem: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("Ainda dá para gastar hoje, \(formatarBRL(livre))")
         } else {
-            VStack(alignment: .leading, spacing: 0) {
-                Text("Passou hoje")
-                    .font(.subheadline)
-                    .foregroundStyle(Tema.estouro)
-                ValorMonetario(-livre, destaque: true)
-                    .foregroundStyle(Tema.estouro)
-            }
-            .accessibilityElement(children: .ignore)
+            // Uma linha só, alinhada pela base: "Passou" e "hoje" no tamanho do
+            // rótulo, o valor no tamanho de destaque. Encolhe em vez de quebrar.
+            Text("\(Text("Passou ").font(.subheadline))\(Text(formatarBRL(-livre)).font(.larga(tamanhoDestaque, .bold)).tracking(-0.4))\(Text(" hoje").font(.subheadline))")
+                .monospacedDigit()
+                .foregroundStyle(Tema.estouro)
+                .lineLimit(1)
+                .minimumScaleFactor(0.5)
+                .accessibilityElement(children: .ignore)
             .accessibilityLabel("Passou \(formatarBRL(-livre)) hoje")
         }
     }
