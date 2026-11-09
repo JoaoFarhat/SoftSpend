@@ -18,8 +18,11 @@
 - Só a camada visual muda. Exceções permitidas pelo spec: tirar o bloqueio de saldo do `editGasto`; escolher o ciclo do início pela data de hoje; derivar valores no ViewModel. Nada em `Python/`.
 - Roxo só como marca: logo, ícone de avião da rota, barra do dia de hoje, botão principal. Proibidos: `LinearGradient` roxo, brilhos/estrelinhas de "IA", ilustração 3D (imagens `bagagem`/`maleta`), emoji como ícone, grade de cartõezinhos com ícone em quadradinho.
 - Temas claro e escuro iguais em qualidade; o app segue o tema do iPhone. Contraste AA nos dois.
-- Paleta (valores finais e completos em `docs/superpowers/specs/design-system/tokens.json`, cópia do Design System; resumo, escuro / claro): fundo `#0B0B0D`/`#F4F3F7`; superfície `#17161B`/`#FFFFFF`; borda `#2A2830`/`#E4E2EA`; texto `#F2F1F5`/`#17151C`; texto fraco `#8E8C96`/`#6F6C78`; barra de dia `#34323B`/`#DCD9E3`; roxo da marca `#9B5CF6`/`#7C3AED`; dia estourado `#E0603F`/`#C2410C`; alerta texto `#F2A54A`/`#B45309`, fundo `#2A1D10`/`#FFF4E5`, borda `#5A3A17`/`#F4D3A6`; ok `#4ADE80`/`#15803D`.
-- Dinheiro sempre em pt-BR ("R$ 1.183,00"), algarismos monoespaçados (`.monospacedDigit()`), independente do idioma do aparelho.
+- Paleta: os valores exatos e as regras de uso estão em `docs/superpowers/specs/design-system/tokens.json` (claro = `light`, escuro = `dark`); o resumo está no design. Fundo #F2F2F7 / #000, superfície #FFF / #1C1C1E, sem bordas em cartões.
+- Dinheiro sempre em pt-BR ("R$ 1.183,00"), SF Pro com algarismos tabulares (`.monospacedDigit()`), independente do idioma do aparelho. **Nunca** fonte mono.
+- Tipografia: SF Pro em toda a interface; **SF Pro Expanded** (`.fontWidth(.expanded)`) só nos códigos da passagem e no valor de destaque.
+- Texto: títulos e rótulos em caixa normal ("Hoje", "Antes de gerar"); sem pontinhos (·) ligando dados, sem setas no texto; frases como "Você gastou R$ 147,70 dos R$ 450 de hoje", "2 gastos sem foto", "Falta a foto". Logo = símbolo de bilhete roxo + "SoftSpend" numa cor só.
+- Formas: só a passagem tem raio 20 e recortes; listas agrupadas raio 12 sem borda (divisória 0,5 pt); botões em pílula.
 - Ícones em SF Symbols. Categorias continuam as 5 de hoje (`Categoria`: Alimentação, Transporte, Lazer, Compras, Outros); a "Hospedagem" do esboço 10 **não** entra (exigiria backend).
 - Dynamic Type nos textos; VoiceOver lê "Ainda dá para gastar hoje, R$ X" e o estado de cada barra ("21 de julho, passou R$ 38").
 - Textos com acento correto ("Não tem conta?", "começar", "usuário").
@@ -70,7 +73,7 @@ xcrun simctl io booted screenshot capturas/<tela>-<tema>.png
 - Modify: `.gitignore` (`capturas/`)
 
 **Interfaces:**
-- Produces: `enum Tema` com uma `static let <nome em camelCase>: Color` por Color Set (`fundo`, `superficie`, `superficie2`, `borda`, `texto`, `textoFraco`, `barraDia`, `marca`, `marcaBotao`, `marcaTexto`, `marcaFundo`, `estouro`, `alertaTexto`, `alertaFundo`, `alertaBorda`, `ok`, `okFundo`); `enum Espaco { static let p: CGFloat = 8, m = 12, g = 16 }`; `enum Raio { static let cartao: CGFloat = 16, linha = 14, campo = 10, botao = 13 }`; `func formatarBRL(_ valor: Decimal, centavos: Bool = true) -> String`; `extension Categoria { var cor: Color }` (ver `docs/superpowers/specs/design-system/tokens.json`; os Color Sets `cat-alimentacao` `#D9580F`, `cat-transporte` `#2563EB`, `cat-lazer` `#0F766E`, `cat-compras` `#7C3AED`, `cat-outros` `#64748B`).
+- Produces: `enum Tema` com uma `static let <nome em camelCase>: Color` por Color Set (`fundo`, `superficie`, `superficie2`, `borda`, `texto`, `textoFraco`, `barraDia`, `marca`, `marcaBotao`, `marcaTexto`, `marcaFundo`, `estouro`, `alertaTexto`, `alertaFundo`, `alertaBorda`, `ok`, `okFundo`); `enum Espaco { static let p: CGFloat = 8, m = 12, g = 16 }`; `enum Raio { static let selo: CGFloat = 6, campo = 10, lista = 12, passagem = 20 }` (botões são `Capsule()`); `extension Font { static func larga(_ tamanho: CGFloat, _ peso: Font.Weight) -> Font }` (= `.system(size:weight:)` com `.width(.expanded)`); `func formatarBRL(_ valor: Decimal, centavos: Bool = true) -> String`; `extension Categoria { var cor: Color }` (Color Sets `cat-alimentacao` `#C2410C`, `cat-transporte` `#1D4ED8`, `cat-lazer` `#0F766E`, `cat-compras` `#6D28D9`, `cat-outros` `#64748B`, todos iguais nos dois temas; ver `docs/superpowers/specs/design-system/tokens.json`).
 
 - [ ] **Passo 1: testes que falham**
 
@@ -149,10 +152,10 @@ xcrun simctl io booted screenshot capturas/<tela>-<tema>.png
 **Interfaces:**
 - Consumes: `Tema`, `Espaco`, `Raio`, `formatarBRL`, `Categoria.cor` (Tarefa 1); `ResumoViagem`, `DiaResumo`, `codigoCidade` (Tarefa 2).
 - Produces:
-  - `CartaoPassagem(resumo: ResumoViagem, origem: String?, destino: String, periodo: String)` — cabeçalho DE/PARA com avião em `Tema.marca`, picote com semicírculos na cor `Tema.fundo`, bloco do estado (`.durante`: "Ainda dá para gastar hoje" + valor grande, ou "Passou R$ X hoje" em `Tema.estouro` se negativo; `.antes`: "Começa em N dias"; `.encerrada`: "Viagem encerrada") e `BarrasPorDia` quando `.durante`. Sem origem: mostra só "PARA".
+  - `CartaoPassagem(resumo: ResumoViagem, origem: String?, destino: String, periodo: String)` — cidade pequena sobre o código (SF Pro Expanded) nos dois lados, avião em `Tema.marca` entre eles, "20 a 25 de julho" e "4º de 6 dias", picote tracejado com recortes na cor `Tema.fundo`, sem borda, raio 20, bloco do estado (`.durante`: "Ainda dá para gastar hoje" + valor grande, ou "Passou R$ X hoje" em `Tema.estouro` se negativo; `.antes`: "Começa em N dias"; `.encerrada`: "Viagem encerrada") e `BarrasPorDia` quando `.durante`. Sem origem: mostra só "PARA".
   - `BarrasPorDia(dias: [DiaResumo], aoTocar: (DiaResumo) -> Void)` — hoje `Tema.marca`, estourado `Tema.estouro`, normal `Tema.barraDia`, futuro tracejado; rótulo com o dia do mês; acessibilidade por barra.
-  - `LinhaGasto(gasto: GastosDia, mostrarSeloCategoria: Bool = true)` — `IconeCategoria`, título, `Selo` (categoria ou "sem comprovante"), valor monoespaçado. Selos com `.lineLimit(1).fixedSize()`.
-  - `Selo(texto: String, estilo: .categoria(Categoria) | .alerta | .ok)`, `AlertaPendencia(quantidade: Int, aoResolver: () -> Void)` (some se 0), `BotaoPrincipal(_ titulo: String, acao:)`, `BotaoSecundario(_ titulo: String, acao:)`, `IconeCategoria(_ categoria: Categoria, tamanho: CGFloat = 30)`, `ValorMonetario(_ valor: Decimal, tamanho: Font)`.
+  - `LinhaGasto(gasto: GastosDia)` — `IconeCategoria`, título, linha de apoio "Categoria, HH:mm" em `Tema.textoFraco` ou "Falta a foto" em `Tema.alertaTexto`, valor com `.monospacedDigit()`. Tudo `.lineLimit(1)`.
+  - `Selo(texto: String, estilo: .neutro | .alerta | .ok)`, `AlertaPendencia(quantidade: Int, aoAdicionar: () -> Void)` ("N gastos sem foto" + "Adicionar"; some se 0), `BotaoPrincipal(_ titulo: String, acao:)` (pílula `Tema.marcaBotao`), `BotaoSecundario(_ titulo: String, acao:)` (pílula `Tema.superficie`), `IconeCategoria(_ categoria: Categoria, tamanho: CGFloat = 30)`, `ValorMonetario(_ valor: Decimal, destaque: Bool = false)` (destaque = SF Pro Expanded 38pt bold, `.lineLimit(1).minimumScaleFactor(0.7)`).
 - Cada componente com `#Preview` em claro e escuro (`.preferredColorScheme`).
 
 - [ ] **Passo 1:** Implementar os componentes.
@@ -170,7 +173,7 @@ xcrun simctl io booted screenshot capturas/<tela>-<tema>.png
 - Consumes: componentes (Tarefa 4), `cicloInicio` (Tarefa 3).
 - Produces: `enum Rota: Hashable { case novaViagem, viagens, viagem(UUID), todosGastos(filtro: FiltroGastos), detalheGasto(UUID), fecharViagem(UUID), perfil }` e `enum FiltroGastos: Hashable { case todos, semComprovante, categoria(Categoria) }` — usados pelas tarefas seguintes em `.navigationDestination(for: Rota.self)`. Até a tarefa dona existir, o destino mostra a tela antiga correspondente.
 
-- [ ] **Passo 1:** `InicioView`: topo com logo ("soft" em `Tema.marca`) e avatar; `CartaoPassagem`; `AlertaPendencia` → `.todosGastos(filtro: .semComprovante)`; "HOJE · dd/MM" + "Ver todos" → `.todosGastos(filtro: .todos)`; lista dos gastos de hoje com `LinhaGasto`; rodapé fixo `BotaoPrincipal("Fotografar comprovante")` + `BotaoSecundario("＋")`. Estados: `.semViagem` → tela 3 com "Nova viagem"; `.antes` → tela 5 (dicas + "Editar viagem"); `.encerrada` → cartão "Viagem encerrada" + botão "Fechar viagem" → `.fecharViagem`.
+- [ ] **Passo 1:** `InicioView`: topo com logo (símbolo de bilhete em `Tema.marca` + "SoftSpend") e avatar; `CartaoPassagem`; `AlertaPendencia` → `.todosGastos(filtro: .semComprovante)`; título "Hoje" + "Todos os gastos" → `.todosGastos(filtro: .todos)`; lista dos gastos de hoje com `LinhaGasto`; rodapé fixo `BotaoPrincipal("Fotografar comprovante")` + `BotaoSecundario("＋")`. Estados: `.semViagem` → tela 3 com "Nova viagem"; `.antes` → tela 5 (dicas + "Editar viagem"); `.encerrada` → cartão "Viagem encerrada" + botão "Fechar viagem" → `.fecharViagem`.
 - [ ] **Passo 2:** `MenuAvatar` (tela 7): nome/e-mail, Viagens, Todos os gastos, Fechar viagem e PDF, Perfil e ajustes, Sair. Sem "Ambiente API" fora de `#if DEBUG`; sem "Cartão corporativo" enquanto o Open Finance estiver desligado (manter a checagem que já existe no `MenuView`; sem resposta = desligado).
 - [ ] **Passo 3:** Build e capturas das telas 3, 5, 6, 7 nos dois temas (mudar a data do simulador ou usar dados de exemplo em DEBUG para cada estado). Comparar com o HTML.
 - [ ] **Passo 4:** Commit `feat: novo início e menu do avatar`.
@@ -238,7 +241,7 @@ xcrun simctl io booted screenshot capturas/<tela>-<tema>.png
 **Files:**
 - Modify/Delete: `SoftexVamo/SoftexVamo/Extensions/Color+App.swift` (gradientes `appPurple`/`cardMain`), imagens `bagagem` e `maleta` e cores antigas (`roxoInicial`, `roxoFinal`, `purplePrimary`…) quando nada mais usar; `CardMainView.swift`, `CardCiclosView.swift`, `CardCategoryView.swift`, `MenuView.swift` se ficaram sem uso.
 
-- [ ] **Passo 1:** `grep -rn "LinearGradient\|appPurple\|cardMain\|bagagem\|maleta\|sparkles\|roxoInicial\|roxoFinal" SoftexVamo/SoftexVamo` — Esperado: nada fora de código removido.
+- [ ] **Passo 1:** `grep -rn "LinearGradient\|appPurple\|cardMain\|bagagem\|maleta\|sparkles\|roxoInicial\|roxoFinal\|\.monospaced()\|textCase(.uppercase)\| · " SoftexVamo/SoftexVamo` — Esperado: nada fora de código removido.
 - [ ] **Passo 2:** Rodar `test` (todos PASS) e build.
 - [ ] **Passo 3:** Capturar as telas 1–17 nos dois temas e colocar lado a lado com o HTML; corrigir diferenças.
 - [ ] **Passo 4:** Commit `chore: remove o visual antigo`. Abrir PR da `redesenho-visual` para a `main` com as capturas. **Não** fazer merge: o usuário decide.

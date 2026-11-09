@@ -62,21 +62,35 @@ Escolhida a 1 pelo usuário: entrega mais rápido, não arrisca o que funciona, 
 - **Ícones de categoria coloridos** continuam (ex.: Alimentação laranja, Transporte azul), em SF Symbols.
 - **Temas claro e escuro** desde o início.
 
-### Paleta de referência (dos esboços aprovados; o construtor pode ajustar tons para contraste AA)
+### Revisão frontend-design (09/11, aprovada pelo usuário)
 
-| Papel | Escuro | Claro |
+As 18 telas foram revistas com o plugin frontend-design para tirar os sinais de "interface gerada". A estrutura não mudou; mudou o acabamento:
+
+- **Uma assinatura só: a passagem.** É o único objeto marcado (raio 20, recortes laterais, picote tracejado). Os códigos da rota (SAO, CGB) e o valor de destaque usam **SF Pro Expanded** (`.fontWidth(.expanded)`), como na sinalização de aeroporto. O resto é iOS nativo: listas agrupadas sem borda, títulos em caixa normal e botões em pílula.
+- **Logo:** um nome só, "SoftSpend", com um símbolo de bilhete roxo; sai o "**soft**spend" de duas cores.
+- **Texto:** sem rótulos em CAIXA ALTA espaçada (exceto os códigos da passagem), sem pontinhos (·) ligando dados, sem setas no texto, sempre escrevendo a frase ("Você gastou R$ 147,70 dos R$ 450 de hoje", "20 a 25 de julho", "4º de 6 dias", "2 gastos sem foto", "Falta a foto", "Adicionar", "Todos os gastos").
+- **Números:** SF Pro com algarismos tabulares (`.monospacedDigit()`); **não** usar fonte mono.
+- **Cores:** as do iOS (fundo #F2F2F7 / #000, superfície #FFF / #1C1C1E); cartões sem borda; selo de categoria neutro; ícones de categoria mais escuros para o glifo branco ter contraste.
+
+### Paleta (valores completos e regras de uso: `design-system/tokens.json`)
+
+| Papel | Claro | Escuro |
 |---|---|---|
-| Fundo | #0B0B0D | #F4F3F7 |
-| Superfície (cartões) | #17161B | #FFFFFF |
-| Borda | #2A2830 | #E4E2EA |
-| Texto | #F2F1F5 | #17151C |
-| Texto fraco | #8E8C96 | #6F6C78 |
-| Barra de dia normal | #34323B | #DCD9E3 |
-| Roxo da marca (botão, barra de hoje) | #9B5CF6 | #7C3AED |
-| Dia estourado (vermelho-tijolo) | #E0603F | #C2410C |
-| Alerta (comprovante faltando) texto / fundo / borda | #F2A54A / #2A1D10 / #5A3A17 | #B45309 / #FFF4E5 / #F4D3A6 |
+| Fundo | #F2F2F7 | #000000 |
+| Superfície (passagem, listas, campos) | #FFFFFF | #1C1C1E |
+| Superfície 2 (chips, selos) | #E9E8EE | #2C2C2E |
+| Divisória de lista | #E3E1E8 | #2C2C2E |
+| Texto | #1C1B1F | #F5F4F7 |
+| Texto fraco | #6B6870 | #9A98A1 |
+| Barra de dia normal | #D9D6DF | #3A3A3E |
+| Roxo da marca (logo, avião, barra de hoje) | #6D28D9 | #8B5CF6 |
+| Botão principal | #6D28D9 | #6D28D9 |
+| Link | #6D28D9 | #C4B2FF |
+| Dia estourado (vermelho-tijolo) | #B93A0C | #EF6A45 |
+| Pendência texto / fundo | #A14800 / #FFF3E2 | #F3A957 / #2B1F12 |
+| Confirmado texto / fundo | #15803D / #E7F6EC | #4ADE80 / #12261A |
 
-Números de dinheiro em fonte monoespaçada com algarismos tabulares (SF Mono ou `.monospacedDigit()`), para alinharem nas listas.
+Referência viva: Design System "SoftSpend" (https://claude.ai/artifact/Ata2yxRut3wkQGMvv2Epad) e canvas com as 18 telas (https://claude.ai/artifact/7NmBpiyCPVAfEPYqSPFoWd), privados do João; a cópia no repositório é `design-system/` e `telas/`.
 
 ## Telas
 
@@ -84,17 +98,17 @@ Números de dinheiro em fonte monoespaçada com algarismos tabulares (SF Mono ou
 
 De cima para baixo:
 
-1. Barra: logo "**soft**spend" ("soft" em roxo) à esquerda; avatar com iniciais à direita (abre o menu/perfil).
-2. **Cartão da passagem** (superfície, borda fina, cantos ~16pt):
-   - linha DE / PARA com códigos de 3 letras e linha tracejada com ícone de avião em roxo no meio. Os códigos vêm da cidade do ciclo (ver "Deixado ao construtor");
-   - "Cuiabá · 20/07 → 25/07" à esquerda, "dia 4/6" à direita;
-   - picote: linha pontilhada com dois semicírculos recortados nas laterais (cor do fundo);
-   - "Ainda dá para gastar hoje" + **valor grande** (= diária − gasto do dia; negativo aparece como "Passou R$ X hoje" em vermelho-tijolo);
-   - "diária R$ 450 · gasto hoje R$ 147,70";
+1. Barra: logo (símbolo de bilhete roxo + "SoftSpend") à esquerda; avatar com iniciais à direita (abre o menu/perfil).
+2. **Cartão da passagem** (superfície, sem borda, cantos 20pt, recortes laterais):
+   - nome da cidade pequeno sobre o código de 3 letras (SF Pro Expanded), origem à esquerda, destino à direita, avião roxo entre os dois. Os códigos vêm da cidade do ciclo (ver "Deixado ao construtor");
+   - "20 a 25 de julho" à esquerda, "4º de 6 dias" à direita;
+   - picote: linha tracejada com dois recortes circulares nas laterais (cor do fundo);
+   - "Ainda dá para gastar hoje" + **valor grande** em SF Pro Expanded (= diária − gasto do dia; negativo aparece como "Passou R$ X hoje" em vermelho-tijolo);
+   - "Você gastou R$ 147,70 dos R$ 450 de hoje";
    - **barras por dia**: uma por dia do ciclo; altura = gasto do dia / diária (com teto visual); dia acima da diária em vermelho-tijolo; hoje em roxo; dias futuros tracejados; rótulo do dia do mês embaixo.
-3. **Alerta de pendência** (só se houver): "N gastos sem comprovante" + "Resolver" (abre a lista filtrada pelos sem comprovante).
-4. "HOJE · 23/07" + lista dos gastos do dia: ícone da categoria (quadrado arredondado colorido com SF Symbol), nome, selo da categoria **ou** selo "sem comprovante" (laranja), valor à direita. Selos nunca quebram linha (corrige o "Aguardan do fatura" de hoje).
-5. Rodapé fixo: botão principal roxo "Fotografar comprovante" (abre a câmera direto) + botão secundário "＋" (lançar sem foto).
+3. **Alerta de pendência** (só se houver): "N gastos sem foto" + "Adicionar" (abre a lista filtrada pelos sem foto).
+4. "Hoje" (título de seção) + "Todos os gastos" à direita + lista agrupada dos gastos do dia: ícone da categoria (quadrado arredondado colorido com SF Symbol), nome, linha de apoio "Categoria, hora" **ou** "Falta a foto" (laranja), valor à direita. Nada quebra linha (corrige o "Aguardan do fatura" de hoje).
+5. Rodapé fixo: botão principal em pílula roxa "Fotografar comprovante" (abre a câmera direto) + botão secundário redondo "＋" (lançar sem foto).
 
 Some do início: a grade de "Orçamento diário / Gasto hoje / Restam hoje", "Média diária" (que mostrava o mesmo valor do orçamento diário — bug), a mala 3D, a lista longa de todos os gastos (vai para "Todos os gastos").
 
