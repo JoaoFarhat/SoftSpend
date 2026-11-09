@@ -98,7 +98,6 @@ struct RegisterView: View {
                                 senhaRequisito("Um número", atende: senhaTemNumero)
                                 senhaRequisito("Um caractere especial (!@#$...)", atende: senhaTemEspecial)
                             }
-                            .padding(.horizontal, Espaco.g + 4)
                         }
 
                         CampoAcesso(rotulo: "Confirmar senha", texto: $confirmarSenha, seguro: true)
@@ -108,7 +107,6 @@ struct RegisterView: View {
                             Text("Senhas não conferem")
                                 .font(.footnote)
                                 .foregroundStyle(Tema.estouro)
-                                .padding(.horizontal, Espaco.g + 4)
                         }
 
                         // Alinhada à borda dos campos, como no esboço.
@@ -120,7 +118,6 @@ struct RegisterView: View {
                             Text(error)
                                 .font(.footnote)
                                 .foregroundStyle(Tema.estouro)
-                                .padding(.horizontal, Espaco.g + 4)
                         }
                     }
                     .padding(.horizontal, Espaco.g + 4)

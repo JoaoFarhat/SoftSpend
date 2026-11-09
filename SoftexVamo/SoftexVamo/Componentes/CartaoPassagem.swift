@@ -234,7 +234,7 @@ struct CartaoPassagem: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
                 .accessibilityElement(children: .ignore)
-            .accessibilityLabel("Passou \(formatarBRL(-livre)) hoje")
+                .accessibilityLabel("Passou \(formatarBRL(-livre)) hoje")
         }
     }
 }
