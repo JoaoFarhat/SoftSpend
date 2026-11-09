@@ -431,6 +431,8 @@ struct ConfirmarGastoView: View {
     // MARK: Salvar
 
     private func salvar() {
+        // Síncrono, antes da Task: um segundo toque não cria outro gasto.
+        guard rascunho.iniciarSalvamento() else { return }
         foco = nil
         viewModel.garantirAtual(ciclo)
         Task {
@@ -439,7 +441,8 @@ struct ConfirmarGastoView: View {
                 try await rascunho.salvar(em: viewModel)
                 aoSalvar()
             } catch {
-                viewModel.errorManager?.show(error: error)
+                // A tela não tem o alerta do ErrorManager: o aviso aparece no próprio formulário.
+                rascunho.aviso = "Não foi possível salvar o gasto. Tente novamente."
             }
         }
     }

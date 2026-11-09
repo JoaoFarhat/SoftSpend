@@ -226,10 +226,11 @@ final class RascunhoGasto {
         valorOriginal = gasto.valor
         diaOriginal = gasto.dia
         criadoEm = gasto.criadoEm
-        urlSalva = gasto.comprovanteUrl
         mime = gasto.comprovanteMime
-        comprovanteSalvo = gasto.comprovanteUrl != nil || gasto.comprovanteDataCriptografado != nil
-        if let dados = gasto.comprovanteData {
+        // Remoção pendente de sync (feita offline): o comprovante já não conta.
+        comprovanteSalvo = temComprovanteValido(gasto)
+        urlSalva = comprovanteSalvo ? gasto.comprovanteUrl : nil
+        if comprovanteSalvo, let dados = gasto.comprovanteData {
             // Comprovante local ainda não enviado: mostra a miniatura.
             imagem = UIImage(data: dados)
         }
@@ -315,13 +316,24 @@ final class RascunhoGasto {
 
     // MARK: Salvar
 
+    /// Marca o salvamento como em andamento. `false` se já estava salvando ou
+    /// se ainda não dá para salvar: o segundo toque é ignorado.
+    func iniciarSalvamento() -> Bool {
+        guard podeSalvar else { return false }
+        salvando = true
+        return true
+    }
+
     /// Cria ou edita o gasto com as funções de hoje do `CiclosViewModel`.
     /// O `CiclosViewModel` precisa estar apontado para o ciclo do dia (`garantirAtual`).
+    ///
+    /// Quem chama deve usar `iniciarSalvamento()` de forma síncrona antes de
+    /// criar a `Task`, para que dois toques seguidos não criem dois gastos.
     func salvar(em viewModel: CiclosViewModel) async throws {
-        guard let dia else { return }
-        tarefaLeitura?.cancel()
         salvando = true
         defer { salvando = false }
+        guard let dia else { return }
+        cancelarLeitura()
         let titulo = self.titulo.trimmingCharacters(in: .whitespaces)
 
         if let gastoId {
@@ -337,4 +349,10 @@ final class RascunhoGasto {
                                                comprovante: dadosComprovante, comprovanteMime: mime)
         }
     }
+}
+
+/// O gasto tem comprovante que vale: enviado ou pendente de envio, e sem
+/// remoção pendente (`comprovanteParaRemover`, feita offline).
+func temComprovanteValido(_ gasto: GastosDia) -> Bool {
+    !gasto.comprovanteParaRemover && (gasto.comprovanteUrl != nil || gasto.comprovanteDataCriptografado != nil)
 }

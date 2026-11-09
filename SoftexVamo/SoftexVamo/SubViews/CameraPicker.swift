@@ -151,6 +151,8 @@ final class CameraComprovante: NSObject, ObservableObject {
     @Published private(set) var estado: Estado = .preparando
     @Published var flash = false
     @Published private(set) var fotografando = false
+    /// A última foto falhou (erro, sessão parada ou tempo esgotado).
+    @Published private(set) var falhouFoto = false
 
     let sessao = AVCaptureSession()
     private let saida = AVCapturePhotoOutput()
@@ -197,29 +199,52 @@ final class CameraComprovante: NSObject, ObservableObject {
         estado = .pronta
     }
 
+    /// Para a sessão. Uma captura em andamento termina com `nil` (nunca fica pendurada).
     func parar() {
+        entregar(nil)
         nonisolated(unsafe) let s = sessao
         fila.async { if s.isRunning { s.stopRunning() } }
     }
 
-    /// Tira a foto em resolução cheia. `nil` se falhar.
+    /// Tempo máximo esperando a foto antes de desistir com `nil`.
+    private static let limiteCaptura: Duration = .seconds(10)
+
+    /// Tira a foto em resolução cheia. `nil` se falhar, se a sessão parar no
+    /// meio ou se a foto não chegar em `limiteCaptura`: a continuação é sempre
+    /// retomada exatamente uma vez.
     func fotografar() async -> UIImage? {
-        guard estado == .pronta, !fotografando else { return nil }
+        guard estado == .pronta, !fotografando, continuacao == nil else { return nil }
+        guard let conexao = saida.connection(with: .video), conexao.isEnabled, conexao.isActive else {
+            falhouFoto = true
+            return nil
+        }
         fotografando = true
+        falhouFoto = false
         defer { fotografando = false }
         let ajustes = AVCapturePhotoSettings()
         if flash, saida.supportedFlashModes.contains(.on) {
             ajustes.flashMode = .on
         }
-        return await withCheckedContinuation { cont in
+        let limite = Task { [weak self] in
+            try? await Task.sleep(for: Self.limiteCaptura)
+            guard !Task.isCancelled else { return }
+            self?.entregar(nil)
+        }
+        defer { limite.cancel() }
+        let foto = await withCheckedContinuation { cont in
             continuacao = cont
             saida.capturePhoto(with: ajustes, delegate: self)
         }
+        falhouFoto = foto == nil
+        return foto
     }
 
+    /// Retoma a captura pendente. Chamadas extras (delegate duplo, tempo
+    /// esgotado, `parar`) não fazem nada.
     fileprivate func entregar(_ imagem: UIImage?) {
-        continuacao?.resume(returning: imagem)
+        guard let cont = continuacao else { return }
         continuacao = nil
+        cont.resume(returning: imagem)
     }
 }
 
@@ -227,8 +252,16 @@ extension CameraComprovante: AVCapturePhotoCaptureDelegate {
     nonisolated func photoOutput(_ output: AVCapturePhotoOutput,
                                  didFinishProcessingPhoto photo: AVCapturePhoto,
                                  error: Error?) {
-        let imagem = photo.fileDataRepresentation().flatMap(UIImage.init(data:))
-        Task { @MainActor in self.entregar(imagem) }
+        let imagem = error == nil ? photo.fileDataRepresentation().flatMap(UIImage.init(data:)) : nil
+        // Fila principal (FIFO): a foto chega antes do "fim da captura" abaixo.
+        DispatchQueue.main.async { MainActor.assumeIsolated { self.entregar(imagem) } }
+    }
+
+    /// Fim da captura (com ou sem erro): se a foto não foi entregue, entrega `nil`.
+    nonisolated func photoOutput(_ output: AVCapturePhotoOutput,
+                                 didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings,
+                                 error: Error?) {
+        DispatchQueue.main.async { MainActor.assumeIsolated { self.entregar(nil) } }
     }
 }
 

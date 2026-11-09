@@ -3,41 +3,47 @@ import Foundation
 import SwiftData
 @testable import SoftSpend
 
-/// Serializado: os testes mexem na mesma chave de `UserDefaults`, que é
-/// apagada antes e depois de cada um para não vazar para o app nem para outros testes.
+/// Serializado: os testes mexem na mesma chave de `UserDefaults`. Cada um guarda
+/// o valor que havia, apaga e restaura no fim, para não vazar para o app.
 @Suite(.serialized)
 @MainActor
 struct ConsentimentoTests {
     private let chave = "consentimentoLeituraAutomatica"
 
-    private func limpar() {
-        UserDefaults.standard.removeObject(forKey: chave)
+    /// Guarda o valor atual da chave, apaga e devolve como restaurá-lo.
+    private func isolar() -> () -> Void {
+        let padrao = UserDefaults.standard
+        let salvo = padrao.object(forKey: chave)
+        padrao.removeObject(forKey: chave)
+        return { [chave] in
+            if let salvo { padrao.set(salvo, forKey: chave) } else { padrao.removeObject(forKey: chave) }
+        }
     }
 
     @Test func comecaSemResposta() {
-        limpar()
-        defer { limpar() }
+        let restaurar = isolar()
+        defer { restaurar() }
         #expect(Consentimento.leituraAutomatica == nil)
     }
 
     @Test func guardaPermissao() {
-        limpar()
-        defer { limpar() }
+        let restaurar = isolar()
+        defer { restaurar() }
         Consentimento.leituraAutomatica = true
         #expect(Consentimento.leituraAutomatica == true)
         #expect(UserDefaults.standard.object(forKey: chave) as? Bool == true)
     }
 
     @Test func guardaRecusa() {
-        limpar()
-        defer { limpar() }
+        let restaurar = isolar()
+        defer { restaurar() }
         Consentimento.leituraAutomatica = false
         #expect(Consentimento.leituraAutomatica == false)
     }
 
     @Test func nilApagaAResposta() {
-        limpar()
-        defer { limpar() }
+        let restaurar = isolar()
+        defer { restaurar() }
         Consentimento.leituraAutomatica = true
         Consentimento.leituraAutomatica = nil
         #expect(Consentimento.leituraAutomatica == nil)
@@ -45,8 +51,8 @@ struct ConsentimentoTests {
     }
 
     @Test func suiteInjetadaNaoTocaOPadrao() throws {
-        limpar()
-        defer { limpar() }
+        let restaurar = isolar()
+        defer { restaurar() }
         let nome = "ConsentimentoTests.\(UUID().uuidString)"
         let suite = try #require(UserDefaults(suiteName: nome))
         defer { suite.removePersistentDomain(forName: nome) }

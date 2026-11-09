@@ -13,6 +13,9 @@ struct CameraComprovanteView: View {
     @State private var fotos = false
     @State private var arquivos = false
     @State private var itemFotos: PhotosPickerItem?
+    /// Câmera do sistema (`CameraPicker`), quando a câmera própria não abre mas o aparelho tem câmera.
+    @State private var cameraDoSistema = false
+    @State private var fotoDoSistema: UIImage?
     @ScaledMetric(relativeTo: .body) private var ladoObturador: CGFloat = 72
 
     private var podeFotografar: Bool { previewFixo == nil && camera.estado == .pronta && !camera.fotografando }
@@ -23,9 +26,12 @@ struct CameraComprovanteView: View {
             Spacer(minLength: Espaco.g)
             moldura
                 .padding(.horizontal, 30)
-            Text("Enquadre o comprovante inteiro")
+            Text(camera.falhouFoto ? "Não foi possível tirar a foto. Tente de novo ou use a galeria."
+                            : "Enquadre o comprovante inteiro")
                 .font(.subheadline)
+                .multilineTextAlignment(.center)
                 .foregroundStyle(.white.opacity(0.8))
+                .padding(.horizontal, Espaco.g)
                 .padding(.top, Espaco.g + 4)
             Spacer(minLength: Espaco.g)
             controles
@@ -48,6 +54,14 @@ struct CameraComprovanteView: View {
                 }
                 itemFotos = nil
             }
+        }
+        .fullScreenCover(isPresented: $cameraDoSistema) {
+            CameraPicker(image: $fotoDoSistema).ignoresSafeArea()
+        }
+        .onChange(of: fotoDoSistema) { _, nova in
+            guard let nova else { return }
+            fotoDoSistema = nil
+            aoEscolher(.foto(nova))
         }
         .fileImporter(isPresented: $arquivos, allowedContentTypes: [.image, .pdf]) { resultado in
             if case .success(let url) = resultado {
@@ -128,6 +142,10 @@ struct CameraComprovanteView: View {
             if ajustes, let url = URL(string: UIApplication.openSettingsURLString) {
                 Link("Abrir Ajustes", destination: url)
                     .font(.subheadline.weight(.semibold))
+            } else if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                // O aparelho tem câmera, mas a sessão própria não abriu.
+                Button("Usar a câmera do sistema") { cameraDoSistema = true }
+                    .font(.subheadline.weight(.semibold))
             }
         }
         .foregroundStyle(.white.opacity(0.85))
@@ -148,6 +166,7 @@ struct CameraComprovanteView: View {
 
             Button {
                 Task {
+                    // A falha fica no `camera` (objeto), não em @State: a tela pode já ter saído.
                     if let foto = await camera.fotografar() {
                         aoEscolher(.foto(foto))
                     }

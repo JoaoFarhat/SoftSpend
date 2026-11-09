@@ -17,6 +17,8 @@ struct DetalheGastoView: View {
     @State private var confirmandoApagar = false
     @State private var adicionandoComprovante = false
     @State private var apagando = false
+    /// Falha ao apagar ou anexar. A tela não tem o alerta do ErrorManager, então avisa aqui.
+    @State private var erro: String?
 
     init(gastoId: UUID, hoje: Date = .now) {
         self.gastoId = gastoId
@@ -40,7 +42,8 @@ struct DetalheGastoView: View {
 
     private func conteudo(_ gasto: GastosDia, ciclo: CicloSoftex) -> some View {
         let imagemLocal = gasto.comprovanteData.flatMap(UIImage.init(data:))
-        let temComprovante = gasto.comprovanteUrl != nil || gasto.comprovanteDataCriptografado != nil
+        // Remoção feita offline (pendente de sync) não conta como anexado.
+        let temComprovante = temComprovanteValido(gasto)
 
         return ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -94,6 +97,11 @@ struct DetalheGastoView: View {
                                aoVoltar: { editando = nil },
                                aoSalvar: { editando = nil })
                 .environmentObject(viewModel)
+        }
+        .alert("Não deu certo", isPresented: Binding(get: { erro != nil }, set: { if !$0 { erro = nil } })) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(erro ?? "")
         }
         .fullScreenCover(isPresented: $ampliada) {
             FotoAmpliadaView(imagem: imagemLocal, url: gasto.comprovanteUrl.flatMap(URL.init(string:)))
@@ -236,7 +244,8 @@ struct DetalheGastoView: View {
                 dismiss()
             } catch {
                 apagando = false
-                viewModel.errorManager?.show(error: error)
+                erro = "Não foi possível apagar o gasto. Tente novamente."
+
             }
         }
     }
@@ -252,19 +261,22 @@ struct DetalheGastoView: View {
             case .imagem(let imagem): dados = NotaFiscal.codificar(imagem); mime = "image/jpeg"
             case .pdf(let pdf): dados = pdf; mime = "application/pdf"
             case .erro(let mensagem):
-                viewModel.errorManager?.show(title: "Comprovante", message: mensagem)
+                erro = mensagem
                 return
             }
         case .semFoto:
             return
         }
-        guard let dados else { return }
+        guard let dados else {
+            erro = "Não foi possível ler a imagem do comprovante."
+            return
+        }
         let id = gasto.id
         Task {
             do {
                 try await viewModel.anexarComprovante(gastoId: id, imageData: dados, mime: mime)
             } catch {
-                viewModel.errorManager?.show(error: error)
+                erro = "Não foi possível anexar o comprovante. Tente novamente."
             }
         }
     }
