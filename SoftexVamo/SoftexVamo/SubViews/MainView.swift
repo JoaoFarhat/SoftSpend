@@ -7,39 +7,19 @@
 
 import SwiftUI
 import SwiftData
-
-/// Filtro com que "Todos os gastos" abre.
-enum FiltroGastos: Hashable {
-    case todos
-    case semComprovante
-    case categoria(Categoria)
-}
-
-/// Destinos empilhados a partir do início.
-enum Rota: Hashable {
-    case novaViagem
-    case viagens
-    case viagem(UUID)
-    case todosGastos(filtro: FiltroGastos)
-    case detalheGasto(UUID)
-    case fecharViagem(UUID)
-    case perfil
-}
-
-extension EnvironmentValues {
-    /// Empilha uma rota no `NavigationStack` do `MainView`.
-    @Entry var abrirRota: (Rota) -> Void = { _ in }
-}
+import Combine
 
 /// Raiz do app autenticado: `NavigationStack` com o início na base.
 struct MainView: View {
     @EnvironmentObject var viewModel: CiclosViewModel
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var syncManager = SyncManager.shared
     @ObservedObject private var authService = AuthService.shared
 
-    /// "Hoje" do início; o modo de demonstração (DEBUG) fixa uma data.
-    var hoje: Date = .now
+    /// "Hoje" fixo (modo de demonstração, DEBUG). `nil` = data atual, que
+    /// acompanha a virada do dia e a volta do app para o primeiro plano.
+    var hojeFixo: Date? = nil
     /// Desligado só no modo de demonstração, que não tem usuário nem rede.
     var sincronizar: Bool = true
     var origem: String? = nil
@@ -47,6 +27,10 @@ struct MainView: View {
     var menuInicial: Bool = false
 
     @State private var caminho: [Rota] = []
+    /// Relógio do início: atualizado na virada do dia e ao voltar para o app.
+    @State private var agora: Date = .now
+
+    private var hoje: Date { hojeFixo ?? agora }
 
     private var usuarioAtual: UsuarioMenu {
         if let usuario { return usuario }
@@ -74,6 +58,12 @@ struct MainView: View {
             syncManager.configure(container: modelContext.container)
             syncManager.limparDadosMortos(context: modelContext)
         }
+        .onChange(of: scenePhase) { _, fase in
+            if fase == .active { agora = .now }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in
+            agora = .now
+        }
         .onChange(of: syncManager.isSyncing) { _, isSyncing in
             if sincronizar, !isSyncing, syncManager.lastSyncError == nil {
                 viewModel.fetchCiclosResumo()
@@ -92,7 +82,9 @@ private struct DestinoRota: View {
     var body: some View {
         switch rota {
         case .novaViagem:
+            // A tela antiga tem o próprio "Voltar"; esconde a barra do sistema.
             NewCicloView()
+                .toolbar(.hidden, for: .navigationBar)
         case .viagens:
             HistoricoView()
         case .viagem(let id):

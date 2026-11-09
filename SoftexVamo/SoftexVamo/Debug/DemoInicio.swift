@@ -44,7 +44,7 @@ struct DemoInicioView: View {
     }
 
     var body: some View {
-        MainView(hoje: hoje, sincronizar: false, origem: "São Paulo",
+        MainView(hojeFixo: hoje, sincronizar: false, origem: "São Paulo",
                  usuario: UsuarioMenu(nome: "João Victor Farhat", email: "joao@empresa.com"),
                  menuInicial: estado == .menu)
             .environmentObject(viewModel)

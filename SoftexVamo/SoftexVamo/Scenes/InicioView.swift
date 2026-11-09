@@ -4,8 +4,8 @@ import SwiftData
 /// Início (telas 3, 5, 6 e 7): passagem da viagem do dia, pendências, gastos
 /// de hoje e o rodapé para lançar. O avatar abre o menu que substitui as abas.
 struct InicioView: View {
-    /// "Hoje" injetável para o modo de demonstração; o app usa `.now`.
-    var hoje: Date = .now
+    /// "Hoje" vindo do `MainView`, que acompanha a virada do dia (o demo fixa uma data).
+    let hoje: Date
     /// O ciclo ainda não tem origem cadastrada; sem ela a passagem mostra só o destino.
     var origem: String? = nil
     let usuario: UsuarioMenu
@@ -18,7 +18,7 @@ struct InicioView: View {
     @State private var viagemEmEdicao: CicloSoftex?
     @State private var diaTocado: DiaResumo?
 
-    init(hoje: Date = .now, origem: String? = nil, usuario: UsuarioMenu, menuInicial: Bool = false) {
+    init(hoje: Date, origem: String? = nil, usuario: UsuarioMenu, menuInicial: Bool = false) {
         self.hoje = hoje
         self.origem = origem
         self.usuario = usuario
@@ -300,8 +300,9 @@ struct InicioView: View {
         @ViewBuilder linha: @escaping (Item) -> Linha
     ) -> some View {
         VStack(spacing: 0) {
-            ForEach(Array(itens.enumerated()), id: \.offset) { indice, item in
-                if indice > 0 {
+            // Identidade pelo id do item: as linhas não se confundem depois de apagar um gasto.
+            ForEach(itens, id: id) { item in
+                if item[keyPath: id] != itens.first?[keyPath: id] {
                     Rectangle().fill(Tema.borda).frame(height: 0.5).padding(.leading, recuoDivisoria)
                 }
                 linha(item)
