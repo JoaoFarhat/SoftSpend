@@ -19,20 +19,6 @@ from services.comprovante_cleanup import (
 )
 
 
-def _app_com_open_finance(monkeypatch):
-    """Recarrega `main` com OPEN_FINANCE_ENABLED=true e devolve o app.
-
-    O registro das rotas do Pluggy e decidido na importacao do modulo,
-    entao `main` precisa ser reimportado quando a flag muda de valor.
-    """
-    import importlib
-    import sys
-
-    monkeypatch.setenv("OPEN_FINANCE_ENABLED", "true")
-    sys.modules.pop("main", None)
-    return importlib.import_module("main").app
-
-
 def _request(client: str, forwarded: str | None = None) -> Request:
     headers = []
     if forwarded:
@@ -197,8 +183,8 @@ def test_https_behind_proxy_includes_hsts_header():
     assert "Strict-Transport-Security" in response.headers
 
 
-def test_pluggy_webhook_requires_configured_secret(monkeypatch):
-    app = _app_com_open_finance(monkeypatch)
+def test_pluggy_webhook_requires_configured_secret(importar_main, monkeypatch):
+    app = importar_main(habilitado=True).app
 
     monkeypatch.delenv("PLUGGY_WEBHOOK_SECRET", raising=False)
     client = TestClient(app)
@@ -211,10 +197,10 @@ def test_pluggy_webhook_requires_configured_secret(monkeypatch):
     assert response.status_code == 503
 
 
-def test_pluggy_webhook_processes_valid_event_in_background(monkeypatch):
+def test_pluggy_webhook_processes_valid_event_in_background(importar_main, monkeypatch):
     from services import open_finance_service
 
-    app = _app_com_open_finance(monkeypatch)
+    app = importar_main(habilitado=True).app
 
     eventos = []
 
@@ -243,8 +229,8 @@ def test_pluggy_webhook_processes_valid_event_in_background(monkeypatch):
     assert eventos[0]["itemId"] == "item-1"
 
 
-def test_pluggy_webhook_rejects_invalid_secret(monkeypatch):
-    app = _app_com_open_finance(monkeypatch)
+def test_pluggy_webhook_rejects_invalid_secret(importar_main, monkeypatch):
+    app = importar_main(habilitado=True).app
 
     monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "webhook-secret")
     client = TestClient(app)
@@ -258,10 +244,10 @@ def test_pluggy_webhook_rejects_invalid_secret(monkeypatch):
     assert response.status_code == 401
 
 
-def test_pluggy_webhook_accepts_secret_in_url_token(monkeypatch):
+def test_pluggy_webhook_accepts_secret_in_url_token(importar_main, monkeypatch):
     from services import open_finance_service
 
-    app = _app_com_open_finance(monkeypatch)
+    app = importar_main(habilitado=True).app
 
     eventos = []
 
@@ -281,8 +267,8 @@ def test_pluggy_webhook_accepts_secret_in_url_token(monkeypatch):
     assert eventos[0]["event"] == "item/updated"
 
 
-def test_pluggy_webhook_accepts_dashboard_probe_with_empty_body(monkeypatch):
-    app = _app_com_open_finance(monkeypatch)
+def test_pluggy_webhook_accepts_dashboard_probe_with_empty_body(importar_main, monkeypatch):
+    app = importar_main(habilitado=True).app
 
     monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "webhook-secret")
     client = TestClient(app)
@@ -296,11 +282,11 @@ def test_pluggy_webhook_accepts_dashboard_probe_with_empty_body(monkeypatch):
     assert response.json() == {"received": True, "ignored": "empty_body"}
 
 
-def test_connect_token_uses_authenticated_user(monkeypatch):
+def test_connect_token_uses_authenticated_user(importar_main, monkeypatch):
     from dependencies import get_current_user_id
     from services import open_finance_service
 
-    app = _app_com_open_finance(monkeypatch)
+    app = importar_main(habilitado=True).app
 
     chamadas = []
 
@@ -755,12 +741,14 @@ def test_pluggy_item_webhook_triggers_import(monkeypatch):
     assert chamadas == [("item-1", "user-1")]
 
 
-def test_open_finance_cards_are_scoped_to_authenticated_user(monkeypatch, tmp_path):
+def test_open_finance_cards_are_scoped_to_authenticated_user(
+    importar_main, monkeypatch, tmp_path
+):
     from database import Base, get_db
     from dependencies import get_current_user_id
     import models
 
-    app = _app_com_open_finance(monkeypatch)
+    app = importar_main(habilitado=True).app
 
     engine = create_engine(f"sqlite:///{tmp_path}/open_finance.db")
     Base.metadata.create_all(engine)
@@ -889,11 +877,11 @@ def test_open_finance_cards_are_scoped_to_authenticated_user(monkeypatch, tmp_pa
     assert response_delete.status_code == 200
 
 
-def test_open_finance_manual_sync_uses_authenticated_user(monkeypatch):
+def test_open_finance_manual_sync_uses_authenticated_user(importar_main, monkeypatch):
     from dependencies import get_current_user_id
     from services import open_finance_service
 
-    app = _app_com_open_finance(monkeypatch)
+    app = importar_main(habilitado=True).app
 
     chamadas = []
 

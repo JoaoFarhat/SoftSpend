@@ -88,6 +88,7 @@ struct MenuView: View {
                 .pickerStyle(.segmented)
                 .onChange(of: selectedEnv) { _, newValue in
                     APIConfig.shared.current = newValue
+                    openFinanceEnabled = false
                     Task { await carregarFeatures() }
                 }
             }
