@@ -388,6 +388,13 @@ final class NetworkManager: Sendable {
         return response.toGastosDia()
     }
 
+    nonisolated func fetchFeatures() async throws -> FeaturesResponse {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/features") else {
+            throw URLError(.badURL)
+        }
+        return try decoder.decode(FeaturesResponse.self, from: try await execute(makeRequest(url: url)))
+    }
+
     nonisolated func fetchOpenFinanceConnections() async throws -> [OpenFinanceConnectionResponse] {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/open-finance/connections") else {
             throw URLError(.badURL)
