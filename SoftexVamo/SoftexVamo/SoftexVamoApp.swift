@@ -16,6 +16,8 @@ struct SoftexVamoApp: App {
     @StateObject var authService = AuthService.shared
     @StateObject private var networkMonitor = NetworkMonitor.shared
     @StateObject var errorManager = ErrorManager()
+    /// Tema de Perfil e ajustes (Automático segue o iPhone).
+    @AppStorage(PreferenciaTema.chave) private var tema: PreferenciaTema = .automatico
 
     let modelContainer: ModelContainer
 
@@ -32,17 +34,32 @@ struct SoftexVamoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            #if DEBUG
-            if VitrineView.ativa {
-                VitrineView()
-            } else if let estado = DemoInicioView.pedido {
-                DemoInicioView(estado: estado)
-            } else {
+            Group {
+                #if DEBUG
+                if VitrineView.ativa {
+                    VitrineView()
+                } else if let estado = DemoInicioView.pedido {
+                    DemoInicioView(estado: estado)
+                } else {
+                    raiz
+                }
+                #else
                 raiz
+                #endif
             }
-            #else
-            raiz
-            #endif
+            .preferredColorScheme(tema.esquema)
+            .onChange(of: tema, initial: true) { _, novo in
+                // `preferredColorScheme(nil)` nem sempre desfaz um tema forçado
+                // antes; a janela segue a escolha (Automático = do iPhone).
+                let estilo: UIUserInterfaceStyle = switch novo {
+                case .automatico: .unspecified
+                case .claro: .light
+                case .escuro: .dark
+                }
+                for cena in UIApplication.shared.connectedScenes {
+                    (cena as? UIWindowScene)?.windows.forEach { $0.overrideUserInterfaceStyle = estilo }
+                }
+            }
         }
         .modelContainer(modelContainer)
     }

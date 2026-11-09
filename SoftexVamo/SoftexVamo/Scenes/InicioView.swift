@@ -385,9 +385,12 @@ struct Lancamento: Identifiable {
 
 /// Símbolo do logo: bilhete roxo cheio com os dois recortes laterais.
 struct SimboloBilhete: View {
-    @ScaledMetric(relativeTo: .title3) private var largura: CGFloat = 24
+    /// Largura no tamanho de texto padrão; acompanha o Dynamic Type.
+    var largura: CGFloat = 24
+    @ScaledMetric(relativeTo: .title3) private var escala: CGFloat = 1
 
     var body: some View {
+        let largura = self.largura * escala
         let altura = largura * 0.66
         RoundedRectangle(cornerRadius: largura * 0.18, style: .continuous)
             .fill(Tema.marca)

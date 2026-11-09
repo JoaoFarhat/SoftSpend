@@ -12,7 +12,9 @@ enum Rota: Hashable {
     case novaViagem
     case viagens
     case viagem(UUID)
-    case todosGastos(filtro: FiltroGastos)
+    /// `cicloId` nil = a viagem do início; com id, os gastos daquela viagem
+    /// (ex.: "Resolver" em Fechar viagem, aberta a partir de Viagens).
+    case todosGastos(filtro: FiltroGastos, cicloId: UUID? = nil)
     case detalheGasto(UUID)
     case fecharViagem(UUID)
     case perfil

@@ -63,3 +63,29 @@ nonisolated func formatarBRL(_ valor: Decimal, centavos: Bool = true) -> String 
         .replacingOccurrences(of: "\u{00A0}", with: " ")
         .replacingOccurrences(of: "\u{202F}", with: " ")
 }
+
+/// Tema escolhido em Perfil e ajustes. Aplicado na raiz do app com
+/// `.preferredColorScheme`; `automatico` segue o iPhone.
+enum PreferenciaTema: String, CaseIterable, Identifiable {
+    case automatico, claro, escuro
+
+    static let chave = "temaApp"
+
+    var id: String { rawValue }
+
+    var nome: String {
+        switch self {
+        case .automatico: return "Automático"
+        case .claro: return "Claro"
+        case .escuro: return "Escuro"
+        }
+    }
+
+    var esquema: ColorScheme? {
+        switch self {
+        case .automatico: return nil
+        case .claro: return .light
+        case .escuro: return .dark
+        }
+    }
+}

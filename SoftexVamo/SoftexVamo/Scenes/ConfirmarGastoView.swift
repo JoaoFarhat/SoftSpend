@@ -15,6 +15,7 @@ struct LancarGastoView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var etapa: Etapa
     @State private var rascunho: RascunhoGasto
+    @AppStorage(PreferenciaTema.chave) private var temaEscolhido: PreferenciaTema = .automatico
     /// Começou pela câmera: o "voltar" do confirmar é "Refazer foto".
     private let comFoto: Bool
 
@@ -70,8 +71,10 @@ struct LancarGastoView: View {
         .onDisappear { rascunho.cancelarLeitura() }
     }
 
-    /// Tema do sistema (o da tela, que não sofre o `preferredColorScheme` da janela).
+    /// Tema fora da câmera: o escolhido em Perfil e ajustes; em "Automático", o
+    /// do sistema (o da tela, que não sofre o `preferredColorScheme` da janela).
     private var temaDoAparelho: ColorScheme {
+        if let escolhido = temaEscolhido.esquema { return escolhido }
         let cena = UIApplication.shared.connectedScenes.first { $0 is UIWindowScene } as? UIWindowScene
         return cena?.screen.traitCollection.userInterfaceStyle == .dark ? .dark : .light
     }

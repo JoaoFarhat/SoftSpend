@@ -7,13 +7,15 @@ import SwiftData
 /// `xcrun simctl launch <udid> com.joao.softspend -demo durante`
 /// (estados: durante, antes, encerrada, vazio, menu; telas de lançar gasto:
 /// consentimento, camera, confirmar, detalhe; todos os gastos: todos, semfoto;
-/// avisos de diária: aviso; nova viagem: novaviagem; viagens: viagens).
+/// avisos de diária: aviso; nova viagem: novaviagem; viagens: viagens;
+/// fechar viagem: fechar; perfil e ajustes: perfil; acesso: entrar, criarconta).
 struct DemoInicioView: View {
     enum Estado: String {
         case durante, antes, encerrada, vazio, menu
         case consentimento, camera, confirmar, detalhe
         case todos, semfoto, aviso
         case novaviagem, viagens
+        case fechar, perfil, entrar, criarconta
     }
 
     static var pedido: Estado? {
@@ -52,7 +54,7 @@ struct DemoInicioView: View {
     private var hoje: Date {
         switch estado {
         case .antes: return dados.dia(17)
-        case .encerrada: return dados.dia(30)
+        case .encerrada, .fechar: return dados.dia(30)
         default: return dados.hoje
         }
     }
@@ -64,6 +66,8 @@ struct DemoInicioView: View {
         if estado == .semfoto { return [.todosGastos(filtro: .semComprovante)] }
         if estado == .viagens { return [.viagens] }
         if estado == .novaviagem { return [.viagens, .novaViagem] }
+        if estado == .fechar { return [.fecharViagem(dados.ciclo.id)] }
+        if estado == .perfil { return [.perfil] }
         guard estado == .detalhe, let spoleto = dados.gastosDeHoje.first(where: { $0.titulo == "Spoleto" }) else { return [] }
         return [.detalheGasto(spoleto.id)]
     }
@@ -98,7 +102,19 @@ struct DemoInicioView: View {
         return f
     }
 
+    @ViewBuilder
     var body: some View {
+        switch estado {
+        case .entrar:
+            LoginView(emailInicial: "joao@empresa.com", senhaInicial: "Senha#2026")
+        case .criarconta:
+            RegisterView(nome: "João Victor Farhat", email: "joao@empresa.com", senha: "Senha#2026")
+        default:
+            inicio
+        }
+    }
+
+    private var inicio: some View {
         MainView(hojeFixo: hoje, sincronizar: false, origem: "São Paulo",
                  usuario: UsuarioMenu(nome: "João Victor Farhat", email: "joao@empresa.com"),
                  menuInicial: estado == .menu,

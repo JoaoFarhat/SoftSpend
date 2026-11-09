@@ -48,7 +48,7 @@ struct MainView: View {
                 .navigationTitle("Início")
                 .toolbar(.hidden, for: .navigationBar)
                 .navigationDestination(for: Rota.self) { rota in
-                    DestinoRota(rota: rota, hoje: hoje, origem: origem)
+                    DestinoRota(rota: rota, hoje: hoje, origem: origem, usuario: usuarioAtual)
                 }
         }
         .environment(\.abrirRota) { caminho.append($0) }
@@ -78,11 +78,12 @@ struct MainView: View {
     }
 }
 
-/// Tela de cada rota. Até a tarefa dona de cada tela existir, mostra a tela antiga.
+/// Tela de cada rota.
 private struct DestinoRota: View {
     let rota: Rota
     let hoje: Date
     let origem: String?
+    let usuario: UsuarioMenu
 
     @EnvironmentObject var viewModel: CiclosViewModel
     @Environment(\.formularioNovaViagem) private var formularioNovaViagem
@@ -98,15 +99,15 @@ private struct DestinoRota: View {
         case .viagem(let id):
             // Os gastos da viagem aberta, sem trocar o ciclo do início.
             DetalheViagemView(cicloId: id, hoje: hoje)
-        case .todosGastos(let filtro):
-            // A viagem do início (a que o usuário está vendo).
-            TodosGastosView(cicloId: viewModel.cicloInicioEm(hoje)?.id, filtro: filtro)
+        case .todosGastos(let filtro, let cicloId):
+            // Sem viagem indicada, a do início (a que o usuário está vendo).
+            TodosGastosView(cicloId: cicloId ?? viewModel.cicloInicioEm(hoje)?.id, filtro: filtro)
         case .detalheGasto(let id):
             DetalheGastoView(gastoId: id, hoje: hoje)
         case .fecharViagem(let id):
-            FecharViagemProvisoria(cicloId: id)
+            FecharViagemView(cicloId: id, hoje: hoje)
         case .perfil:
-            PerfilView()
+            PerfilView(usuario: usuario)
         }
     }
 }
@@ -128,62 +129,6 @@ extension CiclosViewModel {
     func ciclo(id: UUID?) -> CicloSoftex? {
         guard let id else { return nil }
         return allCiclos.first { $0.id == id }
-    }
-}
-
-/// Exportação PDF/CSV que já existia, até a tela de fechar viagem (Tarefa 9).
-private struct FecharViagemProvisoria: View {
-    let cicloId: UUID
-    @EnvironmentObject var viewModel: CiclosViewModel
-    @State private var exportando = false
-    @State private var arquivo: URL?
-
-    private var ciclo: CicloSoftex? { viewModel.ciclo(id: cicloId) }
-
-    var body: some View {
-        let resumo = ResumoViagem(ciclo: ciclo, hoje: .now)
-        VStack(alignment: .leading, spacing: Espaco.g) {
-            Text(ciclo.map { nomeCidade($0.titulo) } ?? "Viagem")
-                .font(.title2.weight(.bold))
-                .foregroundStyle(Tema.texto)
-            Text("Você gastou \(formatarBRL(resumo.gastoTotal)) dos \(formatarBRLCurto(resumo.total))")
-                .font(.subheadline)
-                .foregroundStyle(Tema.textoFraco)
-            AlertaPendencia(quantidade: resumo.semComprovante.count) {}
-                .allowsHitTesting(false)
-            Spacer()
-            if exportando {
-                ProgressView().frame(maxWidth: .infinity)
-            }
-            BotaoPrincipal("Gerar PDF") { exportar(.pdf) }
-            BotaoSecundario("Gerar CSV") { exportar(.csv) }
-        }
-        .padding(Espaco.g)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Tema.fundo.ignoresSafeArea())
-        .navigationTitle("Fechar viagem")
-        .navigationBarTitleDisplayMode(.inline)
-        .disabled(exportando)
-        .sheet(isPresented: Binding(get: { arquivo != nil }, set: { if !$0 { arquivo = nil } })) {
-            if let arquivo { ActivityViewController(activityItems: [arquivo]) }
-        }
-    }
-
-    private func exportar(_ formato: ExportFormato) {
-        guard let ciclo, !exportando else { return }
-        viewModel.garantirAtual(ciclo)
-        exportando = true
-        Task {
-            do {
-                arquivo = try await viewModel.exportarCiclo(formato: formato)
-            } catch let erro as URLError where erro.code == .notConnectedToInternet {
-                viewModel.errorManager?.show(title: "Sem conexão",
-                                             message: "Você precisa estar online para exportar o relatório.")
-            } catch {
-                viewModel.errorManager?.show(error: error)
-            }
-            exportando = false
-        }
     }
 }
 

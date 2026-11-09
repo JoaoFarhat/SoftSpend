@@ -169,4 +169,5 @@ Decisões do usuário (09/11):
 
 ## Fora deste repositório
 
+- O visual do PDF gerado (tela 15) fica para uma tarefa de backend: o PDF e o CSV são montados pelo servidor (`GET /ciclos/{id}/export`, em `Python/`), e o app só baixa e compartilha o arquivo.
 - A tarefa do fluxo da Vixyt para SoftSpend que mexer em telas deve ficar pausada enquanto o redesenho estiver em andamento, para não conflitar.
