@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8"><title>SoftSpend: todas as telas (aprovadas em 09/11/2026)</title>
+<style>body{background:#111114;color:#eee;font-family:system-ui,sans-serif;padding:24px;max-width:1200px;margin:0 auto}h2{margin:0 0 6px}.subtitle{color:#aaa}</style></head><body>
+<h2>SoftSpend: todas as telas</h2>
+<p class="subtitle">Na ordem da viagem. Use o botão para trocar entre claro e escuro. Comente pelo número da tela (ex.: "5: tirar o campo X"). Dados de exemplo: Cuiabá, 20/07 a 25/07, total R$ 2.700 (R$ 450/dia), hoje 23/07.</p>
+
+<style>
+  #ss{--fundo:#f4f3f7;--sup:#fff;--sup2:#efedf4;--borda:#e4e2ea;--texto:#17151c;--fraco:#6f6c78;--barra:#dcd9e3;--roxo:#7c3aed;--roxotx:#7c3aed;--roxof:#f1eafe;--alf:#fff4e5;--alb:#f4d3a6;--al:#b45309;--est:#c2410c;--ok:#15803d;--okf:#e7f6ec;--btn2:#e9e7ef}
+  #ss.escuro{--fundo:#0b0b0d;--sup:#17161b;--sup2:#201f25;--borda:#2a2830;--texto:#f2f1f5;--fraco:#8e8c96;--barra:#34323b;--roxo:#9b5cf6;--roxotx:#c4a6ff;--roxof:#241a3a;--alf:#2a1d10;--alb:#5a3a17;--al:#f2a54a;--est:#e0603f;--ok:#4ade80;--okf:#12261a;--btn2:#26242c}
+  #ss .grade{display:flex;flex-wrap:wrap;gap:30px 22px;justify-content:center;padding:24px 10px;border-radius:16px;background:#1c1b20}
+  #ss .tela{width:250px}
+  #ss .rot{color:#ddd;font-size:13px;margin:0 0 8px;font-weight:600}
+  #ss .rot span{color:#9a98a3;font-weight:400}
+  #ss .fone{height:520px;border-radius:30px;overflow:hidden;position:relative;box-shadow:0 0 0 7px #2c2c30;font-family:-apple-system,"SF Pro Text","Segoe UI",system-ui,sans-serif;text-align:left;background:var(--fundo);color:var(--texto);font-size:12px;line-height:1.35}
+  #ss .num{font-family:ui-monospace,"SF Mono","Cascadia Mono",Menlo,monospace;font-variant-numeric:tabular-nums}
+  #ss .fr{color:var(--fraco)}
+  #ss .top{display:flex;justify-content:space-between;align-items:center;padding:14px 14px 8px}
+  #ss .logo{font-weight:800;font-size:14px;letter-spacing:-.02em}
+  #ss .logo b{color:var(--roxo)}
+  #ss .av{width:26px;height:26px;border-radius:50%;background:var(--btn2);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700}
+  #ss .cx{margin:0 10px;background:var(--sup);border:1px solid var(--borda);border-radius:14px}
+  #ss .sec{padding:12px 14px 4px;font-size:9px;letter-spacing:.1em;color:var(--fraco);display:flex;justify-content:space-between}
+  #ss .sec a{color:var(--roxotx);letter-spacing:0;font-size:10px}
+  #ss .lin{display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--borda)}
+  #ss .lin:last-child{border-bottom:0}
+  #ss .ic{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#fff;flex:none}
+  #ss .chip{font-size:8.5px;padding:1px 6px;border-radius:5px;white-space:nowrap}
+  #ss .alerta{margin:8px 10px 0;padding:8px 11px;border-radius:11px;background:var(--alf);border:1px solid var(--alb);color:var(--al);font-size:10.5px;display:flex;justify-content:space-between}
+  #ss .rod{position:absolute;left:0;right:0;bottom:0;display:flex;gap:6px;padding:10px;background:var(--fundo)}
+  #ss .bp{flex:1;background:var(--roxo);color:#fff;border-radius:12px;padding:11px;text-align:center;font-weight:700;font-size:12px}
+  #ss .bs{background:var(--btn2);border-radius:12px;padding:11px 14px;text-align:center;font-weight:600;font-size:12px}
+  #ss .campo{margin:0 14px 8px;background:var(--sup);border:1px solid var(--borda);border-radius:10px;padding:8px 10px}
+  #ss .campo .fr{font-size:9.5px}
+  #ss .campo div:last-child{font-size:13px}
+  #ss .tit{padding:6px 14px 10px;font-size:19px;font-weight:700;letter-spacing:-.02em}
+  #ss .volta{padding:14px 14px 0;color:var(--roxotx);font-size:12px}
+  #ss .furo{position:absolute;top:-9px;width:16px;height:16px;border-radius:50%;background:var(--fundo)}
+  #ss .nota{color:#bdbbc6;font-size:11px;margin-top:8px;line-height:1.4}
+  #tema{display:inline-block;margin:0 0 14px;padding:8px 14px;border-radius:10px;background:#2c2b31;color:#fff;cursor:pointer;font-size:13px;border:1px solid #444}
+</style>
+
+<div id="tema" onclick="document.getElementById('ss').classList.toggle('escuro');this.textContent=document.getElementById('ss').classList.contains('escuro')?'Ver no tema claro':'Ver no tema escuro'">Ver no tema escuro</div>
+
+<div id="ss"><div class="grade">
+
+<!-- 1 Entrar -->
+<div class="tela"><p class="rot">1 · Entrar</p><div class="fone">
+  <div style="padding:120px 22px 0"><div class="logo" style="font-size:26px"><b>soft</b>spend</div><div class="fr" style="margin-top:4px">Os gastos da viagem a trabalho, no controle.</div></div>
+  <div style="padding:46px 8px 0"><div class="campo"><div class="fr">E-mail</div><div>joao@empresa.com</div></div><div class="campo"><div class="fr">Senha</div><div>••••••••</div></div></div>
+  <div style="padding:6px 14px"><div class="bp">Entrar</div></div>
+  <div class="fr" style="text-align:center;margin-top:12px">Não tem conta? <span style="color:var(--roxotx);font-weight:600">Criar conta</span></div>
+</div><p class="nota">Sem degradê nem cartão flutuando. Acentos corrigidos.</p></div>
+
+<!-- 2 Criar conta -->
+<div class="tela"><p class="rot">2 · Criar conta</p><div class="fone">
+  <div class="volta">‹ Entrar</div><div class="tit" style="padding-top:14px">Criar conta</div>
+  <div class="campo"><div class="fr">Nome completo</div><div>João Victor Farhat</div></div>
+  <div class="campo"><div class="fr">E-mail</div><div>joao@empresa.com</div></div>
+  <div class="campo"><div class="fr">Senha</div><div>••••••••</div></div>
+  <div class="campo"><div class="fr">Confirmar senha</div><div>••••••••</div></div>
+  <div class="fr" style="padding:0 14px;font-size:10px">O nome de usuário saiu: o e-mail já identifica a conta.</div>
+  <div class="rod"><div class="bp">Criar conta</div></div>
+</div><p class="nota">Proposta: tirar "Nome de usuário". Se o servidor exigir, gero a partir do e-mail.</p></div>
+
+<!-- 3 Início vazio -->
+<div class="tela"><p class="rot">3 · Início sem viagem</p><div class="fone">
+  <div class="top"><div class="logo"><b>soft</b>spend</div><div class="av">JO</div></div>
+  <div class="cx" style="margin-top:80px;padding:22px 16px;text-align:center;border-style:dashed">
+    <div style="font-size:26px;color:var(--roxo)">✈</div>
+    <div style="font-weight:700;font-size:14px;margin-top:6px">Nenhuma viagem agora</div>
+    <div class="fr" style="margin-top:4px">Crie a viagem antes de sair para acompanhar quanto ainda dá para gastar a cada dia.</div>
+  </div>
+  <div class="rod"><div class="bp">Nova viagem</div></div>
+</div></div>
+
+<!-- 4 Nova viagem -->
+<div class="tela"><p class="rot">4 · Nova viagem</p><div class="fone">
+  <div class="volta">‹ Cancelar</div><div class="tit">Nova viagem</div>
+  <div class="campo"><div class="fr">Destino</div><div>Cuiabá, MT</div></div>
+  <div style="display:flex;gap:0"><div class="campo" style="flex:1;margin-right:4px"><div class="fr">Ida</div><div>20/07</div></div><div class="campo" style="flex:1;margin-left:4px"><div class="fr">Volta</div><div>25/07</div></div></div>
+  <div class="fr" style="padding:0 14px 6px;font-size:10px">6 dias, contando ida e volta</div>
+  <div style="margin:0 14px 8px;display:flex;background:var(--sup2);border-radius:9px;padding:3px;font-size:11px"><div style="flex:1;text-align:center;padding:5px;border-radius:7px;background:var(--sup);font-weight:600">Diária</div><div class="fr" style="flex:1;text-align:center;padding:5px">Cartão corporativo <span style="font-size:9px">em breve</span></div></div>
+  <div class="campo" style="border-color:var(--roxo)"><div class="fr">Total da viagem</div><div class="num" style="font-size:17px;font-weight:700">R$ 2.700,00</div></div>
+  <div style="text-align:center;color:var(--fraco);font-size:11px;margin:-2px 0 6px">⇅ um calcula o outro</div>
+  <div class="campo"><div class="fr">Diária</div><div class="num">R$ 450,00</div></div>
+  <div class="rod"><div class="bp">Criar viagem</div></div>
+</div><p class="nota">Total e diária ligados: digite o que você souber.</p></div>
+
+<!-- 5 Início antes de começar -->
+<div class="tela"><p class="rot">5 · Início antes da viagem</p><div class="fone">
+  <div class="top"><div class="logo"><b>soft</b>spend</div><div class="av">JO</div></div>
+  <div class="cx">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;padding:11px 13px 3px"><div><div class="fr" style="font-size:8px">DE</div><div class="num" style="font-size:18px;font-weight:700">SAO</div></div><div style="flex:1;margin:0 8px 8px;border-bottom:1.5px dashed var(--barra);text-align:center;color:var(--roxo);font-size:10px;line-height:0">✈</div><div style="text-align:right"><div class="fr" style="font-size:8px">PARA</div><div class="num" style="font-size:18px;font-weight:700">CGB</div></div></div>
+    <div class="fr" style="padding:0 13px 8px;font-size:9.5px">Cuiabá · 20/07 → 25/07</div>
+    <div style="border-top:2px dotted var(--borda);position:relative"><span class="furo" style="left:-8px"></span><span class="furo" style="right:-8px"></span></div>
+    <div style="padding:12px 13px 14px"><div class="fr">Começa em</div><div class="num" style="font-size:28px;font-weight:700">3 dias</div><div class="fr" style="font-size:10px">R$ 2.700 para 6 dias · R$ 450 por dia</div></div>
+  </div>
+  <div class="sec"><span>PARA NÃO ESQUECER</span></div>
+  <div class="cx"><div class="lin"><span>Fotografe todo comprovante na hora, mesmo os pequenos.</span></div><div class="lin"><span>Táxi e aplicativo: peça o recibo por e-mail.</span></div></div>
+  <div class="rod"><div class="bs" style="flex:1">Editar viagem</div></div>
+</div></div>
+
+<!-- 6 Início durante -->
+<div class="tela"><p class="rot">6 · Início <span>(principal)</span></p><div class="fone">
+  <div class="top"><div class="logo"><b>soft</b>spend</div><div class="av">JO</div></div>
+  <div class="cx">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;padding:11px 13px 3px"><div><div class="fr" style="font-size:8px">DE</div><div class="num" style="font-size:18px;font-weight:700">SAO</div></div><div style="flex:1;margin:0 8px 8px;border-bottom:1.5px dashed var(--barra);text-align:center;color:var(--roxo);font-size:10px;line-height:0">✈</div><div style="text-align:right"><div class="fr" style="font-size:8px">PARA</div><div class="num" style="font-size:18px;font-weight:700">CGB</div></div></div>
+    <div class="fr" style="display:flex;justify-content:space-between;padding:0 13px 7px;font-size:9.5px"><span>Cuiabá · 20/07 → 25/07</span><span class="num">dia 4/6</span></div>
+    <div style="border-top:2px dotted var(--borda);position:relative"><span class="furo" style="left:-8px"></span><span class="furo" style="right:-8px"></span></div>
+    <div style="padding:9px 13px 0"><div class="fr" style="font-size:10.5px">Ainda dá para gastar hoje</div><div class="num" style="font-size:27px;font-weight:700;letter-spacing:-.03em">R$ 302,30</div><div class="fr" style="font-size:9.5px">diária R$ 450 · gasto hoje R$ 147,70</div></div>
+    <div style="display:flex;gap:4px;align-items:flex-end;height:40px;padding:7px 13px 0"><div style="flex:1;height:27px;background:var(--barra);border-radius:2px"></div><div style="flex:1;height:36px;background:var(--est);border-radius:2px"></div><div style="flex:1;height:24px;background:var(--barra);border-radius:2px"></div><div style="flex:1;height:10px;background:var(--roxo);border-radius:2px"></div><div style="flex:1;height:30px;border:1.5px dashed var(--barra);border-radius:2px"></div><div style="flex:1;height:30px;border:1.5px dashed var(--barra);border-radius:2px"></div></div>
+    <div class="num fr" style="display:flex;gap:4px;padding:3px 13px 8px;font-size:8.5px"><span style="flex:1;text-align:center">20</span><span style="flex:1;text-align:center;color:var(--est)">21</span><span style="flex:1;text-align:center">22</span><span style="flex:1;text-align:center;color:var(--roxotx);font-weight:700">23</span><span style="flex:1;text-align:center">24</span><span style="flex:1;text-align:center">25</span></div>
+  </div>
+  <div class="alerta"><b>2 gastos sem comprovante</b><span>Resolver</span></div>
+  <div class="sec"><span>HOJE · 23/07</span><a>Ver todos</a></div>
+  <div class="cx">
+    <div class="lin"><div class="ic" style="background:#f07a2c">🍴</div><div style="flex:1"><div style="font-weight:600">Spoleto</div><span class="chip" style="background:rgba(240,122,44,.16);color:#d9651c">Alimentação</span></div><div class="num">43,10</div></div>
+    <div class="lin"><div class="ic" style="background:#3b82f6">🚕</div><div style="flex:1"><div style="font-weight:600">Táxi aeroporto</div><span class="chip" style="background:var(--alf);color:var(--al)">sem comprovante</span></div><div class="num">104,60</div></div>
+  </div>
+  <div class="rod"><div class="bp">Fotografar comprovante</div><div class="bs">＋</div></div>
+</div><p class="nota">A tela aprovada. Toque numa barra mostra o total daquele dia.</p></div>
+
+<!-- 7 Menu do avatar -->
+<div class="tela"><p class="rot">7 · Menu (avatar)</p><div class="fone">
+  <div class="top"><div class="logo"><b>soft</b>spend</div><div class="av" style="background:var(--roxo);color:#fff">JO</div></div>
+  <div class="cx" style="box-shadow:0 10px 30px rgba(0,0,0,.18)">
+    <div class="lin" style="padding:11px 12px"><div class="av" style="width:34px;height:34px;background:var(--roxof);color:var(--roxotx)">JO</div><div><div style="font-weight:700">João Victor Farhat</div><div class="fr" style="font-size:10px">joao@empresa.com</div></div></div>
+    <div class="lin" style="padding:11px 12px"><span style="width:18px">🧳</span><span style="flex:1">Viagens</span><span class="fr">›</span></div>
+    <div class="lin" style="padding:11px 12px"><span style="width:18px">≡</span><span style="flex:1">Todos os gastos</span><span class="fr">›</span></div>
+    <div class="lin" style="padding:11px 12px"><span style="width:18px">⎙</span><span style="flex:1">Fechar viagem e PDF</span><span class="fr">›</span></div>
+    <div class="lin" style="padding:11px 12px"><span style="width:18px">⚙</span><span style="flex:1">Perfil e ajustes</span><span class="fr">›</span></div>
+    <div class="lin" style="padding:11px 12px;color:var(--est)"><span style="width:18px">⇥</span><span style="flex:1">Sair</span></div>
+  </div>
+</div><p class="nota">Substitui a barra de abas. Sem "Ambiente API" e sem "Cartão corporativo" enquanto estiver desligado.</p></div>
+
+<!-- 8 Consentimento -->
+<div class="tela"><p class="rot">8 · Leitura automática <span>(1º uso)</span></p><div class="fone">
+  <div style="padding:70px 18px 0"><div style="width:44px;height:44px;border-radius:12px;background:var(--roxof);color:var(--roxotx);display:flex;align-items:center;justify-content:center;font-size:20px">⎘</div>
+  <div style="font-size:18px;font-weight:700;margin-top:14px;letter-spacing:-.02em">Ler o comprovante para você?</div>
+  <div class="fr" style="margin-top:8px;font-size:12px">A foto é enviada para um serviço de leitura (Google Gemini) que preenche valor, local, data e categoria. Ela não é usada para outra coisa e continua guardada só na sua conta.</div>
+  <div class="fr" style="margin-top:8px;font-size:12px">Você pode mudar isso depois em Perfil e ajustes.</div></div>
+  <div class="rod" style="flex-direction:column"><div class="bp">Permitir leitura</div><div class="bs" style="background:transparent;color:var(--fraco)">Agora não, preencho eu</div></div>
+</div><p class="nota">Exigência do projeto (LGPD). Aparece uma vez.</p></div>
+
+<!-- 9 Câmera -->
+<div class="tela"><p class="rot">9 · Câmera</p><div class="fone" style="background:#000;color:#fff">
+  <div style="display:flex;justify-content:space-between;padding:14px;font-size:12px"><span>✕</span><span style="opacity:.7">Comprovante</span><span>⚡</span></div>
+  <div style="margin:30px 26px 0;height:300px;border-radius:12px;background:repeating-linear-gradient(0deg,#e9e7e2 0 8px,#dcd9d2 8px 9px);position:relative">
+    <div style="position:absolute;inset:-6px;border:2px solid #fff;border-radius:16px;opacity:.85"></div>
+    <div style="position:absolute;left:16px;top:16px;color:#333;font-family:ui-monospace,monospace;font-size:10px;line-height:1.5">SPOLETO CUIABÁ<br>23/07/2026 13:42<br>------------------<br>PRATO DO DIA 38,90<br>SUCO 4,20<br>------------------<br>TOTAL R$ 43,10</div>
+  </div>
+  <div style="text-align:center;font-size:11px;opacity:.75;margin-top:14px">Enquadre o comprovante inteiro</div>
+  <div style="position:absolute;bottom:22px;left:0;right:0;display:flex;justify-content:space-around;align-items:center"><span style="font-size:11px;opacity:.8">Galeria</span><span style="width:58px;height:58px;border-radius:50%;background:#fff;box-shadow:0 0 0 4px #000,0 0 0 6px #fff"></span><span style="font-size:11px;opacity:.8">Sem foto</span></div>
+</div><p class="nota">Abre direto do botão principal. "Galeria" para PDF/foto já tirada.</p></div>
+
+<!-- 10 Confirmar gasto -->
+<div class="tela"><p class="rot">10 · Confirmar gasto</p><div class="fone">
+  <div class="volta">‹ Refazer foto</div>
+  <div style="display:flex;gap:10px;padding:12px 14px 6px;align-items:center"><div style="width:46px;height:60px;border-radius:6px;background:repeating-linear-gradient(0deg,#e9e7e2 0 5px,#dcd9d2 5px 6px);border:1px solid var(--borda)"></div><div><div class="fr" style="font-size:10px">Lido do comprovante · confira</div><div class="num" style="font-size:26px;font-weight:700">R$ 43,10</div></div></div>
+  <div class="campo"><div class="fr">Descrição</div><div>Spoleto</div></div>
+  <div style="display:flex"><div class="campo" style="flex:1;margin-right:4px"><div class="fr">Data</div><div>23/07</div></div><div class="campo" style="flex:1;margin-left:4px"><div class="fr">Hora</div><div>13:42</div></div></div>
+  <div class="fr" style="padding:2px 14px 6px;font-size:9.5px">CATEGORIA</div>
+  <div style="display:flex;flex-wrap:wrap;gap:6px;padding:0 14px">
+    <span class="chip" style="font-size:11px;padding:6px 10px;border-radius:9px;background:#f07a2c;color:#fff">🍴 Alimentação</span>
+    <span class="chip" style="font-size:11px;padding:6px 10px;border-radius:9px;background:var(--sup2)">🚕 Transporte</span>
+    <span class="chip" style="font-size:11px;padding:6px 10px;border-radius:9px;background:var(--sup2)">🛏 Hospedagem</span>
+    <span class="chip" style="font-size:11px;padding:6px 10px;border-radius:9px;background:var(--sup2)">🛍 Compras</span>
+    <span class="chip" style="font-size:11px;padding:6px 10px;border-radius:9px;background:var(--sup2)">… Outros</span>
+  </div>
+  <div class="alerta" style="background:var(--okf);border-color:transparent;color:var(--ok);margin-top:12px"><span>Hoje ainda sobra <b class="num">R$ 259,20</b> depois deste</span></div>
+  <div class="rod"><div class="bp">Salvar gasto</div></div>
+</div><p class="nota">Mostra na hora quanto sobra do dia. Se passar da diária, o aviso fica laranja.</p></div>
+
+<!-- 11 Detalhe -->
+<div class="tela"><p class="rot">11 · Detalhe do gasto</p><div class="fone">
+  <div class="volta" style="display:flex;justify-content:space-between"><span>‹ Hoje</span><span>Editar</span></div>
+  <div style="margin:12px 14px 0;height:210px;border-radius:12px;background:repeating-linear-gradient(0deg,#e9e7e2 0 8px,#dcd9d2 8px 9px);position:relative"><div style="position:absolute;left:14px;top:14px;color:#333;font-family:ui-monospace,monospace;font-size:9.5px;line-height:1.5">SPOLETO CUIABÁ<br>23/07/2026 13:42<br>PRATO DO DIA 38,90<br>SUCO 4,20<br>TOTAL R$ 43,10</div><span style="position:absolute;right:10px;bottom:10px;background:rgba(0,0,0,.55);color:#fff;font-size:9px;padding:3px 7px;border-radius:6px">ampliar</span></div>
+  <div style="padding:12px 14px 0"><div style="font-size:16px;font-weight:700">Spoleto</div><div class="num" style="font-size:22px;font-weight:700">R$ 43,10</div></div>
+  <div class="cx" style="margin-top:10px"><div class="lin"><span class="fr" style="flex:1">Data</span><span>23/07 · 13:42</span></div><div class="lin"><span class="fr" style="flex:1">Categoria</span><span>Alimentação</span></div><div class="lin"><span class="fr" style="flex:1">Comprovante</span><span style="color:var(--ok)">✓ anexado</span></div></div>
+  <div style="text-align:center;color:var(--est);margin-top:14px;font-size:12px">Apagar gasto</div>
+</div></div>
+
+<!-- 12 Todos os gastos -->
+<div class="tela"><p class="rot">12 · Todos os gastos</p><div class="fone">
+  <div class="volta">‹ Início</div><div class="tit">Gastos · Cuiabá</div>
+  <div style="margin:0 14px 8px;background:var(--sup);border:1px solid var(--borda);border-radius:10px;padding:7px 10px;color:var(--fraco)">⌕ Buscar gasto ou local</div>
+  <div style="display:flex;gap:5px;padding:0 14px 4px;font-size:10px"><span style="padding:4px 9px;border-radius:8px;background:var(--texto);color:var(--fundo)">Todos</span><span style="padding:4px 9px;border-radius:8px;background:var(--alf);color:var(--al)">Sem comprovante 2</span><span style="padding:4px 9px;border-radius:8px;background:var(--sup2)">Categoria ▾</span></div>
+  <div class="sec"><span>QUA · 23/07</span><span class="num">147,70 de 450</span></div>
+  <div class="cx"><div class="lin"><div class="ic" style="background:#f07a2c">🍴</div><span style="flex:1">Spoleto</span><span class="num">43,10</span></div><div class="lin"><div class="ic" style="background:#3b82f6">🚕</div><span style="flex:1">Táxi aeroporto <span style="color:var(--al)">•</span></span><span class="num">104,60</span></div></div>
+  <div class="sec"><span>TER · 22/07</span><span class="num">412,00 de 450</span></div>
+  <div class="cx"><div class="lin"><div class="ic" style="background:#f07a2c">🍴</div><span style="flex:1">Almoço</span><span class="num">55,70</span></div><div class="lin"><div class="ic" style="background:#8b5cf6">🛍</div><span style="flex:1">Farmácia</span><span class="num">36,30</span></div></div>
+  <div class="sec"><span>SEG · 21/07</span><span class="num" style="color:var(--est)">488,00 de 450 · +38</span></div>
+</div><p class="nota">Cada dia mostra o total contra a diária. Dia estourado em vermelho-tijolo.</p></div>
+
+<!-- 13 Aviso de diária -->
+<div class="tela"><p class="rot">13 · Avisos de diária</p><div class="fone" style="background:linear-gradient(#3d4a5c,#202833);color:#fff">
+  <div style="text-align:center;padding-top:44px"><div style="font-size:44px;font-weight:300">19:20</div><div style="font-size:11px;opacity:.8">quarta-feira, 23 de julho</div></div>
+  <div style="margin:40px 10px 0;background:rgba(255,255,255,.88);color:#111;border-radius:14px;padding:10px 12px"><div style="display:flex;justify-content:space-between;font-size:10px;color:#555"><span>SOFTSPEND</span><span>agora</span></div><div style="font-weight:700;margin-top:3px">Você usou 80% da diária de hoje</div><div style="font-size:11px">Ainda dá para gastar R$ 90,00 em Cuiabá.</div></div>
+  <div style="margin:8px 10px 0;background:rgba(255,255,255,.88);color:#111;border-radius:14px;padding:10px 12px"><div style="display:flex;justify-content:space-between;font-size:10px;color:#555"><span>SOFTSPEND</span><span>ontem</span></div><div style="font-weight:700;margin-top:3px">Passou R$ 38,00 da diária</div><div style="font-size:11px">Segunda, 21/07. Os próximos dias continuam com R$ 450.</div></div>
+</div><p class="nota">No máximo um de cada por dia. Dá para desligar em Ajustes.</p></div>
+
+<!-- 14 Fechar viagem -->
+<div class="tela"><p class="rot">14 · Fechar viagem e PDF</p><div class="fone">
+  <div class="volta">‹ Início</div><div class="tit">Fechar viagem</div>
+  <div class="cx" style="padding:12px 13px"><div class="fr" style="font-size:10px">Cuiabá · 20/07 → 25/07</div><div style="display:flex;justify-content:space-between;margin-top:6px"><div><div class="fr" style="font-size:9.5px">Gasto</div><div class="num" style="font-size:18px;font-weight:700">R$ 2.384,60</div></div><div style="text-align:right"><div class="fr" style="font-size:9.5px">de</div><div class="num" style="font-size:18px;font-weight:700">R$ 2.700</div></div></div><div class="fr" style="font-size:10px;margin-top:4px">Sobrou R$ 315,40 · 1 dia passou da diária</div></div>
+  <div class="sec"><span>ANTES DE GERAR</span></div>
+  <div class="cx"><div class="lin"><span style="color:var(--ok)">✓</span><span style="flex:1">27 gastos com comprovante</span></div><div class="lin"><span style="color:var(--al)">!</span><span style="flex:1">2 sem comprovante</span><span style="color:var(--roxotx);font-size:10px">Resolver</span></div></div>
+  <div class="sec"><span>FORMATO</span></div>
+  <div style="display:flex;gap:6px;padding:0 10px"><div class="cx" style="margin:0;flex:1;padding:10px;border-color:var(--roxo)"><b>PDF</b><div class="fr" style="font-size:9.5px">com as fotos</div></div><div class="cx" style="margin:0;flex:1;padding:10px"><b>CSV</b><div class="fr" style="font-size:9.5px">planilha</div></div></div>
+  <div class="rod" style="flex-direction:column"><div class="bp">Gerar e compartilhar</div><div class="fr" style="text-align:center;font-size:10px">Dá para gerar mesmo com pendências; elas aparecem marcadas.</div></div>
+</div></div>
+
+<!-- 15 PDF -->
+<div class="tela"><p class="rot">15 · O PDF gerado</p><div class="fone" style="background:#e9e8ec">
+  <div style="margin:16px 14px;background:#fff;color:#111;border-radius:4px;padding:14px;height:440px;box-shadow:0 2px 10px rgba(0,0,0,.12);font-size:8.5px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div style="font-weight:800;font-size:11px"><span style="color:#7c3aed">soft</span>spend</div><div style="color:#666">Relatório de viagem</div></div><div style="text-align:right;color:#666">João Victor Farhat<br>joao@empresa.com</div></div>
+    <div style="margin-top:10px;font-size:13px;font-weight:700">Cuiabá, MT · 20 a 25/07/2026</div>
+    <div style="display:flex;gap:10px;margin-top:8px"><div><div style="color:#666">Total</div><b class="num">R$ 2.700,00</b></div><div><div style="color:#666">Gasto</div><b class="num">R$ 2.384,60</b></div><div><div style="color:#666">Saldo</div><b class="num">R$ 315,40</b></div></div>
+    <div style="margin-top:10px;font-weight:700">Por categoria</div>
+    <div style="display:flex;height:7px;border-radius:2px;overflow:hidden;margin-top:4px"><div style="width:48%;background:#f07a2c"></div><div style="width:30%;background:#3b82f6"></div><div style="width:22%;background:#8b5cf6"></div></div>
+    <div style="margin-top:10px;font-weight:700">Gastos</div>
+    <div style="display:grid;grid-template-columns:34px 1fr 50px 14px;gap:3px 6px;margin-top:4px" class="num"><span>21/07</span><span>Jantar</span><span style="text-align:right">88,00</span><span>✓</span><span>22/07</span><span>Almoço</span><span style="text-align:right">55,70</span><span>✓</span><span>23/07</span><span>Spoleto</span><span style="text-align:right">43,10</span><span>✓</span><span>23/07</span><span>Táxi aeroporto</span><span style="text-align:right">104,60</span><span style="color:#b45309">!</span></div>
+    <div style="margin-top:10px;font-weight:700">Comprovantes</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;margin-top:4px"><div style="height:44px;background:repeating-linear-gradient(0deg,#eee 0 4px,#ddd 4px 5px)"></div><div style="height:44px;background:repeating-linear-gradient(0deg,#eee 0 4px,#ddd 4px 5px)"></div><div style="height:44px;background:repeating-linear-gradient(0deg,#eee 0 4px,#ddd 4px 5px)"></div><div style="height:44px;border:1px dashed #b45309;color:#b45309;display:flex;align-items:center;justify-content:center">falta</div></div>
+  </div>
+</div><p class="nota">Sóbrio, para a empresa: resumo, gastos por dia e fotos. Sempre claro, independente do tema.</p></div>
+
+<!-- 16 Viagens -->
+<div class="tela"><p class="rot">16 · Viagens</p><div class="fone">
+  <div class="volta">‹ Início</div><div class="tit" style="display:flex;justify-content:space-between">Viagens <span style="color:var(--roxotx);font-size:22px;font-weight:400">＋</span></div>
+  <div class="sec"><span>AGORA</span></div>
+  <div class="cx" style="padding:11px 13px;border-color:var(--roxo)"><div style="display:flex;justify-content:space-between"><b class="num">SAO → CGB</b><span class="fr num">dia 4/6</span></div><div class="fr" style="font-size:10px">Cuiabá · 20/07 → 25/07</div><div style="height:5px;background:var(--barra);border-radius:3px;margin-top:8px"><div style="width:44%;height:100%;background:var(--roxo);border-radius:3px"></div></div><div class="fr num" style="font-size:9.5px;margin-top:4px">R$ 1.183 de R$ 2.700</div></div>
+  <div class="sec"><span>ANTERIORES</span></div>
+  <div class="cx"><div class="lin" style="padding:10px 12px"><div style="flex:1"><b class="num">SAO → POA</b><div class="fr" style="font-size:10px">Porto Alegre · 02/06 → 06/06</div></div><div style="text-align:right"><div class="num">R$ 1.640</div><div style="font-size:9.5px;color:var(--roxotx)">PDF</div></div></div><div class="lin" style="padding:10px 12px"><div style="flex:1"><b class="num">SAO → REC</b><div class="fr" style="font-size:10px">Recife · 14/04 → 19/04</div></div><div style="text-align:right"><div class="num">R$ 2.115</div><div style="font-size:9.5px;color:var(--roxotx)">PDF</div></div></div></div>
+</div><p class="nota">Substitui o "Histórico". Abrir uma viagem antiga não troca a viagem do início.</p></div>
+
+<!-- 17 Perfil -->
+<div class="tela"><p class="rot">17 · Perfil e ajustes</p><div class="fone">
+  <div class="volta">‹ Início</div>
+  <div style="text-align:center;padding:12px 0 6px"><div class="av" style="width:56px;height:56px;margin:0 auto;font-size:18px;background:var(--roxof);color:var(--roxotx)">JO</div><div style="font-weight:700;font-size:14px;margin-top:8px">João Victor Farhat</div><div class="fr" style="font-size:10.5px">joao@empresa.com</div></div>
+  <div class="sec"><span>CONTA</span></div>
+  <div class="cx"><div class="lin"><span style="flex:1">Nome</span><span class="fr">›</span></div><div class="lin"><span style="flex:1">E-mail</span><span class="fr">›</span></div><div class="lin"><span style="flex:1">Senha</span><span class="fr">›</span></div></div>
+  <div class="sec"><span>PREFERÊNCIAS</span></div>
+  <div class="cx"><div class="lin"><span style="flex:1">Avisos de diária</span><span style="width:30px;height:17px;border-radius:9px;background:var(--roxo);position:relative"><span style="position:absolute;right:2px;top:2px;width:13px;height:13px;border-radius:50%;background:#fff"></span></span></div><div class="lin"><span style="flex:1">Leitura automática do comprovante</span><span style="width:30px;height:17px;border-radius:9px;background:var(--roxo);position:relative"><span style="position:absolute;right:2px;top:2px;width:13px;height:13px;border-radius:50%;background:#fff"></span></span></div><div class="lin"><span style="flex:1">Tema</span><span class="fr">Automático ›</span></div></div>
+  <div style="text-align:center;color:var(--est);margin-top:14px;font-size:12px">Sair da conta</div>
+</div><p class="nota">Sem as estatísticas em cartõezinhos e sem "Ambiente API".</p></div>
+
+<!-- 18 Conciliação (futuro) -->
+<div class="tela"><p class="rot">18 · Conciliação do cartão <span>(só desenho, futuro)</span></p><div class="fone">
+  <div class="volta">‹ Viagem</div><div class="tit">Cartão corporativo</div>
+  <div class="cx" style="padding:11px 13px"><div style="display:flex;justify-content:space-between"><span>Conferidos</span><b class="num">5 de 8</b></div><div style="height:5px;background:var(--barra);border-radius:3px;margin-top:6px"><div style="width:62%;height:100%;background:var(--ok);border-radius:3px"></div></div><div style="display:flex;justify-content:space-between;margin-top:8px;font-size:10.5px"><span class="fr">A reembolsar (acima da diária)</span><b class="num" style="color:var(--est)">R$ 38,00</b></div></div>
+  <div class="sec"><span>TRANSAÇÕES DO CARTÃO</span></div>
+  <div class="cx">
+    <div class="lin"><span style="color:var(--ok);width:14px">✓</span><div style="flex:1"><div>Spoleto</div><div class="fr" style="font-size:9.5px">23/07 · comprovante confere</div></div><span class="num">43,10</span></div>
+    <div class="lin"><span style="color:var(--al);width:14px">!</span><div style="flex:1"><div>Restaurante Mahalo</div><div style="font-size:9.5px;color:var(--al)">valor diferente: comprovante R$ 86,00</div></div><span class="num">88,00</span></div>
+    <div class="lin"><span style="color:var(--al);width:14px">!</span><div style="flex:1"><div>Uber</div><div style="font-size:9.5px;color:var(--al)">data diferente: comprovante 22/07</div></div><span class="num">27,40</span></div>
+    <div class="lin"><span style="color:var(--fraco);width:14px">○</span><div style="flex:1"><div>Posto Shell</div><div class="fr" style="font-size:9.5px">sem comprovante</div></div><span class="num">61,00</span></div>
+  </div>
+  <div class="rod" style="flex-direction:column"><div class="bp" style="opacity:.45">Enviar para a empresa</div><div class="fr" style="text-align:center;font-size:10px">Libera quando todos estiverem ✓</div></div>
+</div><p class="nota">Para quando houver os gastos do cartão. Resolve o "ir um por um" do site da empresa.</p></div>
+
+</div></div>
+
+</body></html>
