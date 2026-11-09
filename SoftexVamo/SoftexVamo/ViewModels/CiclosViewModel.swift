@@ -346,12 +346,19 @@ final class CiclosViewModel: ObservableObject {
 
         loadMoreDiasTask?.cancel()
         let ciclo = atualCiclo
+        // Só busca para a viagem que está aberta: se o `atualCiclo` já é
+        // outro, os dias do servidor seriam gravados na viagem errada.
+        guard ciclo.backendId == cicloId else { return }
         let limite = diasLimit
+        // Candidatos à remoção: dias já sincronizados ANTES da busca. Um dia
+        // que o SyncActor enviar durante a busca não está aqui e não é apagado.
+        let sincronizadosAntes = idsDeDiasSincronizados(de: ciclo)
         let tarefa = Task {
             isLoadingDias = true
             defer { isLoadingDias = false }
             var skip = 0
             var idsServidor = Set<Int>()
+            var listaCompleta = false
             do {
                 // Teto de páginas: protege contra um servidor que ignore o `skip`.
                 for _ in 0..<100 {
@@ -364,27 +371,44 @@ final class CiclosViewModel: ObservableObject {
                     skip += dias.count
                     salvarLocal()
                     carregarDiasLocais()
-                    if dias.count < limite { break }
+                    if dias.count < limite {
+                        listaCompleta = true
+                        break
+                    }
                 }
                 diasSkip = skip
                 hasMoreDias = false
-                removerDiasSumidos(de: ciclo, mantendo: idsServidor)
+                // Sem a última página (teto atingido), a lista está incompleta:
+                // não dá para saber o que sumiu do servidor.
+                if listaCompleta {
+                    removerDiasSumidos(de: ciclo, candidatos: sincronizadosAntes, mantendo: idsServidor)
+                }
             } catch {
                 guard !Task.isCancelled else { return }
-                showError(error)
+                // Com dias locais na tela, a falha de rede em segundo plano
+                // não interrompe o usuário (offline-first).
+                if (ciclo.dias ?? []).isEmpty { showError(error) }
             }
         }
         loadMoreDiasTask = tarefa
         await tarefa.value
     }
 
-    /// Com a lista completa do servidor, um dia já sincronizado que não veio
-    /// nela foi apagado lá: sai daqui também. Dias ou gastos com alteração
-    /// local pendente ficam, para o sync não perder nada.
-    private func removerDiasSumidos(de ciclo: CicloSoftex, mantendo ids: Set<Int>) {
+    private func idsDeDiasSincronizados(de ciclo: CicloSoftex) -> Set<Int> {
+        Set((ciclo.dias ?? []).compactMap { dia in
+            dia.syncStatus == .synced ? dia.backendId : nil
+        })
+    }
+
+    /// Com a lista completa do servidor, um dia já sincronizado antes da busca
+    /// que não veio nela foi apagado lá: sai daqui também. Nunca apaga um dia
+    /// com gastos (o delete em cascata levaria gastos junto) nem um dia com
+    /// alteração local pendente.
+    private func removerDiasSumidos(de ciclo: CicloSoftex, candidatos: Set<Int>, mantendo ids: Set<Int>) {
         let sumidos = (ciclo.dias ?? []).filter { dia in
-            guard let id = dia.backendId, dia.deletadoEm == nil, dia.syncStatus == .synced else { return false }
-            return !ids.contains(id) && dia.gastos.allSatisfy { $0.syncStatus == .synced }
+            guard let id = dia.backendId, candidatos.contains(id),
+                  dia.deletadoEm == nil, dia.syncStatus == .synced else { return false }
+            return !ids.contains(id) && dia.gastos.isEmpty
         }
         guard !sumidos.isEmpty else { return }
         for dia in sumidos { modelContext?.delete(dia) }

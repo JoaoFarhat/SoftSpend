@@ -130,4 +130,91 @@ struct CiclosViewModelTests {
         #expect(ids.contains(pendente.id))
         #expect(ids.count == 2)
     }
+
+    func diaSincronizado(_ backendId: Int, em c: CicloSoftex) -> DiaSoftex {
+        let dia = DiaSoftex(data: .now, saldo: 100)
+        dia.backendId = backendId
+        dia.syncStatus = .synced
+        ctx.insert(dia)
+        dia.ciclo = c
+        return dia
+    }
+
+    /// Dia com gastos nunca é apagado pela limpeza: o delete em cascata
+    /// levaria os gastos junto.
+    @Test func diaComGastosQueSumiuDoServidorFica() async throws {
+        let c = viagem(backendId: 7)
+        let dia = diaSincronizado(999, em: c)
+        let gasto = GastosDia(valor: 10, titulo: "Café", categoria: .ALIMENTACAO, dia: dia)
+        gasto.syncStatus = .synced
+        ctx.insert(gasto)
+        let vm = CiclosViewModel()
+        vm.modelContext = ctx
+        vm.atualCiclo = c
+
+        await vm.carregarDiasDoServidor(cicloId: 7) { _, _ in [] }
+
+        #expect(try diasNoBanco().map(\.id).contains(dia.id))
+        #expect(try ctx.fetch(FetchDescriptor<GastosDia>()).count == 1)
+    }
+
+    /// Se o teto de páginas for atingido, a lista do servidor está incompleta
+    /// e nada é apagado.
+    @Test func tetoDePaginasNaoApagaDias() async throws {
+        let c = viagem(backendId: 7)
+        let antigo = diaSincronizado(999, em: c)
+        let vm = CiclosViewModel()
+        vm.modelContext = ctx
+        vm.atualCiclo = c
+
+        // Servidor que ignora o `skip`: sempre a mesma página cheia.
+        await vm.carregarDiasDoServidor(cicloId: 7) { _, limit in
+            (0..<limit).map { i in
+                let dia = DiaSoftex(data: .now, saldo: 100)
+                dia.backendId = 1 + i
+                return dia
+            }
+        }
+
+        #expect(try diasNoBanco().map(\.id).contains(antigo.id))
+    }
+
+    /// Um dia enviado pelo sync DURANTE a busca não estava sincronizado no
+    /// começo dela: não é candidato e fica.
+    @Test func diaSincronizadoDuranteABuscaFica() async throws {
+        let c = viagem(backendId: 7)
+        let novo = DiaSoftex(data: .now, saldo: 100)
+        ctx.insert(novo)
+        novo.ciclo = c
+        let vm = CiclosViewModel()
+        vm.modelContext = ctx
+        vm.atualCiclo = c
+
+        await vm.carregarDiasDoServidor(cicloId: 7) { _, _ in
+            // O SyncActor sobe o dia enquanto a resposta (sem ele) chega.
+            novo.backendId = 555
+            novo.syncStatus = .synced
+            return []
+        }
+
+        #expect(try diasNoBanco().map(\.id).contains(novo.id))
+    }
+
+    /// Busca pedida para outra viagem que não a aberta não grava nem apaga nada.
+    @Test func buscaDeOutraViagemNaoMexeNaAberta() async throws {
+        let c = viagem(backendId: 7)
+        let antigo = diaSincronizado(999, em: c)
+        let vm = CiclosViewModel()
+        vm.modelContext = ctx
+        vm.atualCiclo = c
+        var chamadas = 0
+
+        await vm.carregarDiasDoServidor(cicloId: 8) { _, _ in
+            chamadas += 1
+            return []
+        }
+
+        #expect(chamadas == 0)
+        #expect(try diasNoBanco().map(\.id) == [antigo.id])
+    }
 }
