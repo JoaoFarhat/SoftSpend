@@ -46,9 +46,21 @@ enum AvisoDiaria: Equatable {
         }
     }
 
+    /// "yyyy-MM-dd" no calendário gregoriano e no fuso atual, qualquer que seja
+    /// o calendário ou o idioma do aparelho (budista, árabe...).
+    private static let formatoChave: DateFormatter = {
+        let f = DateFormatter()
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = .autoupdatingCurrent
+        f.calendar = cal
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = .autoupdatingCurrent
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
     var chave: String {
-        let c = Calendar.current.dateComponents([.year, .month, .day], from: data)
-        let dia = String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+        let dia = Self.formatoChave.string(from: data)
         switch self {
         case .oitentaPorCento: return "80-\(dia)"
         case .passou: return "passou-\(dia)"

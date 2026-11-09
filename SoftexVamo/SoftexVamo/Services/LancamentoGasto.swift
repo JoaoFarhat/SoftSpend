@@ -36,17 +36,6 @@ func sobraDepois(de valor: Decimal, resumo: ResumoViagem) -> Decimal {
     resumo.livreHoje - valor
 }
 
-/// "43,10" → 43.10, aceitando "R$", milhar e vírgula (pt-BR). Inválido = 0.
-func lerValorBRL(_ texto: String) -> Decimal {
-    let formatter = NumberFormatter()
-    formatter.numberStyle = .currency
-    formatter.locale = Locale(identifier: "pt_BR")
-    formatter.currencySymbol = ""
-    formatter.isLenient = true
-    formatter.maximumFractionDigits = 2
-    return formatter.number(from: texto)?.decimalValue ?? 0
-}
-
 /// 43.10 → "43,10", como o campo de valor mostra.
 func textoValorBRL(_ valor: Decimal) -> String {
     formatarValorSemSimbolo(valor)
@@ -199,7 +188,8 @@ final class RascunhoGasto {
     private var tarefaLeitura: Task<Void, Never>?
 
     var editando: Bool { gastoId != nil }
-    var valor: Decimal { lerValorBRL(valorTexto) }
+    /// "43,10" ou "43.10" (teclado decimal em inglês) → 43.10, arredondado a 2 casas. Inválido = 0.
+    var valor: Decimal { lerValorDigitado(valorTexto) ?? 0 }
 
     var temComprovante: Bool {
         dadosComprovante != nil || imagem != nil || (comprovanteSalvo && !removerSalvo)
@@ -339,16 +329,26 @@ final class RascunhoGasto {
         if let gastoId {
             try await viewModel.editGasto(gastoId: gastoId, novoDia: dia, titulo: titulo,
                                           value: valor, categoria: categoria)
-            if let dadosComprovante {
-                try await viewModel.anexarComprovante(gastoId: gastoId, imageData: dadosComprovante, mime: mime)
-            } else if removerSalvo {
-                try await viewModel.removerComprovante(gastoId: gastoId)
+            do {
+                if let dadosComprovante {
+                    try await viewModel.anexarComprovante(gastoId: gastoId, imageData: dadosComprovante, mime: mime)
+                } else if removerSalvo {
+                    try await viewModel.removerComprovante(gastoId: gastoId)
+                }
+            } catch {
+                // O gasto já foi salvo; só o comprovante falhou.
+                throw FalhaComprovante(causa: error)
             }
         } else {
             try await viewModel.createNewGasto(title: titulo, value: valor, dia: dia, categoria: categoria,
                                                comprovante: dadosComprovante, comprovanteMime: mime)
         }
     }
+}
+
+/// A edição do gasto foi salva, mas anexar ou remover o comprovante falhou.
+struct FalhaComprovante: Error {
+    let causa: Error
 }
 
 /// O gasto tem comprovante que vale: enviado ou pendente de envio, e sem

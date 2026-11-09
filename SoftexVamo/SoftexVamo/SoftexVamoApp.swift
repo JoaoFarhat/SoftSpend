@@ -26,6 +26,8 @@ struct SoftexVamoApp: App {
         let viewModel = CiclosViewModel()
         let errorManager = ErrorManager()
         viewModel.errorManager = errorManager
+        // Mesmo ErrorManager do alerta da raiz (`errorAlert` em `raiz`).
+        AuthService.shared.errorManager = errorManager
         self._listViewModel = StateObject(wrappedValue: viewModel)
         self._errorManager = StateObject(wrappedValue: errorManager)
         // Avisos de diária aparecem também com o app aberto.
@@ -77,6 +79,9 @@ struct SoftexVamoApp: App {
         }
         .environmentObject(authService)
         .environmentObject(errorManager)
+        // Único alerta de erro do app: CiclosViewModel, AuthService e as telas
+        // que usam `errorManager` (exportar, excluir viagem, apagar gasto...).
+        .errorAlert(errorManager: errorManager)
         .onChange(of: authService.currentUser?.id) { _, _ in
             // Com userId nos models, não precisa limpar dados no logout —
             // cada usuário só vê os próprios dados via filtro por userId.

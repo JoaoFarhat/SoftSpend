@@ -45,8 +45,8 @@ final class AuthService: ObservableObject {
             await saveUser(authResponse)
         } catch {
             let message = (error as? APIError)?.localizedDescription ?? "Email ou senha invalidos"
+            // Só no formulário (LoginView mostra `errorMessage`): sem alerta em dobro.
             errorMessage = message
-            errorManager?.show(title: "Erro no login", message: message)
         }
 
         isLoading = false
@@ -62,8 +62,8 @@ final class AuthService: ObservableObject {
             await saveUser(authResponse)
         } catch {
             let message = (error as? APIError)?.localizedDescription ?? error.localizedDescription
+            // Só no formulário (RegisterView mostra `errorMessage`): sem alerta em dobro.
             errorMessage = message
-            errorManager?.show(title: "Erro no cadastro", message: message)
         }
 
         isLoading = false

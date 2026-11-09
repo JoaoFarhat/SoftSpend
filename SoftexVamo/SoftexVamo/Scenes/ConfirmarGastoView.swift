@@ -447,6 +447,8 @@ struct ConfirmarGastoView: View {
                     AvisoDiaria.verificar(ciclo: ciclo, hoje: hoje)
                 }
                 aoSalvar()
+            } catch is FalhaComprovante {
+                rascunho.aviso = "O gasto foi salvo, mas o comprovante não. Tente anexar de novo."
             } catch {
                 // A tela não tem o alerta do ErrorManager: o aviso aparece no próprio formulário.
                 rascunho.aviso = "Não foi possível salvar o gasto. Tente novamente."

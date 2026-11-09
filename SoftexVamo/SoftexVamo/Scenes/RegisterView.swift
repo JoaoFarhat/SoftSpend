@@ -110,7 +110,7 @@ struct RegisterView: View {
                         }
 
                         // Alinhada à borda dos campos, como no esboço.
-                        Text("O nome de usuário saiu: o e-mail já identifica a conta.")
+                        Text("Você entra com o e-mail e a senha.")
                             .font(.footnote)
                             .foregroundStyle(Tema.textoFraco)
 
