@@ -158,8 +158,9 @@ final class CiclosViewModel: ObservableObject {
             if !ciclosLocais.isEmpty {
                 if !append {
                     self.allCiclos = ciclosLocais
-                    self.atualCiclo = ciclosLocais[0]
-                    self.index = 0
+                    let inicio = cicloDoInicio(ciclosLocais, hoje: .now) ?? ciclosLocais[0]
+                    self.atualCiclo = inicio
+                    self.index = ciclosLocais.firstIndex(where: { $0.id == inicio.id }) ?? 0
                 } else {
                     let idsExistentes = Set(self.allCiclos.map { $0.id })
                     let novos = ciclosLocais.filter { !idsExistentes.contains($0.id) }
@@ -203,8 +204,9 @@ final class CiclosViewModel: ObservableObject {
                     self.allCiclos = ciclosAtualizados
                     self.index = 0
                     
-                    if let primeiro = self.allCiclos.first {
-                        self.atualCiclo = primeiro
+                    if let inicio = self.cicloInicio ?? self.allCiclos.first {
+                        self.atualCiclo = inicio
+                        self.index = self.allCiclos.firstIndex(where: { $0.id == inicio.id }) ?? 0
                     } else {
                         self.atualCiclo = CicloSoftex.vazio
                     }
@@ -355,6 +357,27 @@ final class CiclosViewModel: ObservableObject {
                     showError(error)
                 }
             }
+        }
+    }
+
+    /// Viagem mostrada no início: a que contém hoje, senão a próxima, senão a última encerrada.
+    var cicloInicio: CicloSoftex? {
+        cicloDoInicio(allCiclos, hoje: .now)
+    }
+
+    /// Carrega a viagem escolhida em Viagens sem mudar `cicloInicio`.
+    func abrirViagem(_ ciclo: CicloSoftex) {
+        loadMoreDiasTask?.cancel()
+        loadMoreDiasTask = nil
+        atualCiclo = ciclo
+        index = allCiclos.firstIndex(where: { $0.id == ciclo.id }) ?? 0
+        diasSkip = 0
+        carregarDiasLocais()
+        if let cicloId = ciclo.backendId, NetworkMonitor.shared.isConnected {
+            hasMoreDias = true
+            loadMoreDiasTask = Task { await loadMoreDias(cicloId: cicloId) }
+        } else {
+            hasMoreDias = false
         }
     }
 
@@ -617,7 +640,7 @@ final class CiclosViewModel: ObservableObject {
         }
 
         if self.atualCiclo.id == cicloId {
-            if let primeiroCiclo = self.allCiclos.first {
+            if let primeiroCiclo = self.cicloInicio ?? self.allCiclos.first {
                 self.atualCiclo = primeiroCiclo
                 if let firstIndex = self.allCiclos.firstIndex(of: primeiroCiclo) {
                     self.index = firstIndex
@@ -845,15 +868,8 @@ final class CiclosViewModel: ObservableObject {
         let gastoAntigoValor = gastoLocal.valor
         let diferenca = value - gastoAntigoValor
 
-        if oldDiaIndex == newDiaIndex {
-            guard (self.atualCiclo.dias?[oldDiaIndex].saldo ?? 0) - diferenca >= 0 else {
-                throw APIError.serverError(message: "Saldo do dia insuficiente", requestId: "-", statusCode: 400)
-            }
-        } else {
-            guard (self.atualCiclo.dias?[newDiaIndex].saldo ?? 0) - value >= 0 else {
-                throw APIError.serverError(message: "Saldo do dia de destino insuficiente", requestId: "-", statusCode: 400)
-            }
-        }
+        // Editar um gasto pode passar da diária: o saldo do dia fica negativo
+        // e a interface mostra quanto passou.
 
         gastoLocal.titulo = titulo
         gastoLocal.valor = value
