@@ -6,11 +6,13 @@ import SwiftData
 ///
 /// `xcrun simctl launch <udid> com.joao.softspend -demo durante`
 /// (estados: durante, antes, encerrada, vazio, menu; telas de lançar gasto:
-/// consentimento, camera, confirmar, detalhe).
+/// consentimento, camera, confirmar, detalhe; todos os gastos: todos, semfoto;
+/// avisos de diária: aviso).
 struct DemoInicioView: View {
     enum Estado: String {
         case durante, antes, encerrada, vazio, menu
         case consentimento, camera, confirmar, detalhe
+        case todos, semfoto, aviso
     }
 
     static var pedido: Estado? {
@@ -53,6 +55,8 @@ struct DemoInicioView: View {
     /// Tela 11: o Spoleto de hoje (a foto de exemplo é guardada no `init`,
     /// nunca durante o body).
     private var caminhoInicial: [Rota] {
+        if estado == .todos { return [.todosGastos(filtro: .todos)] }
+        if estado == .semfoto { return [.todosGastos(filtro: .semComprovante)] }
         guard estado == .detalhe, let spoleto = dados.gastosDeHoje.first(where: { $0.titulo == "Spoleto" }) else { return [] }
         return [.detalheGasto(spoleto.id)]
     }
@@ -88,6 +92,14 @@ struct DemoInicioView: View {
             .environmentObject(errorManager)
             .environmentObject(AuthService.shared)
             .modelContainer(dados.container)
+            .task {
+                // Tela 13: um aviso de cada tipo (a permissão é pedida no primeiro).
+                guard estado == .aviso else { return }
+                // Espaçados para cada banner poder ser capturado sozinho.
+                await AvisoDiaria.agendar(.oitentaPorCento(livre: 90, data: dados.hoje), cidade: "Cuiabá", diaria: 450)
+                try? await Task.sleep(for: .seconds(8))
+                await AvisoDiaria.agendar(.passou(valor: 38, data: dados.dia(21)), cidade: "Cuiabá", diaria: 450)
+            }
     }
 }
 

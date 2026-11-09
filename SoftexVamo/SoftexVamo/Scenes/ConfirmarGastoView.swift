@@ -439,6 +439,10 @@ struct ConfirmarGastoView: View {
             do {
                 // `salvando` volta a false dentro do `salvar` antes do dismiss.
                 try await rascunho.salvar(em: viewModel)
+                // Aviso de diária (tela 13): só quando o gasto é de hoje.
+                if let dia = rascunho.dia, Calendar.current.isDate(dia.data, inSameDayAs: hoje) {
+                    AvisoDiaria.verificar(ciclo: ciclo, hoje: hoje)
+                }
                 aoSalvar()
             } catch {
                 // A tela não tem o alerta do ErrorManager: o aviso aparece no próprio formulário.

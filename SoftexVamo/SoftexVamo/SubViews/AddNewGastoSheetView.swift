@@ -652,6 +652,10 @@ struct AddNewGastoSheetView: View {
                     )
                 }
 
+                if let ciclo = selectedDia.ciclo, Calendar.current.isDateInToday(selectedDia.data) {
+                    AvisoDiaria.verificar(ciclo: ciclo, hoje: .now)
+                }
+
                 // isSalvando DEVE ser resetado ANTES do dismiss().
                 // O padrão anterior usava `defer { Task { ... } }` que rodava
                 // depois do dismiss, acessando @State de uma view destruída.

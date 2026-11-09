@@ -96,9 +96,9 @@ private struct DestinoRota: View {
         case .viagem(let id):
             // Detalhe provisório: a tela antiga do ciclo, sem trocar o ciclo do início.
             ViagemProvisoria(cicloId: id)
-        case .todosGastos:
-            // A lista antiga já tem busca e filtro por categoria (Tarefa 7 traz os filtros novos).
-            ViagemProvisoria(cicloId: viewModel.cicloInicioEm(hoje)?.id)
+        case .todosGastos(let filtro):
+            // A viagem do início (a que o usuário está vendo).
+            TodosGastosView(cicloId: viewModel.cicloInicioEm(hoje)?.id, filtro: filtro)
         case .detalheGasto(let id):
             DetalheGastoView(gastoId: id, hoje: hoje)
         case .fecharViagem(let id):

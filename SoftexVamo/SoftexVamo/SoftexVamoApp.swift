@@ -8,6 +8,7 @@
 import SwiftUI
 import SwiftData
 import os
+import UserNotifications
 
 @main
 struct SoftexVamoApp: App {
@@ -25,6 +26,8 @@ struct SoftexVamoApp: App {
         viewModel.errorManager = errorManager
         self._listViewModel = StateObject(wrappedValue: viewModel)
         self._errorManager = StateObject(wrappedValue: errorManager)
+        // Avisos de diária aparecem também com o app aberto.
+        UNUserNotificationCenter.current().delegate = AvisosNotificacaoDelegate.compartilhado
     }
 
     var body: some Scene {
