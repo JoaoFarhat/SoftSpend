@@ -6,30 +6,31 @@
 //
 
 import SwiftUI
+import CryptoKit
 
 /// `username` do cadastro, derivado do e-mail (o campo "Nome de usuário" saiu
 /// da tela, mas o servidor ainda exige `username`, de 3 a 50 caracteres e único).
 ///
-/// Parte antes do "@", sem acento, em minúsculas, só com letras, números, "." e
-/// "_". Curta demais (menos de 3), ganha o primeiro pedaço do domínio
-/// ("jo@empresa.com" → "jo.empresa"); se ainda faltar, completa com "_".
+/// Parte antes do "@" (sem acento, em minúsculas, só letras, números, "." e "_",
+/// cortada para caber) + "_" + os 6 primeiros hex do SHA-256 do e-mail inteiro
+/// (sem espaços em volta, minúsculo). O sufixo separa e-mails com a mesma parte
+/// local em domínios diferentes ("joao@empresa.com" × "joao@gmail.com") e é
+/// sempre o mesmo para o mesmo e-mail.
 nonisolated func usernameDoEmail(_ email: String) -> String {
-    let limpo = email.trimmingCharacters(in: .whitespacesAndNewlines)
-    let partes = limpo.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+    let normal = email.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    let local = normal.split(separator: "@", maxSplits: 1, omittingEmptySubsequences: false)
+        .first.map(String.init) ?? ""
 
-    func filtrar(_ texto: String) -> String {
-        texto.folding(options: .diacriticInsensitive, locale: Locale(identifier: "pt_BR"))
-            .lowercased()
-            .filter { ($0.isASCII && ($0.isLetter || $0.isNumber)) || $0 == "." || $0 == "_" }
-    }
+    let filtrado = local.folding(options: .diacriticInsensitive, locale: Locale(identifier: "pt_BR"))
+        .lowercased()
+        .filter { ($0.isASCII && ($0.isLetter || $0.isNumber)) || $0 == "." || $0 == "_" }
 
-    var nome = filtrar(partes.first ?? "")
-    if nome.count < 3, partes.count > 1 {
-        let dominio = filtrar(partes[1].split(separator: ".").first.map(String.init) ?? "")
-        if !dominio.isEmpty { nome = nome.isEmpty ? dominio : "\(nome).\(dominio)" }
-    }
-    while nome.count < 3 { nome += "_" }
-    return String(nome.prefix(50))
+    let hash = SHA256.hash(data: Data(normal.utf8))
+    let sufixo = String(hash.map { String(format: "%02x", $0) }.joined().prefix(6))
+
+    // 50 = base + "_" + 6 hex. Sem base, "usuario" (o total fica sempre entre 3 e 50).
+    let base = filtrado.isEmpty ? "usuario" : String(filtrado.prefix(50 - 1 - sufixo.count))
+    return "\(base)_\(sufixo)"
 }
 
 /// Tela 2: criar conta. Nome, e-mail, senha e confirmação; o `username` sai do e-mail.
@@ -110,10 +111,10 @@ struct RegisterView: View {
                                 .padding(.horizontal, Espaco.g + 4)
                         }
 
+                        // Alinhada à borda dos campos, como no esboço.
                         Text("O nome de usuário saiu: o e-mail já identifica a conta.")
                             .font(.footnote)
                             .foregroundStyle(Tema.textoFraco)
-                            .padding(.horizontal, Espaco.g + 4)
 
                         if let error = authService.errorMessage {
                             Text(error)
