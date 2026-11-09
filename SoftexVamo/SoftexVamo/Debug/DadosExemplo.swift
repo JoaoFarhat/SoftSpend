@@ -9,6 +9,8 @@ final class DadosExemplo {
 
     let container: ModelContainer
     let ciclo: CicloSoftex
+    /// Viagens anteriores (Porto Alegre em junho, Recife em abril), para a tela de Viagens.
+    private(set) var anteriores: [CicloSoftex] = []
     let calendario: Calendar = .current
     let periodo = "20 a 25 de julho"
 
@@ -70,6 +72,28 @@ final class DadosExemplo {
             g.criadoEm = dia(n, hora, minuto)
         }
         ciclo.gasto_total = lancamentos.reduce(0) { $0 + Decimal(string: $1.4)! }
+
+        // (título, mês, primeiro dia, último dia, total, gasto)
+        let passadas: [(String, Int, Int, Int, Decimal, Decimal)] = [
+            ("Porto Alegre, RS", 6, 2, 6, 2250, 1640),
+            ("Recife, PE", 4, 14, 19, 2700, 2115),
+        ]
+        var anteriores: [CicloSoftex] = []
+        for (titulo, mes, ini, fim, total, gasto) in passadas {
+            let n = fim - ini + 1
+            let c = CicloSoftex(valor_total: total, gasto_total: gasto,
+                                periodo: String(format: "%02d/%02d - %02d/%02d", ini, mes, fim, mes),
+                                diaria: total / Decimal(n), titulo: titulo, dias: [])
+            ctx.insert(c)
+            for d in ini...fim {
+                let data = calendario.date(from: DateComponents(year: 2026, month: mes, day: d))!
+                let dia = DiaSoftex(data: data, saldo: total / Decimal(n))
+                ctx.insert(dia)
+                dia.ciclo = c
+            }
+            anteriores.append(c)
+        }
+        self.anteriores = anteriores
         try? ctx.save()
     }
 }

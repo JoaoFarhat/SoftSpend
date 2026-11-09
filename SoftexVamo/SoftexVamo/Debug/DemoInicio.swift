@@ -7,12 +7,13 @@ import SwiftData
 /// `xcrun simctl launch <udid> com.joao.softspend -demo durante`
 /// (estados: durante, antes, encerrada, vazio, menu; telas de lançar gasto:
 /// consentimento, camera, confirmar, detalhe; todos os gastos: todos, semfoto;
-/// avisos de diária: aviso).
+/// avisos de diária: aviso; nova viagem: novaviagem; viagens: viagens).
 struct DemoInicioView: View {
     enum Estado: String {
         case durante, antes, encerrada, vazio, menu
         case consentimento, camera, confirmar, detalhe
         case todos, semfoto, aviso
+        case novaviagem, viagens
     }
 
     static var pedido: Estado? {
@@ -31,7 +32,11 @@ struct DemoInicioView: View {
         self.estado = estado
         let vm = CiclosViewModel()
         let dados = DadosExemplo.compartilhado
-        vm.allCiclos = estado == .vazio ? [] : [dados.ciclo]
+        switch estado {
+        case .vazio: vm.allCiclos = []
+        case .viagens, .novaviagem: vm.allCiclos = [dados.ciclo] + dados.anteriores
+        default: vm.allCiclos = [dados.ciclo]
+        }
         vm.atualCiclo = estado == .vazio ? CicloSoftex.vazio : dados.ciclo
         vm.isLoading = false
         vm.modelContext = dados.container.mainContext
@@ -57,6 +62,8 @@ struct DemoInicioView: View {
     private var caminhoInicial: [Rota] {
         if estado == .todos { return [.todosGastos(filtro: .todos)] }
         if estado == .semfoto { return [.todosGastos(filtro: .semComprovante)] }
+        if estado == .viagens { return [.viagens] }
+        if estado == .novaviagem { return [.viagens, .novaViagem] }
         guard estado == .detalhe, let spoleto = dados.gastosDeHoje.first(where: { $0.titulo == "Spoleto" }) else { return [] }
         return [.detalheGasto(spoleto.id)]
     }
@@ -83,6 +90,14 @@ struct DemoInicioView: View {
         }
     }
 
+    /// Tela 4: Cuiabá, 20 a 25/07, digitando só a diária de R$ 450.
+    private var formularioExemplo: FormularioViagem {
+        var f = FormularioViagem(ida: dados.dia(20), volta: dados.dia(25), destino: "Cuiabá, MT")
+        f.editarDiaria("450")
+        f.formatarCampos()
+        return f
+    }
+
     var body: some View {
         MainView(hojeFixo: hoje, sincronizar: false, origem: "São Paulo",
                  usuario: UsuarioMenu(nome: "João Victor Farhat", email: "joao@empresa.com"),
@@ -92,6 +107,7 @@ struct DemoInicioView: View {
             .environmentObject(errorManager)
             .environmentObject(AuthService.shared)
             .modelContainer(dados.container)
+            .environment(\.formularioNovaViagem, estado == .novaviagem ? formularioExemplo : nil)
             .task {
                 // Tela 13: um aviso de cada tipo (a permissão é pedida no primeiro).
                 guard estado == .aviso else { return }

@@ -48,7 +48,7 @@ struct MainView: View {
                 .navigationTitle("Início")
                 .toolbar(.hidden, for: .navigationBar)
                 .navigationDestination(for: Rota.self) { rota in
-                    DestinoRota(rota: rota, hoje: hoje)
+                    DestinoRota(rota: rota, hoje: hoje, origem: origem)
                 }
         }
         .environment(\.abrirRota) { caminho.append($0) }
@@ -82,20 +82,22 @@ struct MainView: View {
 private struct DestinoRota: View {
     let rota: Rota
     let hoje: Date
+    let origem: String?
 
     @EnvironmentObject var viewModel: CiclosViewModel
+    @Environment(\.formularioNovaViagem) private var formularioNovaViagem
 
     var body: some View {
         switch rota {
         case .novaViagem:
-            // A tela antiga tem o próprio "Voltar"; esconde a barra do sistema.
-            NewCicloView()
+            // A tela tem o próprio "Cancelar"; esconde a barra do sistema.
+            NewCicloView(formulario: formularioNovaViagem)
                 .toolbar(.hidden, for: .navigationBar)
         case .viagens:
-            HistoricoView()
+            ViagensView(hoje: hoje, origem: origem)
         case .viagem(let id):
-            // Detalhe provisório: a tela antiga do ciclo, sem trocar o ciclo do início.
-            ViagemProvisoria(cicloId: id)
+            // Os gastos da viagem aberta, sem trocar o ciclo do início.
+            DetalheViagemView(cicloId: id, hoje: hoje)
         case .todosGastos(let filtro):
             // A viagem do início (a que o usuário está vendo).
             TodosGastosView(cicloId: viewModel.cicloInicioEm(hoje)?.id, filtro: filtro)
@@ -126,21 +128,6 @@ extension CiclosViewModel {
     func ciclo(id: UUID?) -> CicloSoftex? {
         guard let id else { return nil }
         return allCiclos.first { $0.id == id }
-    }
-}
-
-/// Tela antiga do ciclo (lista de gastos com busca, edição e exportação).
-private struct ViagemProvisoria: View {
-    let cicloId: UUID?
-    @EnvironmentObject var viewModel: CiclosViewModel
-
-    var body: some View {
-        CiclosListView()
-            .onAppear {
-                if let ciclo = viewModel.ciclo(id: cicloId) {
-                    viewModel.garantirAtual(ciclo)
-                }
-            }
     }
 }
 
