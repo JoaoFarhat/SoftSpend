@@ -10,13 +10,15 @@
 
 **Spec:** `docs/superpowers/specs/2026-11-09-redesenho-visual-design.md` — telas aprovadas: `docs/superpowers/specs/telas/2026-11-09-todas-as-telas.html` (abrir no navegador; botão troca claro/escuro). Leia os dois antes de começar.
 
+**Claude Design (referência viva, mesmas telas):** Design System "SoftSpend" — https://claude.ai/artifact/Ata2yxRut3wkQGMvv2Epad (tokens claro/escuro, tipografia, espaçamentos, raios e os componentes `CartaoPassagem`, `BarrasPorDia`, `LinhaGasto`, `Selo`, `AlertaPendencia`, `Botoes`); canvas "SoftSpend — telas do redesenho" — https://claude.ai/artifact/7NmBpiyCPVAfEPYqSPFoWd (as 18 telas, cada uma com o tema no botão Tweaks). Os nomes de cor do `tokens.json` do Design System são os nomes dos Color Sets da Tarefa 1 (`fundo`, `superficie`, `superficie-2`, `borda`, `texto`, `texto-fraco`, `barra-dia`, `marca`, `marca-botao`, `marca-texto`, `marca-fundo`, `estouro`, `alerta-texto`, `alerta-fundo`, `alerta-borda`, `ok`, `ok-fundo`, `cat-*`). Os links são privados do João: se a sessão não conseguir abri-los, siga o HTML do repositório, que tem as mesmas telas.
+
 ## Global Constraints
 
 - Branch `redesenho-visual`; a `main` fica com a versão antiga. Commits pequenos, um por tarefa (ou por passo de commit).
 - Só a camada visual muda. Exceções permitidas pelo spec: tirar o bloqueio de saldo do `editGasto`; escolher o ciclo do início pela data de hoje; derivar valores no ViewModel. Nada em `Python/`.
 - Roxo só como marca: logo, ícone de avião da rota, barra do dia de hoje, botão principal. Proibidos: `LinearGradient` roxo, brilhos/estrelinhas de "IA", ilustração 3D (imagens `bagagem`/`maleta`), emoji como ícone, grade de cartõezinhos com ícone em quadradinho.
 - Temas claro e escuro iguais em qualidade; o app segue o tema do iPhone. Contraste AA nos dois.
-- Paleta (escuro / claro): fundo `#0B0B0D`/`#F4F3F7`; superfície `#17161B`/`#FFFFFF`; borda `#2A2830`/`#E4E2EA`; texto `#F2F1F5`/`#17151C`; texto fraco `#8E8C96`/`#6F6C78`; barra de dia `#34323B`/`#DCD9E3`; roxo da marca `#9B5CF6`/`#7C3AED`; dia estourado `#E0603F`/`#C2410C`; alerta texto `#F2A54A`/`#B45309`, fundo `#2A1D10`/`#FFF4E5`, borda `#5A3A17`/`#F4D3A6`; ok `#4ADE80`/`#15803D`.
+- Paleta (valores finais e completos em `docs/superpowers/specs/design-system/tokens.json`, cópia do Design System; resumo, escuro / claro): fundo `#0B0B0D`/`#F4F3F7`; superfície `#17161B`/`#FFFFFF`; borda `#2A2830`/`#E4E2EA`; texto `#F2F1F5`/`#17151C`; texto fraco `#8E8C96`/`#6F6C78`; barra de dia `#34323B`/`#DCD9E3`; roxo da marca `#9B5CF6`/`#7C3AED`; dia estourado `#E0603F`/`#C2410C`; alerta texto `#F2A54A`/`#B45309`, fundo `#2A1D10`/`#FFF4E5`, borda `#5A3A17`/`#F4D3A6`; ok `#4ADE80`/`#15803D`.
 - Dinheiro sempre em pt-BR ("R$ 1.183,00"), algarismos monoespaçados (`.monospacedDigit()`), independente do idioma do aparelho.
 - Ícones em SF Symbols. Categorias continuam as 5 de hoje (`Categoria`: Alimentação, Transporte, Lazer, Compras, Outros); a "Hospedagem" do esboço 10 **não** entra (exigiria backend).
 - Dynamic Type nos textos; VoiceOver lê "Ainda dá para gastar hoje, R$ X" e o estado de cada barra ("21 de julho, passou R$ 38").
@@ -62,13 +64,13 @@ xcrun simctl io booted screenshot capturas/<tela>-<tema>.png
 ### Tarefa 1: Tokens visuais e formatação de dinheiro
 
 **Files:**
-- Create: Color Sets em `SoftexVamo/SoftexVamo/Assets.xcassets/Tema/` (`fundo`, `superficie`, `borda`, `texto`, `textoFraco`, `barraDia`, `marca`, `estouro`, `alertaTexto`, `alertaFundo`, `alertaBorda`, `ok`), cada um com Any + Dark conforme a paleta.
+- Create: Color Sets em `SoftexVamo/SoftexVamo/Assets.xcassets/Tema/`, um por cor do `tokens.json` do Design System (valores exatos de lá, Any = `light`, Dark = `dark`). O botão principal usa `marca-botao` (#7C3AED nos dois temas: texto branco a 5,7:1); as cores de categoria `cat-*` foram escurecidas para o glifo branco passar 3:1.
 - Create: `SoftexVamo/SoftexVamo/Tema/Tema.swift`
 - Create: `SoftexVamo/SoftSpendTests/FormatacaoTests.swift`
 - Modify: `.gitignore` (`capturas/`)
 
 **Interfaces:**
-- Produces: `enum Tema` com `static let fundo, superficie, borda, texto, textoFraco, barraDia, marca, estouro, alertaTexto, alertaFundo, alertaBorda, ok: Color`; `enum Espaco { static let p: CGFloat = 8, m = 12, g = 16 }`; `enum Raio { static let cartao: CGFloat = 16, linha = 14, campo = 10, botao = 13 }`; `func formatarBRL(_ valor: Decimal, centavos: Bool = true) -> String`; `extension Categoria { var cor: Color }` (Alimentação `#F07A2C`, Transporte `#3B82F6`, Lazer `#14B8A6`, Compras `#8B5CF6`, Outros `#64748B`).
+- Produces: `enum Tema` com uma `static let <nome em camelCase>: Color` por Color Set (`fundo`, `superficie`, `superficie2`, `borda`, `texto`, `textoFraco`, `barraDia`, `marca`, `marcaBotao`, `marcaTexto`, `marcaFundo`, `estouro`, `alertaTexto`, `alertaFundo`, `alertaBorda`, `ok`, `okFundo`); `enum Espaco { static let p: CGFloat = 8, m = 12, g = 16 }`; `enum Raio { static let cartao: CGFloat = 16, linha = 14, campo = 10, botao = 13 }`; `func formatarBRL(_ valor: Decimal, centavos: Bool = true) -> String`; `extension Categoria { var cor: Color }` (ver `docs/superpowers/specs/design-system/tokens.json`; os Color Sets `cat-alimentacao` `#D9580F`, `cat-transporte` `#2563EB`, `cat-lazer` `#0F766E`, `cat-compras` `#7C3AED`, `cat-outros` `#64748B`).
 
 - [ ] **Passo 1: testes que falham**
 
