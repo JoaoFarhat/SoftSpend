@@ -67,7 +67,7 @@ xcrun simctl io booted screenshot capturas/<tela>-<tema>.png
 ### Tarefa 1: Tokens visuais e formatação de dinheiro
 
 **Files:**
-- Create: Color Sets em `SoftexVamo/SoftexVamo/Assets.xcassets/Tema/`, um por cor do `tokens.json` do Design System (valores exatos de lá, Any = `light`, Dark = `dark`). O botão principal usa `marca-botao` (#7C3AED nos dois temas: texto branco a 5,7:1); as cores de categoria `cat-*` foram escurecidas para o glifo branco passar 3:1.
+- Create: Color Sets em `SoftexVamo/SoftexVamo/Assets.xcassets/Tema/`, um por cor do `tokens.json` do Design System (valores exatos de lá, Any = `light`, Dark = `dark`). O botão principal usa `marca-botao` (#6D28D9 nos dois temas: texto branco a 7:1); as cores de categoria `cat-*` foram escurecidas para o glifo branco passar 3:1.
 - Create: `SoftexVamo/SoftexVamo/Tema/Tema.swift`
 - Create: `SoftexVamo/SoftSpendTests/FormatacaoTests.swift`
 - Modify: `.gitignore` (`capturas/`)
