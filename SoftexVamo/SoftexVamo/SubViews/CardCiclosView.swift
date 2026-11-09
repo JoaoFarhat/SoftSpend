@@ -11,6 +11,7 @@ struct CardCiclosView: View {
     
     @EnvironmentObject var viewModel: CiclosViewModel
     @EnvironmentObject var errorManager: ErrorManager
+    @Environment(\.abrirRota) private var abrirRota
     
     let ciclo : CicloSoftex
     
@@ -116,9 +117,8 @@ struct CardCiclosView: View {
         }
         .padding(.horizontal)
         .onTapGesture {
-            viewModel.atualCiclo = ciclo
-            presentCiclo = true
-            viewModel.selectedTab = 0
+            // Abre o detalhe da viagem sem trocar o ciclo do início.
+            abrirRota(.viagem(ciclo.id))
         }
         //
         .foregroundColor(isAtual ? .white : Color("textPrimary"))

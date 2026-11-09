@@ -14,7 +14,6 @@ struct CiclosListView: View {
     @StateObject var authService = AuthService.shared
     @StateObject var gastosViewModel = GastosViewModel(dias: [])
     @Environment(\.modelContext) private var modelContext
-    @State private var showMenu = false
     
     private var currentUser: UserModel? {
         AuthService.shared.currentUser
@@ -191,32 +190,6 @@ struct CiclosListView: View {
                         .shadow(color: .black.opacity(0.1), radius: 4)
                 }
 
-                ZStack(alignment: .topTrailing) {
-                    Button {
-                        withAnimation(.spring()) {
-                            showMenu.toggle()
-                        }
-                    } label: {
-                        HStack {
-                            Text(currentUser?.nome.prefix(2).uppercased() ?? "??")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(10)
-                                .background(Color.appPurple)
-                                .clipShape(Circle())
-
-                            Image(systemName: "chevron.up")
-                                .font(.system(size: 12, weight: .bold))
-                                .rotationEffect(.degrees(showMenu ? 0 : 180))
-                                .foregroundStyle(Color("textPrimary"))
-                        }
-                        .padding(8)
-                        .background(Color("cardBackground"))
-                        .clipShape(Capsule())
-                        .shadow(color: .black.opacity(0.1), radius: 4)
-
-                    }
-                }
             }
 
         }.padding(.horizontal, 10)
@@ -293,13 +266,6 @@ struct CiclosListView: View {
             gastosViewModel.dias = viewModel.atualCiclo.dias ?? []
         }
         .background(.backgroundCor)
-        .overlay(alignment: .topTrailing) {
-            if showMenu {
-                MenuView(showMenu: $showMenu)
-                    .environmentObject(viewModel)
-                    .offset(x: -16, y: 70)
-            }
-        }
         .fullScreenCover(isPresented: $addNewGastoSheet, onDismiss: {
             gastoToEdit = nil
             diaDoGasto = nil

@@ -32,6 +32,8 @@ struct SoftexVamoApp: App {
             #if DEBUG
             if VitrineView.ativa {
                 VitrineView()
+            } else if let estado = DemoInicioView.pedido {
+                DemoInicioView(estado: estado)
             } else {
                 raiz
             }

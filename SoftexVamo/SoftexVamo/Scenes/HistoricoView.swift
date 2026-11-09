@@ -14,7 +14,7 @@ struct HistoricoView: View {
     @State private var showingModal = false
     
     var body: some View {
-        NavigationStack{
+        Group {
             VStack(alignment: .leading){
                 
                 VStack(alignment: .leading){

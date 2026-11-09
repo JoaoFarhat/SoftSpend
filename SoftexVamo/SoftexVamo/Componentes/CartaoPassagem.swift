@@ -120,14 +120,22 @@ struct CartaoPassagem: View {
         }
     }
 
+    /// Lado direito da linha do período. Antes da viagem fica vazio: o bloco
+    /// de baixo já diz quantos dias são (tela 5).
     private var textoDias: String {
         switch resumo.estado {
         case .durante(let dia, let de):
             return "\(dia)º de \(de) dias"
+        case .antes:
+            return ""
         default:
-            let n = resumo.dias.count
-            return n == 1 ? "1 dia" : "\(n) dias"
+            return textoQuantidadeDias
         }
+    }
+
+    private var textoQuantidadeDias: String {
+        let n = resumo.dias.count
+        return n == 1 ? "1 dia" : "\(n) dias"
     }
 
     // MARK: Picote
@@ -167,15 +175,25 @@ struct CartaoPassagem: View {
                     .padding(.top, Espaco.m + 4)
             }
         case .antes(let faltando):
-            VStack(alignment: .leading, spacing: 4) {
-                Text(faltando == 1 ? "Começa amanhã" : "Começa em \(faltando) dias")
-                    .font(.title2.weight(.bold))
+            // Tela 5: "Começa em" pequeno, "3 dias" no tamanho de destaque.
+            VStack(alignment: .leading, spacing: 0) {
+                Text(faltando == 1 ? "Começa" : "Começa em")
+                    .font(.subheadline)
+                    .foregroundStyle(Tema.textoFraco)
+                Text(faltando == 1 ? "amanhã" : "\(faltando) dias")
+                    .font(.larga(tamanhoDestaque, .bold))
+                    .tracking(-0.4)
                     .foregroundStyle(Tema.texto)
-                Text("A diária é de \(formatarBRLCurto(resumo.diaria))")
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                Text("\(formatarBRLCurto(resumo.total)) para \(textoQuantidadeDias), \(formatarBRLCurto(resumo.diaria)) por dia")
                     .font(.footnote)
                     .foregroundStyle(Tema.textoFraco)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
         case .encerrada:
             VStack(alignment: .leading, spacing: 4) {
                 Text("Viagem encerrada")
