@@ -29,27 +29,39 @@ struct SoftexVamoApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
-                if authService.isAuthenticated {
-                    MainView()
-                        .environmentObject(listViewModel)
-                        .id(authService.currentUser?.id)
-                } else {
-                    LoginView()
-
-                }
+            #if DEBUG
+            if VitrineView.ativa {
+                VitrineView()
+            } else {
+                raiz
             }
-            .environmentObject(authService)
-            .environmentObject(errorManager)
-            .onChange(of: authService.currentUser?.id) { _, _ in
-                // Com userId nos models, não precisa limpar dados no logout —
-                // cada usuário só vê os próprios dados via filtro por userId.
-                // Dados offline pendentes de sync são preservados para quando
-                // o usuário original logar novamente.
-                listViewModel.reset()
-            }
+            #else
+            raiz
+            #endif
         }
         .modelContainer(modelContainer)
+    }
+
+    private var raiz: some View {
+        Group {
+            if authService.isAuthenticated {
+                MainView()
+                    .environmentObject(listViewModel)
+                    .id(authService.currentUser?.id)
+            } else {
+                LoginView()
+
+            }
+        }
+        .environmentObject(authService)
+        .environmentObject(errorManager)
+        .onChange(of: authService.currentUser?.id) { _, _ in
+            // Com userId nos models, não precisa limpar dados no logout —
+            // cada usuário só vê os próprios dados via filtro por userId.
+            // Dados offline pendentes de sync são preservados para quando
+            // o usuário original logar novamente.
+            listViewModel.reset()
+        }
     }
 
     private static let appLogger = Logger(subsystem: "br.com.softspend", category: "SoftexVamoApp")
