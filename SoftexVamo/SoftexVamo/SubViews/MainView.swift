@@ -25,6 +25,9 @@ struct MainView: View {
     var origem: String? = nil
     var usuario: UsuarioMenu? = nil
     var menuInicial: Bool = false
+    /// Pilha e lançamento abertos ao entrar (modo de demonstração, DEBUG).
+    var caminhoInicial: [Rota] = []
+    var lancamentoInicial: Lancamento? = nil
 
     @State private var caminho: [Rota] = []
     /// Relógio do início: atualizado na virada do dia e ao voltar para o app.
@@ -40,7 +43,9 @@ struct MainView: View {
 
     var body: some View {
         NavigationStack(path: $caminho) {
-            InicioView(hoje: hoje, origem: origem, usuario: usuarioAtual, menuInicial: menuInicial)
+            InicioView(hoje: hoje, origem: origem, usuario: usuarioAtual, menuInicial: menuInicial,
+                       lancamentoInicial: lancamentoInicial)
+                .navigationTitle("Início")
                 .toolbar(.hidden, for: .navigationBar)
                 .navigationDestination(for: Rota.self) { rota in
                     DestinoRota(rota: rota, hoje: hoje)
@@ -54,6 +59,7 @@ struct MainView: View {
         }
         .onAppear {
             viewModel.modelContext = modelContext
+            if !caminhoInicial.isEmpty, caminho.isEmpty { caminho = caminhoInicial }
             guard sincronizar else { return }
             syncManager.configure(container: modelContext.container)
             syncManager.limparDadosMortos(context: modelContext)
@@ -94,7 +100,7 @@ private struct DestinoRota: View {
             // A lista antiga já tem busca e filtro por categoria (Tarefa 7 traz os filtros novos).
             ViagemProvisoria(cicloId: viewModel.cicloInicioEm(hoje)?.id)
         case .detalheGasto(let id):
-            GastoProvisorio(gastoId: id)
+            DetalheGastoView(gastoId: id, hoje: hoje)
         case .fecharViagem(let id):
             FecharViagemProvisoria(cicloId: id)
         case .perfil:
@@ -135,31 +141,6 @@ private struct ViagemProvisoria: View {
                     viewModel.garantirAtual(ciclo)
                 }
             }
-    }
-}
-
-/// Edição do gasto com a tela antiga (Tarefa 6 traz o detalhe novo).
-private struct GastoProvisorio: View {
-    let gastoId: UUID
-    @EnvironmentObject var viewModel: CiclosViewModel
-    @Query private var gastos: [GastosDia]
-
-    init(gastoId: UUID) {
-        self.gastoId = gastoId
-        _gastos = Query(filter: #Predicate<GastosDia> { $0.id == gastoId })
-    }
-
-    var body: some View {
-        if let gasto = gastos.first, let dia = gasto.dia, let ciclo = dia.ciclo {
-            AddNewGastoSheetView(dias: ciclo.dias ?? [], gastoToEdit: gasto, diaDoGasto: dia)
-                .toolbar(.hidden, for: .navigationBar)
-                .onAppear { viewModel.garantirAtual(ciclo) }
-        } else {
-            Text("Gasto não encontrado")
-                .foregroundStyle(Tema.textoFraco)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Tema.fundo)
-        }
     }
 }
 

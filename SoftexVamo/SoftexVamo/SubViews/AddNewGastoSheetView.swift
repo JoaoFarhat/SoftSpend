@@ -93,6 +93,7 @@ struct AddNewGastoSheetView: View {
     @State private var ignorarEdicaoAutomatica: Bool = false
 
     private let logger = Logger(subsystem: "br.com.softspend", category: "AddNewGastoSheetView")
+    // Visual antigo, ainda usado só pela lista provisória (`CiclosListView`) até a Tarefa 10.
     
     @State private var comprovanteImagem: UIImage?
     @State private var comprovanteData: Data?
@@ -664,130 +665,48 @@ struct AddNewGastoSheetView: View {
         }
     }
     
-    /// Teto de upload da nota. O servidor rejeita acima de 10MB.
-    private static let tamanhoMaximoNota = 9 * 1024 * 1024
-
-    /// Reduz a imagem antes de enviar ao OCR.
-    ///
-    /// A foto original da camera tem vários MB, mas o servidor a reduz para
-    /// 1280px antes de enviar ao Gemini. Subir a resolucao total apenas gasta
-    /// tempo de rede, que domina a latencia percebida do escaneamento.
-    private func comprimirParaOCR(_ image: UIImage) -> Data? {
-        let ladoMaximo: CGFloat = 1280
-        let maiorLado = max(image.size.width, image.size.height)
-        let escala = min(1, ladoMaximo / maiorLado)
-        let novoTamanho = CGSize(
-            width: image.size.width * escala,
-            height: image.size.height * escala
-        )
-
-        let formato = UIGraphicsImageRendererFormat.default()
-        formato.scale = 1
-        let redimensionada = UIGraphicsImageRenderer(size: novoTamanho, format: formato).image { _ in
-            image.draw(in: CGRect(origin: .zero, size: novoTamanho))
-        }
-
-        return redimensionada.jpegData(compressionQuality: 0.8)
-    }
-
-    /// Codifica a nota preservando a resolução original.
-    ///
-    /// Diferente do OCR, a nota arquivada precisa continuar legível para fins
-    /// fiscais, então não há redimensionamento: só a conversão para JPEG (o
-    /// HEIC da galeria não é universalmente legível). A qualidade cai apenas
-    /// se o arquivo passar do teto aceito pelo servidor.
-    private func codificarNotaFiscal(_ image: UIImage) -> Data? {
-        var qualidade: CGFloat = 0.95
-        var dados = image.jpegData(compressionQuality: qualidade)
-
-        while let atual = dados, atual.count > Self.tamanhoMaximoNota, qualidade > 0.4 {
-            qualidade -= 0.15
-            dados = image.jpegData(compressionQuality: qualidade)
-        }
-
-        return dados
-    }
+    // Codificação, leitura e abertura de arquivo vêm de `LancamentoGasto.swift`
+    // (as mesmas usadas pela tela nova de confirmar gasto).
 
     @MainActor
     private func processarImagem(imagem: UIImage) {
         comprovanteImagem = imagem
-        comprovanteData = codificarNotaFiscal(imagem)
+        comprovanteData = NotaFiscal.codificar(imagem)
         comprovanteMime = "image/jpeg"
         removerComprovanteSalvo = false
 
-        guard modoImagem == .escanear, let dataOCR = comprimirParaOCR(imagem) else { return }
-
-        extrairComIA(imagem: imagem, data: dataOCR)
+        // Sem consentimento a foto só é anexada (AGENTS.md, LGPD).
+        guard modoImagem == .escanear, Consentimento.leituraAutomatica == true else { return }
+        extrairComIA(imagem: imagem)
     }
 
     @MainActor
     private func processarArquivoImportado(url: URL) {
-        Task {
-            guard url.startAccessingSecurityScopedResource() else {
-                erroExtracao = "Não foi possível ler o arquivo selecionado."
-                return
-            }
-            defer { url.stopAccessingSecurityScopedResource() }
-
-            do {
-                let data = try Data(contentsOf: url)
-                let extensao = url.pathExtension.lowercased()
-                let utType = UTType(filenameExtension: extensao) ?? .data
-
-                if utType.conforms(to: .pdf) || extensao == "pdf" {
-                    guard data.count <= Self.tamanhoMaximoNota else {
-                        erroExtracao = "PDF excede o tamanho máximo permitido."
-                        return
-                    }
-                    comprovanteData = data
-                    comprovanteMime = "application/pdf"
-                    comprovanteImagem = nil
-                    removerComprovanteSalvo = false
-                } else {
-                    guard let imagem = UIImage(data: data) else {
-                        erroExtracao = "Arquivo de imagem não reconhecido."
-                        return
-                    }
-                    processarImagem(imagem: imagem)
-                }
-            } catch {
-                erroExtracao = error.localizedDescription
-            }
+        switch NotaFiscal.abrir(url) {
+        case .pdf(let data):
+            comprovanteData = data
+            comprovanteMime = "application/pdf"
+            comprovanteImagem = nil
+            removerComprovanteSalvo = false
+        case .imagem(let imagem):
+            processarImagem(imagem: imagem)
+        case .erro(let mensagem):
+            erroExtracao = mensagem
         }
     }
 
     @MainActor
-    private func extrairComIA(imagem: UIImage, data: Data) {
+    private func extrairComIA(imagem: UIImage) {
         isExtraindo = true
         erroExtracao = nil
         tarefaRefinamento?.cancel()
 
         tarefaRefinamento = Task {
-            let local = await ComprovanteOCRLocal.extrair(de: imagem)
-            let teveLeituraLocal = local.temAlgoUtil
-            if teveLeituraLocal {
-                aplicar(titulo: local.titulo, valor: local.valor, categoria: local.categoria)
+            let aviso = await LeituraComprovante.ler(imagem) { titulo, valor, categoria in
+                aplicar(titulo: titulo, valor: valor, categoria: categoria)
             }
-
             guard !Task.isCancelled else { return }
-
-            do {
-                let resultado = try await NetworkManager.shared.extrairGastoDeImagem(imageData: data)
-                guard !Task.isCancelled else { return }
-                
-                aplicar(
-                    titulo: resultado.titulo,
-                    valor: resultado.valor,
-                    categoria: resultado.categoria
-                )
-            } catch {
-                guard !Task.isCancelled else { return }
-                erroExtracao = teveLeituraLocal
-                    ? "Leitura feita no dispositivo. Confira os valores antes de salvar."
-                    : "Nao foi possivel extrair os dados. Preencha manualmente."
-                logger.error("Erro ao extrair gasto: \(error.localizedDescription, privacy: .public)")
-            }
-
+            erroExtracao = aviso
             isExtraindo = false
         }
     }
@@ -820,18 +739,7 @@ struct AddNewGastoSheetView: View {
     }
     
     func verificarNumeros(orcamento: String) -> Decimal {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.locale = Locale(identifier: "pt_BR")
-        formatter.currencySymbol = ""
-        formatter.isLenient = true
-        formatter.maximumFractionDigits = 2
-
-        if let number = formatter.number(from: orcamento) {
-            return number.decimalValue
-        }
-
-        return Decimal(0)
+        lerValorBRL(orcamento)
     }
     
     func iconName(for categoria: Categoria) -> String {

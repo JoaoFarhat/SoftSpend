@@ -1,5 +1,5 @@
 #if DEBUG
-import Foundation
+import SwiftUI
 import SwiftData
 
 /// Viagem de exemplo do spec (Cuiabá, 20 a 25/07/2026, R$ 2.700, diária R$ 450,
@@ -71,6 +71,35 @@ final class DadosExemplo {
         }
         ciclo.gasto_total = lancamentos.reduce(0) { $0 + Decimal(string: $1.4)! }
         try? ctx.save()
+    }
+}
+
+extension DadosExemplo {
+    /// Foto de exemplo do comprovante do Spoleto (papel pautado), para as capturas.
+    @MainActor
+    static func imagemComprovante() -> UIImage {
+        let linhas = ["SPOLETO CUIABÁ", "23/07/2026 13:42", "-------------------", "PRATO DO DIA 38,90",
+                      "SUCO 4,20", "-------------------", "TOTAL R$ 43,10"]
+        let papel = ZStack(alignment: .topLeading) {
+            Color(red: 0.914, green: 0.906, blue: 0.886)
+            VStack(spacing: 0) {
+                ForEach(0..<36, id: \.self) { _ in
+                    Color.clear.frame(height: 15)
+                    Color(red: 0.863, green: 0.851, blue: 0.824).frame(height: 1.5)
+                }
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(linhas, id: \.self) { Text($0) }
+            }
+            .font(.system(size: 19, weight: .regular))
+            .foregroundStyle(Color(white: 0.2))
+            .padding(28)
+        }
+        .frame(width: 400, height: 600, alignment: .topLeading)
+        .clipped()
+        let renderer = ImageRenderer(content: papel)
+        renderer.scale = 3
+        return renderer.uiImage ?? UIImage()
     }
 }
 #endif

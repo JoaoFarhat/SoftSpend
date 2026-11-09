@@ -14,15 +14,17 @@ struct InicioView: View {
     @Environment(\.abrirRota) private var abrirRota
 
     @State private var menuAberto: Bool
-    @State private var lancandoGasto = false
+    @State private var lancamento: Lancamento?
     @State private var viagemEmEdicao: CicloSoftex?
     @State private var diaTocado: DiaResumo?
 
-    init(hoje: Date, origem: String? = nil, usuario: UsuarioMenu, menuInicial: Bool = false) {
+    init(hoje: Date, origem: String? = nil, usuario: UsuarioMenu, menuInicial: Bool = false,
+         lancamentoInicial: Lancamento? = nil) {
         self.hoje = hoje
         self.origem = origem
         self.usuario = usuario
         _menuAberto = State(initialValue: menuInicial)
+        _lancamento = State(initialValue: lancamentoInicial)
     }
 
     var body: some View {
@@ -39,8 +41,10 @@ struct InicioView: View {
             }
         }
         .background(Tema.fundo.ignoresSafeArea())
-        .fullScreenCover(isPresented: $lancandoGasto) {
-            AddNewGastoSheetView(dias: viewModel.atualCiclo.dias ?? [])
+        .fullScreenCover(item: $lancamento) { item in
+            LancarGastoView(ciclo: item.ciclo, hoje: hoje, comFoto: item.comFoto,
+                            etapaInicial: item.etapa, rascunho: item.rascunho,
+                            previewCamera: item.previewCamera)
                 .environmentObject(viewModel)
         }
         .fullScreenCover(item: $viagemEmEdicao) { ciclo in
@@ -209,8 +213,8 @@ struct InicioView: View {
             BotaoPrincipal("Fechar viagem") { abrirRota(.fecharViagem(ciclo.id)) }
         default:
             HStack(spacing: Espaco.p) {
-                BotaoPrincipal("Fotografar comprovante") { lancar(em: ciclo) }
-                BotaoSecundario(simbolo: "plus", rotulo: "Lançar sem foto") { lancar(em: ciclo) }
+                BotaoPrincipal("Fotografar comprovante") { lancar(em: ciclo, comFoto: true) }
+                BotaoSecundario(simbolo: "plus", rotulo: "Lançar sem foto") { lancar(em: ciclo, comFoto: false) }
             }
         }
     }
@@ -349,9 +353,9 @@ struct InicioView: View {
             .sorted { $0.criadoEm > $1.criadoEm }
     }
 
-    private func lancar(em ciclo: CicloSoftex) {
+    private func lancar(em ciclo: CicloSoftex, comFoto: Bool) {
         viewModel.garantirAtual(ciclo)
-        lancandoGasto = true
+        lancamento = Lancamento(ciclo: ciclo, comFoto: comFoto)
     }
 
     private func apagar(_ gasto: GastosDia, em ciclo: CicloSoftex) {
@@ -365,6 +369,18 @@ struct InicioView: View {
             }
         }
     }
+}
+
+/// Lançamento de gasto aberto a partir do rodapé do início.
+struct Lancamento: Identifiable {
+    let id = UUID()
+    let ciclo: CicloSoftex
+    /// "Fotografar comprovante" (consentimento → câmera) ou "+" (direto no confirmar).
+    let comFoto: Bool
+    /// Etapa e rascunho fixos, só para o modo de demonstração.
+    var etapa: LancarGastoView.Etapa? = nil
+    var rascunho: RascunhoGasto? = nil
+    var previewCamera: UIImage? = nil
 }
 
 /// Símbolo do logo: bilhete roxo cheio com os dois recortes laterais.
