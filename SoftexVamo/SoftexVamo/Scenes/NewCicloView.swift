@@ -19,7 +19,6 @@ struct NewCicloView: View {
     private enum DataAberta { case ida, volta }
 
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject var errorManager: ErrorManager
     @EnvironmentObject var cicloViewModel: CiclosViewModel
 
     @State private var form: FormularioViagem
@@ -33,14 +32,14 @@ struct NewCicloView: View {
 
     private var isEditing: Bool { ciclo != nil }
 
-    /// Editar viagem: começa pelo total do ciclo e pelas datas dos dias.
+    /// Editar viagem: começa pelo total do ciclo e pelas datas dos dias
+    /// (sem dias carregados, pelo `periodo`; nunca por "hoje + 7").
     init(ciclo: CicloSoftex, onBack: (() -> Void)? = nil) {
         self.ciclo = ciclo
         self.onBack = onBack
-        // Menor e maior data dos dias, não a ordem do array.
-        let datas = (ciclo.dias ?? []).filter { $0.deletadoEm == nil }.map(\.data)
-        let ida = datas.min() ?? Date()
-        let volta = datas.max() ?? Date().addingTimeInterval(86400 * 7)
+        let intervalo = intervaloViagem(ciclo)
+        let ida = intervalo?.ini ?? Calendar.current.startOfDay(for: Date())
+        let volta = intervalo?.fim ?? ida
         _form = State(initialValue: FormularioViagem(ida: ida, volta: volta, total: ciclo.valor_total,
                                                      destino: ciclo.titulo))
     }
@@ -115,6 +114,13 @@ struct NewCicloView: View {
         }
         .onChange(of: foco) { anterior, _ in
             if anterior == .total || anterior == .diaria { form.formatarCampos() }
+        }
+        .onAppear {
+            // Viagem sincronizada sem dias locais: pede os dias ao servidor,
+            // que `salvar` exige para editar sem corromper a viagem.
+            if let ciclo, ciclo.backendId != nil, !(ciclo.dias ?? []).contains(where: { $0.deletadoEm == nil }) {
+                cicloViewModel.abrirViagem(ciclo)
+            }
         }
         .navigationBarHidden(true)
     }
@@ -289,12 +295,19 @@ struct NewCicloView: View {
                     erroSalvar = "A viagem ainda está sincronizando. Tente editar daqui a pouco."
                     return
                 }
+                guard (ciclo.dias ?? []).contains(where: { $0.deletadoEm == nil }) else {
+                    // Sem os dias locais, `editCiclo` recriaria todos os dias com clientIds novos:
+                    // a viagem ficaria com dias duplicados ou em datas erradas.
+                    salvando = false
+                    erroSalvar = "Os dias da viagem ainda estão carregando. Tente de novo em instantes."
+                    return
+                }
                 let dias = Calendar.current.datesBetween(ida, and: volta)
                 let cicloEditado = ciclo
                 cicloEditado.titulo = titulo
                 cicloEditado.valor_total = total
                 cicloEditado.periodo = periodoCurto(ida, volta)
-                cicloEditado.diaria = total / Decimal(max(dias, 1))
+                cicloEditado.diaria = ValoresViagem.diaria(total: total, dias: max(dias, 1))
                 let novosDias = cicloViewModel.createAllDiasLoteRequest(dayCount: dias, startDate: ida)
                 await cicloViewModel.editCiclo(cicloId: cicloId, ciclo: cicloEditado, dias: novosDias)
             } else {
@@ -303,8 +316,9 @@ struct NewCicloView: View {
                                                             totalValue: total, titulo: titulo)
                 } catch {
                     salvando = false
+                    // Aviso no próprio formulário: o alerta da raiz não aparece
+                    // sobre esta tela (fullScreenCover) e seria um aviso em dobro.
                     erroSalvar = "Não foi possível criar a viagem. Tente novamente."
-                    errorManager.show(error: error)
                     return
                 }
             }

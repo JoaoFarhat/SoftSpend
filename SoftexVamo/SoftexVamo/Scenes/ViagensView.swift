@@ -7,25 +7,6 @@
 
 import SwiftUI
 
-/// Primeiro e último dia da viagem: pelos dias do ciclo; sem dias carregados,
-/// pelo `periodo` ("dd/MM - dd/MM"), no ano em que o ciclo foi criado.
-func intervaloViagem(_ ciclo: CicloSoftex, calendario: Calendar = .current) -> (ini: Date, fim: Date)? {
-    let datas = (ciclo.dias ?? []).filter { $0.deletadoEm == nil }.map { calendario.startOfDay(for: $0.data) }
-    if let ini = datas.min(), let fim = datas.max() { return (ini, fim) }
-
-    let partes = ciclo.periodo.components(separatedBy: "-").map { $0.trimmingCharacters(in: .whitespaces) }
-    guard partes.count == 2 else { return nil }
-    let ano = calendario.component(.year, from: ciclo.criadoEm)
-    func data(_ texto: String, ano: Int) -> Date? {
-        let p = texto.split(separator: "/").compactMap { Int($0) }
-        guard p.count == 2 else { return nil }
-        return calendario.date(from: DateComponents(year: ano, month: p[1], day: p[0]))
-    }
-    guard let ini = data(partes[0], ano: ano), var fim = data(partes[1], ano: ano) else { return nil }
-    if fim < ini, let virada = data(partes[1], ano: ano + 1) { fim = virada }
-    return (ini, fim)
-}
-
 /// Viagens fora do "Agora": as próximas (da mais perto para a mais longe) e as
 /// anteriores (da mais recente para a mais antiga; sem datas, no fim).
 func gruposViagens(_ ciclos: [CicloSoftex], agora: CicloSoftex?, hoje: Date,

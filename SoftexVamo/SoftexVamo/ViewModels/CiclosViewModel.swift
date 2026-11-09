@@ -226,8 +226,10 @@ final class CiclosViewModel: ObservableObject {
                         return
                     }
                     
+                    // Sem zerar `dias`: isso desligava os dias locais do ciclo
+                    // (os pendentes ficavam órfãos). O upsert por `backendId`
+                    // religa os do servidor e tira os que sumiram de lá.
                     self.atualCiclo = cicloParaSalvar
-                    self.atualCiclo.dias = []
                     self.diasSkip = 0
                     self.hasMoreDias = true
                     loadMoreDiasTask?.cancel()
@@ -320,44 +322,74 @@ final class CiclosViewModel: ObservableObject {
         salvarLocal()
     }
     
+    /// Mostra os dias locais do `atualCiclo` e busca no servidor todas as
+    /// páginas de dias (viagens com mais de `diasLimit` dias inclusive).
     func loadMoreDias(cicloId: Int) async {
+        guard NetworkMonitor.shared.isConnected else {
+            carregarDiasLocais()
+            return
+        }
+        await carregarDiasDoServidor(cicloId: cicloId) { skip, limit in
+            try await NetworkManager.shared.fetchDias(cicloId: cicloId, skip: skip, limit: limit)
+        }
+    }
+
+    /// Busca página a página (até uma vir com menos de `diasLimit`), faz o
+    /// upsert por `backendId` e tira os dias sincronizados que sumiram do
+    /// servidor. `buscar` recebe `skip` e `limit`; injetável nos testes.
+    func carregarDiasDoServidor(
+        cicloId: Int,
+        buscar: @escaping @MainActor (_ skip: Int, _ limit: Int) async throws -> [DiaSoftex]
+    ) async {
+        guard !Task.isCancelled else { return }
         carregarDiasLocais()
 
         loadMoreDiasTask?.cancel()
-        loadMoreDiasTask = Task {
-            guard hasMoreDias, !isLoadingDias else { return }
+        let ciclo = atualCiclo
+        let limite = diasLimit
+        let tarefa = Task {
             isLoadingDias = true
             defer { isLoadingDias = false }
-            
-            guard NetworkMonitor.shared.isConnected else { return }
-            
+            var skip = 0
+            var idsServidor = Set<Int>()
             do {
-                let dias = try await NetworkManager.shared.fetchDias(cicloId: cicloId, skip: diasSkip, limit: diasLimit)
-                
-                await MainActor.run {
-                    guard !Task.isCancelled else { return }
-                    
-                    hasMoreDias = dias.count == diasLimit
-                    diasSkip += dias.count
-
-                    if atualCiclo.dias == nil {
-                        atualCiclo.dias = []
-                    }
-
+                // Teto de páginas: protege contra um servidor que ignore o `skip`.
+                for _ in 0..<100 {
+                    let dias = try await buscar(skip, limite)
+                    guard !Task.isCancelled, atualCiclo.id == ciclo.id else { return }
                     for dia in dias {
-                        salvarOuAtualizarDiaLocal(dia, no: atualCiclo)
+                        if let id = dia.backendId { idsServidor.insert(id) }
+                        salvarOuAtualizarDiaLocal(dia, no: ciclo)
                     }
-
+                    skip += dias.count
                     salvarLocal()
                     carregarDiasLocais()
+                    if dias.count < limite { break }
                 }
+                diasSkip = skip
+                hasMoreDias = false
+                removerDiasSumidos(de: ciclo, mantendo: idsServidor)
             } catch {
-                await MainActor.run {
-                    guard !Task.isCancelled else { return }
-                    showError(error)
-                }
+                guard !Task.isCancelled else { return }
+                showError(error)
             }
         }
+        loadMoreDiasTask = tarefa
+        await tarefa.value
+    }
+
+    /// Com a lista completa do servidor, um dia já sincronizado que não veio
+    /// nela foi apagado lá: sai daqui também. Dias ou gastos com alteração
+    /// local pendente ficam, para o sync não perder nada.
+    private func removerDiasSumidos(de ciclo: CicloSoftex, mantendo ids: Set<Int>) {
+        let sumidos = (ciclo.dias ?? []).filter { dia in
+            guard let id = dia.backendId, dia.deletadoEm == nil, dia.syncStatus == .synced else { return false }
+            return !ids.contains(id) && dia.gastos.allSatisfy { $0.syncStatus == .synced }
+        }
+        guard !sumidos.isEmpty else { return }
+        for dia in sumidos { modelContext?.delete(dia) }
+        salvarLocal()
+        carregarDiasLocais()
     }
 
     /// Viagem mostrada no início: a que contém hoje, senão a próxima, senão a última encerrada.
@@ -406,8 +438,10 @@ final class CiclosViewModel: ObservableObject {
 
         // Recuperação defensiva: ciclos antigos/corrompidos podem ter perdido
         // seus dias. Se o ciclo tem um periodo valido, re-gera os dias localmente
-        // para o usuario nao ficar bloqueado.
-        if diasAtualizados.isEmpty, !atualCiclo.periodo.isEmpty {
+        // para o usuario nao ficar bloqueado. Só para ciclo nunca sincronizado:
+        // os dias de um ciclo com `backendId` vêm do servidor (`loadMoreDias`);
+        // recriá-los aqui geraria clientIds novos que subiriam como duplicatas.
+        if diasAtualizados.isEmpty, atualCiclo.backendId == nil, !atualCiclo.periodo.isEmpty {
             diasAtualizados = reconstruirDiasParaCicloAtual()
         }
 

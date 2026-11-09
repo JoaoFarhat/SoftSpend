@@ -105,6 +105,29 @@ struct ResumoViagemTests {
         gasto("10", em: dia(c, 23))
         let r0 = resumo(c, "23/07")
         #expect(r0.dias[0].proporcao == 0); #expect(r0.livreHoje == -10)
+        // Sem diária não há dia "estourado" (como em Todos os gastos).
+        #expect(!r0.dias[0].estourou); #expect(r0.diasEstourados == 0)
+    }
+    @Test func remocaoPendenteDoComprovanteContaComoSemComprovante() {
+        let c = ciclo(de: 23, ate: 23)
+        let g = gasto("10", em: dia(c, 23), comprovante: true)
+        g.comprovanteParaRemover = true
+        #expect(resumo(c, "23/07").semComprovante.count == 1)
+    }
+    /// Instalação nova: as viagens chegam sem dias locais; o início escolhe
+    /// pelo `periodo`, não pela primeira da lista.
+    @Test func cicloDoInicioUsaOPeriodoQuandoNaoHaDias() {
+        let antigo = ciclo(titulo: "Antigo", de: 1, ate: 5, mes: 6)
+        let semDias = CicloSoftex(valor_total: 600, gasto_total: 0, periodo: "20/07 - 25/07",
+                                  diaria: 100, titulo: "Cuiabá, MT", dias: [])
+        semDias.criadoEm = d("01/07")
+        ctx.insert(semDias)
+        let futuroSemDias = CicloSoftex(valor_total: 600, gasto_total: 0, periodo: "10/08 - 12/08",
+                                        diaria: 100, titulo: "Belém, PA", dias: [])
+        futuroSemDias.criadoEm = d("01/07")
+        ctx.insert(futuroSemDias)
+        #expect(cicloDoInicio([antigo, futuroSemDias, semDias], hoje: d("23/07"), calendario: cal) === semDias)
+        #expect(cicloDoInicio([antigo, futuroSemDias], hoje: d("23/07"), calendario: cal) === futuroSemDias)
     }
     @Test func diaFaltandoNoCicloViraDiaVazio() {
         let c = ciclo(de: 20, ate: 25)

@@ -11,7 +11,8 @@ struct DiaResumo: Identifiable {
     let futuro: Bool
 
     var passou: Decimal { max(0, gasto - diaria) }
-    var estourou: Bool { gasto > diaria }
+    /// Sem diária (0) não há estouro, como em `SecaoGastosDia`.
+    var estourou: Bool { diaria > 0 && gasto > diaria }
 
     /// gasto / diária, limitado a 0...1.25. Vale 0 quando a diária é zero.
     var proporcao: Double {
@@ -94,17 +95,35 @@ struct ResumoViagem {
         gastoTotal = lista.reduce(0) { $0 + $1.gasto }
         gastoHoje = lista.first(where: \.ehHoje)?.gasto ?? 0
         diasEstourados = lista.filter(\.estourou).count
-        semComprovante = porDia.keys.sorted().flatMap { porDia[$0] ?? [] }.filter {
-            $0.comprovanteUrl == nil && $0.comprovanteDataCriptografado == nil
-        }
+        // Mesma regra de Todos os gastos e Fechar viagem (remoção pendente conta).
+        semComprovante = porDia.keys.sorted().flatMap { porDia[$0] ?? [] }.filter { !temComprovanteValido($0) }
     }
+}
+
+/// Primeiro e último dia da viagem: pelos dias do ciclo; sem dias carregados,
+/// pelo `periodo` ("dd/MM - dd/MM"), no ano em que o ciclo foi criado.
+func intervaloViagem(_ ciclo: CicloSoftex, calendario: Calendar = .current) -> (ini: Date, fim: Date)? {
+    if let dias = intervalo(ciclo, calendario) { return dias }
+
+    let partes = ciclo.periodo.components(separatedBy: "-").map { $0.trimmingCharacters(in: .whitespaces) }
+    guard partes.count == 2 else { return nil }
+    let ano = calendario.component(.year, from: ciclo.criadoEm)
+    func data(_ texto: String, ano: Int) -> Date? {
+        let p = texto.split(separator: "/").compactMap { Int($0) }
+        guard p.count == 2 else { return nil }
+        return calendario.date(from: DateComponents(year: ano, month: p[1], day: p[0]))
+    }
+    guard let ini = data(partes[0], ano: ano), var fim = data(partes[1], ano: ano) else { return nil }
+    if fim < ini, let virada = data(partes[1], ano: ano + 1) { fim = virada }
+    return (ini, fim)
 }
 
 /// Ciclo que o início deve mostrar: o que contém hoje (em sobreposição, o de
 /// primeiro dia mais recente); senão o próximo futuro; senão o último encerrado.
+/// Ciclo ainda sem dias locais (instalação nova) conta pelo `periodo`.
 func cicloDoInicio(_ ciclos: [CicloSoftex], hoje: Date, calendario: Calendar = .current) -> CicloSoftex? {
     let h = calendario.startOfDay(for: hoje)
-    let comIntervalo = ciclos.compactMap { c in intervalo(c, calendario).map { (c, $0.ini, $0.fim) } }
+    let comIntervalo = ciclos.compactMap { c in intervaloViagem(c, calendario: calendario).map { (c, $0.ini, $0.fim) } }
 
     if let atual = comIntervalo.filter({ $0.1 <= h && h <= $0.2 }).max(by: { $0.1 < $1.1 }) {
         return atual.0
