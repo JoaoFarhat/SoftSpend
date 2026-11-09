@@ -83,7 +83,7 @@ struct OpenFinanceView: View {
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 52, height: 52)
-                .background(LinearGradient.appPurple)
+                .background(Tema.marca)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
 
             VStack(alignment: .leading, spacing: 4) {
@@ -110,7 +110,7 @@ struct OpenFinanceView: View {
         VStack(spacing: 14) {
             Image(systemName: "creditcard")
                 .font(.system(size: 42))
-                .foregroundStyle(Color.appPurple.opacity(0.6))
+                .foregroundStyle(Tema.marca.opacity(0.6))
             Text("Nenhuma fatura importada")
                 .font(.system(size: 18, weight: .bold))
             Text("Toque em sincronizar depois de linkar o cartão no Pluggy.")
@@ -125,7 +125,7 @@ struct OpenFinanceView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 12)
-                    .background(Color.appPurple)
+                    .background(Tema.marca)
                     .clipShape(Capsule())
             }
             .disabled(viewModel.isSyncing)
@@ -143,7 +143,7 @@ struct OpenFinanceView: View {
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
-                    .background(Color.appPurple)
+                    .background(Tema.marca)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -189,9 +189,9 @@ struct OpenFinanceView: View {
         HStack(spacing: 12) {
             Image(systemName: "doc.text")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Color.appPurple)
+                .foregroundStyle(Tema.marca)
                 .frame(width: 38, height: 38)
-                .background(Color.appPurple.opacity(0.12))
+                .background(Tema.marca.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
             VStack(alignment: .leading, spacing: 3) {
@@ -282,7 +282,7 @@ struct FaturaDetalheView: View {
             if let minimo = fatura.minimumPaymentAmount {
                 Text("Pagamento mínimo: \(minimo.formattedAsCurrency())")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.appPurple)
+                    .foregroundStyle(Tema.marca)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

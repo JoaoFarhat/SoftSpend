@@ -270,3 +270,15 @@ private func gastosValidos(_ ciclo: CicloSoftex?) -> [GastosDia] {
         .flatMap(\.gastos)
         .filter { $0.deletadoEm == nil }
 }
+
+/// Folha de compartilhamento do sistema, para o PDF do relatório.
+struct ActivityViewController: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    let applicationActivities: [UIActivity]? = nil
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: applicationActivities)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}

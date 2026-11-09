@@ -36,7 +36,7 @@ nonisolated enum OpenFinanceMatchStatus: String, Codable, Sendable {
         case .pendente: return Color("textSecondary")
         case .autoMatched: return .green
         case .review: return .orange
-        case .confirmed: return .appPurple
+        case .confirmed: return Tema.marca
         }
     }
 }
