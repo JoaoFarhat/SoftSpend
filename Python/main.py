@@ -40,6 +40,9 @@ async def lifespan(app: FastAPI):
 
 
 DOCS_ENABLED = os.getenv("DOCS_ENABLED", "false").lower() == "true"
+OPEN_FINANCE_ENABLED = (
+    os.getenv("OPEN_FINANCE_ENABLED", "false").lower() == "true"
+)
 
 app = FastAPI(
     lifespan=lifespan,
@@ -68,11 +71,17 @@ app.include_router(ciclo_router)
 app.include_router(dia_router)
 app.include_router(gasto_router)
 app.include_router(auth_router)
-app.include_router(open_finance_router)
+if OPEN_FINANCE_ENABLED:
+    app.include_router(open_finance_router)
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 setup_exception_handlers(app)
+
+
+@app.get("/api/features")
+def features():
+    return {"open_finance": OPEN_FINANCE_ENABLED}
 
 
 @app.get("/health", include_in_schema=False)

@@ -299,6 +299,7 @@ Open Finance com Pluggy (`services/open_finance_service.py`):
 
 | Variável | Default | Descrição |
 | --- | --- | --- |
+| `OPEN_FINANCE_ENABLED` | `false` | Com `false` as rotas `/api/open-finance/*`, `/api/connect-token` e `/api/webhooks/pluggy` não são registradas (404) e `GET /api/features` devolve `{"open_finance": false}`; nenhuma variável `PLUGGY_*` é necessária. Com `true` tudo funciona como antes |
 | `PLUGGY_CLIENT_ID` | — | Credencial da aplicação no Pluggy; sem ela `/api/connect-token` responde 503 |
 | `PLUGGY_CLIENT_SECRET` | — | Segredo da aplicação no Pluggy; somente no backend |
 | `PLUGGY_API_URL` | `https://api.pluggy.ai` | Base URL da API |
