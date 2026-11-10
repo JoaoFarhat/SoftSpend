@@ -9,7 +9,14 @@ import SwiftUI
 import SwiftData
 import Combine
 
-/// Raiz do app autenticado: `NavigationStack` com o início na base.
+/// Abas da barra de baixo. O redesenho tinha tirado a barra e deixado tudo no menu do avatar, e o
+/// usuário não achava as telas (decisão do usuário de 10/11: voltar com 3 abas).
+enum Aba: Hashable {
+    case inicio, viagens, gastos
+}
+
+/// Raiz do app autenticado: uma barra com 3 abas (Início, Viagens, Gastos), cada uma com a própria
+/// `NavigationStack`. O avatar do início fica só com o que é da conta (Perfil e ajustes, Sair).
 struct MainView: View {
     @EnvironmentObject var viewModel: CiclosViewModel
     @Environment(\.modelContext) private var modelContext
@@ -29,7 +36,9 @@ struct MainView: View {
     var caminhoInicial: [Rota] = []
     var lancamentoInicial: Lancamento? = nil
 
-    @State private var caminho: [Rota] = []
+    @State private var aba: Aba = .inicio
+    /// Pilha de cada aba: trocar de aba não perde onde o usuário estava na outra.
+    @State private var caminhos: [Aba: [Rota]] = [:]
     /// Relógio do início: atualizado na virada do dia e ao voltar para o app.
     @State private var agora: Date = .now
 
@@ -42,16 +51,30 @@ struct MainView: View {
     }
 
     var body: some View {
-        NavigationStack(path: $caminho) {
-            InicioView(hoje: hoje, origem: origem, usuario: usuarioAtual, menuInicial: menuInicial,
-                       lancamentoInicial: lancamentoInicial)
-                .navigationTitle("Início")
-                .toolbar(.hidden, for: .navigationBar)
-                .navigationDestination(for: Rota.self) { rota in
-                    DestinoRota(rota: rota, hoje: hoje, origem: origem, usuario: usuarioAtual)
-                }
+        TabView(selection: $aba) {
+            pilha(.inicio) {
+                InicioView(hoje: hoje, origem: origem, usuario: usuarioAtual, menuInicial: menuInicial,
+                           lancamentoInicial: lancamentoInicial)
+                    .navigationTitle("Início")
+                    .toolbar(.hidden, for: .navigationBar)
+            }
+            .tabItem { Label("Início", systemImage: "house") }
+            .tag(Aba.inicio)
+
+            pilha(.viagens) {
+                ViagensView(hoje: hoje, origem: origem)
+            }
+            .tabItem { Label("Viagens", systemImage: "suitcase") }
+            .tag(Aba.viagens)
+
+            pilha(.gastos) {
+                // Os gastos da viagem do início (a que o usuário está vendo), como o "Ver todos".
+                TodosGastosView(cicloId: viewModel.cicloInicioEm(hoje)?.id, filtro: .todos)
+            }
+            .tabItem { Label("Gastos", systemImage: "list.bullet") }
+            .tag(Aba.gastos)
         }
-        .environment(\.abrirRota) { caminho.append($0) }
+        .environment(\.abrirRota) { abrir($0) }
         .tint(Tema.marcaTexto)
         .task {
             guard sincronizar else { return }
@@ -59,7 +82,7 @@ struct MainView: View {
         }
         .onAppear {
             viewModel.modelContext = modelContext
-            if !caminhoInicial.isEmpty, caminho.isEmpty { caminho = caminhoInicial }
+            if !caminhoInicial.isEmpty, caminhos.isEmpty { abrirInicial(caminhoInicial) }
             guard sincronizar else { return }
             syncManager.configure(container: modelContext.container)
             syncManager.limparDadosMortos(context: modelContext)
@@ -74,6 +97,36 @@ struct MainView: View {
             if sincronizar, !isSyncing, syncManager.lastSyncError == nil {
                 viewModel.fetchCiclosResumo()
             }
+        }
+    }
+
+    /// Uma aba: a tela raiz numa `NavigationStack` com a pilha daquela aba.
+    private func pilha<Raiz: View>(_ aba: Aba, @ViewBuilder raiz: () -> Raiz) -> some View {
+        NavigationStack(path: Binding(get: { caminhos[aba] ?? [] }, set: { caminhos[aba] = $0 })) {
+            raiz()
+                .navigationDestination(for: Rota.self) { rota in
+                    DestinoRota(rota: rota, hoje: hoje, origem: origem, usuario: usuarioAtual)
+                }
+        }
+    }
+
+    /// "Viagens" é uma aba: troca de aba em vez de empilhar a mesma lista de novo. O resto empilha
+    /// na aba atual.
+    private func abrir(_ rota: Rota) {
+        if rota == .viagens {
+            aba = .viagens
+        } else {
+            caminhos[aba, default: []].append(rota)
+        }
+    }
+
+    /// Pilha de entrada do modo de demonstração: começando por Viagens, abre na aba Viagens.
+    private func abrirInicial(_ rotas: [Rota]) {
+        if rotas.first == .viagens {
+            aba = .viagens
+            caminhos[.viagens] = Array(rotas.dropFirst())
+        } else {
+            caminhos[.inicio] = rotas
         }
     }
 }

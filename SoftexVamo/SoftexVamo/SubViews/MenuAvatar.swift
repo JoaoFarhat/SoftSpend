@@ -37,7 +37,6 @@ struct AvatarIniciais: View {
 struct MenuAvatar: View {
     let usuario: UsuarioMenu
     /// Viagem que "Fechar viagem e PDF" abre; sem viagem o item some.
-    let cicloParaFechar: UUID?
     let aoEscolher: (Rota) -> Void
     let aoSair: () -> Void
 
@@ -49,14 +48,7 @@ struct MenuAvatar: View {
         VStack(spacing: 0) {
             cabecalho
             divisoria
-            item("Viagens", simbolo: "suitcase") { aoEscolher(.viagens) }
-            divisoria
-            item("Todos os gastos", simbolo: "list.bullet") { aoEscolher(.todosGastos(filtro: .todos)) }
-            if let cicloParaFechar {
-                divisoria
-                item("Fechar viagem e PDF", simbolo: "printer") { aoEscolher(.fecharViagem(cicloParaFechar)) }
-            }
-            divisoria
+            // Viagens e Gastos estão na barra de abas; Fechar viagem, no início e em Viagens (10/11).
             item("Perfil e ajustes", simbolo: "gearshape") { aoEscolher(.perfil) }
             #if DEBUG
             if !CommandLine.arguments.contains("-demo") {

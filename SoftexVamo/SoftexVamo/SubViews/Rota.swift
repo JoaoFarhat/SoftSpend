@@ -7,7 +7,7 @@ enum FiltroGastos: Hashable {
     case categoria(Categoria)
 }
 
-/// Destinos empilhados a partir do início (`.navigationDestination(for: Rota.self)` no `MainView`).
+/// Destinos empilhados em cada aba (`.navigationDestination(for: Rota.self)` no `MainView`).
 enum Rota: Hashable {
     case novaViagem
     case viagens
@@ -21,6 +21,6 @@ enum Rota: Hashable {
 }
 
 extension EnvironmentValues {
-    /// Empilha uma rota no `NavigationStack` do `MainView`.
+    /// Empilha uma rota na `NavigationStack` da aba atual do `MainView` (`.viagens` troca para a aba Viagens).
     @Entry var abrirRota: (Rota) -> Void = { _ in }
 }

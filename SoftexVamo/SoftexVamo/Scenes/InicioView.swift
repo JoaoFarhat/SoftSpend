@@ -36,7 +36,7 @@ struct InicioView: View {
             ZStack(alignment: .top) {
                 conteudo(ciclo: ciclo, resumo: resumo)
                 if menuAberto {
-                    menu(ciclo: ciclo)
+                    menu
                 }
             }
         }
@@ -83,14 +83,14 @@ struct InicioView: View {
 
     // MARK: Menu
 
-    private func menu(ciclo: CicloSoftex?) -> some View {
+    private var menu: some View {
         ZStack(alignment: .top) {
             Tema.fundo
                 .ignoresSafeArea()
                 .contentShape(Rectangle())
                 .onTapGesture { fecharMenu() }
                 .accessibilityHidden(true)
-            MenuAvatar(usuario: usuario, cicloParaFechar: ciclo?.id) { rota in
+            MenuAvatar(usuario: usuario) { rota in
                 fecharMenu()
                 abrirRota(rota)
             } aoSair: {
