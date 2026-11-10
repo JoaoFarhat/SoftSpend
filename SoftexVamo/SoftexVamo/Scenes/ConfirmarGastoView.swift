@@ -247,7 +247,8 @@ struct ConfirmarGastoView: View {
     }
 
     private var textoStatus: String {
-        if rascunho.lendo { return "Lendo o comprovante" }
+        // O consentimento aparece uma vez só; o aviso de para onde a foto vai fica em toda leitura (10/11).
+        if rascunho.lendo { return "Lendo o comprovante com o Google Gemini" }
         if rascunho.leuComprovante { return "Lido do comprovante. Confira." }
         if rascunho.editando { return "Editar gasto" }
         if rascunho.temComprovante { return "Comprovante anexado" }
