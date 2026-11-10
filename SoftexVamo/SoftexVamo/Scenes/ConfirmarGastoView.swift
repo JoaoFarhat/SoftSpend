@@ -143,6 +143,8 @@ struct ConfirmarGastoView: View {
     @FocusState private var foco: Campo?
     @State private var adicionandoComprovante = false
     @State private var opcoesComprovante = false
+    /// Foto anexada antes de o usuário responder sobre a leitura automática (tela 8 em folha).
+    @State private var fotoAguardandoConsentimento: ResultadoComprovante?
 
     @ScaledMetric(relativeTo: .largeTitle) private var tamanhoValor: CGFloat = 38
     @ScaledMetric(relativeTo: .body) private var larguraMiniatura: CGFloat = 52
@@ -183,12 +185,22 @@ struct ConfirmarGastoView: View {
                 .background(Tema.fundo)
         }
         .escolherComprovante(isPresented: $adicionandoComprovante) { resultado in
-            // Anexar depois não passa pela leitura, como antes.
-            switch resultado {
-            case .foto(let imagem): rascunho.receberImagem(imagem, ler: false)
-            case .arquivo(let url): rascunho.receberArquivo(url, ler: false)
-            case .semFoto: break
+            // Gasto novo (pelo "+"): a foto anexada aqui também é lida (10/11: só o caminho da
+            // câmera lia). Na edição, não: a leitura trocaria o que já foi salvo.
+            if case .semFoto = resultado { return }
+            if !rascunho.editando, Consentimento.leituraAutomatica == nil {
+                fotoAguardandoConsentimento = resultado
+            } else {
+                anexar(resultado)
             }
+        }
+        .sheet(isPresented: Binding(get: { fotoAguardandoConsentimento != nil },
+                                    set: { if !$0 { liberarFotoAguardando() } })) {
+            ConsentimentoLeituraView { permitiu in
+                Consentimento.leituraAutomatica = permitiu
+                liberarFotoAguardando()
+            }
+            .presentationBackground(Tema.fundo)
         }
         .confirmationDialog("Comprovante", isPresented: $opcoesComprovante, titleVisibility: .hidden) {
             Button("Trocar comprovante") { adicionandoComprovante = true }
@@ -298,6 +310,22 @@ struct ConfirmarGastoView: View {
 
     // MARK: Campos
 
+    private func anexar(_ resultado: ResultadoComprovante) {
+        let ler = !rascunho.editando
+        switch resultado {
+        case .foto(let imagem): rascunho.receberImagem(imagem, ler: ler)
+        case .arquivo(let url): rascunho.receberArquivo(url, ler: ler)
+        case .semFoto: break
+        }
+    }
+
+    /// Anexa a foto que esperava a resposta; se a folha fechou sem resposta, anexa sem ler.
+    private func liberarFotoAguardando() {
+        guard let foto = fotoAguardandoConsentimento else { return }
+        fotoAguardandoConsentimento = nil
+        anexar(foto)
+    }
+
     private func caixa<C: View>(_ rotulo: String, @ViewBuilder conteudo: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(rotulo)
@@ -339,10 +367,23 @@ struct ConfirmarGastoView: View {
                 }
             }
         } label: {
-            caixa("Data") {
-                Text(rascunho.dia.map { dataCurta($0.data) } ?? "Escolher")
+            HStack(spacing: Espaco.p) {
+                Text("Data")
+                    .foregroundStyle(Tema.textoFraco)
+                Spacer(minLength: Espaco.p)
+                Text(rascunho.dia.map { diaComSemana($0.data) } ?? "Escolher")
+                    .foregroundStyle(Tema.texto)
                     .monospacedDigit()
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Tema.textoFraco)
+                    .accessibilityHidden(true)
             }
+            .font(.body)
+            .padding(.horizontal, Espaco.g)
+            .padding(.vertical, Espaco.m)
+            .background(Tema.superficie, in: RoundedRectangle(cornerRadius: Raio.lista, style: .continuous))
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Data, \(rascunho.dia.map { diaPorExtenso($0.data) } ?? "não escolhida")")
