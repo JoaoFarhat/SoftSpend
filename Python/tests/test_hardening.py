@@ -86,6 +86,9 @@ def test_refresh_token_rotation_reuse_detection_and_logout(monkeypatch):
         "REFRESH_TOKEN_SECRET_KEY",
         "different-refresh-secret-with-at-least-32-characters",
     )
+    # Sem janela de tolerancia, a replica do token rotacionado e tratada
+    # como reuso na hora (o comportamento coberto por este teste).
+    monkeypatch.setenv("REFRESH_REUSE_GRACE_SECONDS", "0")
 
     sys.modules.pop("services.auth_service", None)
     auth_service = importlib.import_module("services.auth_service")
