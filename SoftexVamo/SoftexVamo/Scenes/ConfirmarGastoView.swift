@@ -108,7 +108,17 @@ func diaDeHoje(_ ciclo: CicloSoftex, hoje: Date) -> DiaSoftex? {
 }
 
 func diasValidos(_ ciclo: CicloSoftex) -> [DiaSoftex] {
-    (ciclo.dias ?? []).filter { $0.deletadoEm == nil }.sorted { $0.data < $1.data }
+    // Um dia por data: com duplicata antiga ainda no aparelho, fica o que já está no servidor
+    // (ou o que tem gastos), para o gasto não ir para a cópia (10/11).
+    let cal = Calendar.current
+    let vivos = (ciclo.dias ?? []).filter { $0.deletadoEm == nil }
+    let porData = Dictionary(grouping: vivos) { cal.startOfDay(for: $0.data) }
+    return porData.values.compactMap { mesmos in
+        mesmos.max { a, b in
+            ((a.backendId != nil ? 1 : 0), a.gastos.count) < ((b.backendId != nil ? 1 : 0), b.gastos.count)
+        }
+    }
+    .sorted { $0.data < $1.data }
 }
 
 /// "23/07", independente do idioma do aparelho.

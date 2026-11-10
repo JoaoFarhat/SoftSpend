@@ -201,7 +201,9 @@ struct NewCicloView: View {
                 erroSalvar = nil
             }
         )
-        return CampoFormulario(rotulo: total ? "Total da viagem" : "Diária", destacado: total) {
+        // A borda da marca acompanha o campo em edição (10/11: ficava presa no Total).
+        return CampoFormulario(rotulo: total ? "Total da viagem" : "Diária",
+                               destacado: foco == (total ? .total : .diaria)) {
             HStack(spacing: 6) {
                 Text("R$")
                 TextField("0,00", text: texto)
@@ -312,7 +314,7 @@ struct NewCicloView: View {
 }
 
 /// Campo agrupado da tela: rótulo pequeno sobre o valor, superfície sem borda;
-/// `destacado` desenha a borda da marca (o campo principal).
+/// `destacado` desenha a borda da marca (o campo em edição).
 private struct CampoFormulario<Conteudo: View>: View {
     let rotulo: String
     var destacado: Bool = false

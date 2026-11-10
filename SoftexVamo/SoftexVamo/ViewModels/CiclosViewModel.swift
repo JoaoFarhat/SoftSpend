@@ -512,21 +512,21 @@ final class CiclosViewModel: ObservableObject {
     }
     
     private func salvarOuAtualizarDiaLocal(_ dia: DiaSoftex, no ciclo: CicloSoftex) {
-        if let backendId = dia.backendId {
-            let descriptor = FetchDescriptor<DiaSoftex>(
-                predicate: #Predicate { $0.backendId == backendId }
-            )
-            if let existente = try? modelContext?.fetch(descriptor).first {
-                existente.data = dia.data
-                existente.saldo = dia.saldo
-                existente.ciclo = ciclo
-                for gasto in dia.gastos {
-                    salvarOuAtualizarGastoLocal(gasto, no: existente)
-                }
-                existente.syncStatus = .synced
-                existente.syncError = nil
-                return
+        // Casa pelo backendId e, sem ele, pelo clientId: um dia criado no iPhone que ainda não tinha
+        // recebido o backendId não era reconhecido e o do servidor entrava como outro dia (10/11:
+        // cada data aparecia duas vezes ao escolher a data do gasto).
+        if let existente = diaLocal(backendId: dia.backendId) ?? diaLocal(clientId: dia.clientId) {
+            existente.backendId = dia.backendId ?? existente.backendId
+            existente.data = dia.data
+            existente.saldo = dia.saldo
+            existente.ciclo = ciclo
+            for gasto in dia.gastos {
+                salvarOuAtualizarGastoLocal(gasto, no: existente)
             }
+            existente.syncStatus = .synced
+            existente.syncError = nil
+            absorverDuplicatas(de: existente)
+            return
         }
         dia.syncStatus = .synced
         dia.syncError = nil
@@ -534,6 +534,34 @@ final class CiclosViewModel: ObservableObject {
         modelContext?.insert(dia)
         for gasto in dia.gastos {
             salvarOuAtualizarGastoLocal(gasto, no: dia)
+        }
+    }
+
+    private func diaLocal(backendId: Int?) -> DiaSoftex? {
+        guard let backendId else { return nil }
+        let descriptor = FetchDescriptor<DiaSoftex>(predicate: #Predicate { $0.backendId == backendId })
+        return try? modelContext?.fetch(descriptor).first
+    }
+
+    private func diaLocal(clientId: String) -> DiaSoftex? {
+        let descriptor = FetchDescriptor<DiaSoftex>(
+            predicate: #Predicate { $0.clientId == clientId && $0.deletadoEm == nil }
+        )
+        return try? modelContext?.fetch(descriptor).first
+    }
+
+    /// Duplicatas que já ficaram no aparelho (mesmo clientId, outro registro): os gastos delas
+    /// passam para o dia que ficou e elas saem. Roda a cada carga dos dias do servidor.
+    private func absorverDuplicatas(de dia: DiaSoftex) {
+        let clientId = dia.clientId
+        let id = dia.id
+        let descriptor = FetchDescriptor<DiaSoftex>(
+            predicate: #Predicate { $0.clientId == clientId && $0.id != id }
+        )
+        guard let outros = try? modelContext?.fetch(descriptor), !outros.isEmpty else { return }
+        for outro in outros {
+            for gasto in Array(outro.gastos) { gasto.dia = dia }
+            modelContext?.delete(outro)
         }
     }
 

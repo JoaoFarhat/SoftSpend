@@ -37,6 +37,29 @@ struct CiclosViewModelTests {
         #expect(dia.saldo == dec("-150.00"))
     }
 
+    /// 10/11: com a cópia do dia que veio do servidor ainda no aparelho, a lista de datas do gasto
+    /// mostrava cada dia duas vezes. Fica um por data: o que já está no servidor.
+    @Test func listaDeDatasNaoRepeteODia() {
+        let ciclo = CicloSoftex(valor_total: 900, gasto_total: 0, periodo: "", diaria: 450, titulo: "Cuiabá, MT", dias: [])
+        ctx.insert(ciclo)
+        let hoje = Calendar.current.startOfDay(for: .now)
+        let amanha = Calendar.current.date(byAdding: .day, value: 1, to: hoje)!
+        let local = DiaSoftex(data: hoje, saldo: 450)
+        let doServidor = DiaSoftex(data: hoje, saldo: 450)
+        doServidor.backendId = 7
+        let outroDia = DiaSoftex(data: amanha, saldo: 450)
+        for dia in [local, doServidor, outroDia] {
+            ctx.insert(dia)
+            dia.ciclo = ciclo
+        }
+
+        let dias = diasValidos(ciclo)
+
+        #expect(dias.count == 2)
+        #expect(dias.first?.backendId == 7)
+        #expect(dias.last?.data == amanha)
+    }
+
     // MARK: Carregamento dos dias da viagem
 
     func viagem(periodo: String = "20/07 - 25/07", backendId: Int?) -> CicloSoftex {
