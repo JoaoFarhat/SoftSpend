@@ -69,7 +69,6 @@ serializado no MainActor, congelando a UI durante a sincronização.
 ### Componentes
 
 - `CiclosViewModel` — operações de ciclo/dia/gasto com persistência local.
-- `GastosViewModel` — filtro e estado da tela de gastos.
 - `SyncManager` — sincronização sob demanda com backoff exponencial.
 
 ### Relacionamentos SwiftData
@@ -174,10 +173,10 @@ estas regras ao modificar o código:
    o `body` muta o modelo, o SwiftUI detecta a mudança → re-renderiza → chama a
    computed property de novo → muta de novo → crash/freeze.
 
-   **Caso concreto**: `GastosViewModel.secoesExibidas` fazia
+   **Caso concreto** (visual antigo, já removido): um ViewModel fazia
    `diaFiltrado.gastos = gastosQueBatem` (mutava o `@Model` durante o body).
-   Corrigido com `DiaComGastosFiltrados`, um struct imutável que envolve o
-   dia e os gastos filtrados sem mutar o modelo.
+   Foi corrigido com um struct imutável que envolvia o dia e os gastos
+   filtrados sem mutar o modelo.
 
    **Regra**: computed properties de ViewModel chamadas em `body` nunca devem
    mutar `@Model`. Se precisar de dados filtrados, retorne um struct value type.
@@ -204,9 +203,8 @@ estas regras ao modificar o código:
 5. **Delete de gastos via context menu (long press).**
    Os gastos estão em `ScrollView` + `VStack` (não em `List`), então
    `.swipeActions` não funciona. O delete é feito via `.contextMenu` na célula
-   do gasto em `CicloGastosView`, que chama `deleteAction` →
-   `CiclosViewModel.deleteGasto(gastoID: UUID)` (soft delete + sync). O
-   `GastosViewModel.deleteGasto(dia:offsets:)` era código morto e foi removido.
+   do gasto em `InicioView` (e pelo botão de apagar em `DetalheGastoView`),
+   que chama `CiclosViewModel.deleteGasto(gastoID: UUID)` (soft delete + sync).
 
 ## Bancos de dados
 
@@ -336,9 +334,10 @@ o detalhe em `open_finance_match`.
 No iOS, `CartaoOpenFinance`, `FaturaCartao` e `TransacaoCartao` são models
 SwiftData somente de leitura cacheados por `backendId`. `OpenFinanceViewModel`
 faz upsert a partir dos DTOs, apaga registros que sumiram no backend e
-reaplica os matches em `GastosDia`. A tela `OpenFinanceView` (menu → "Cartão
-corporativo") lista cartões e faturas; `FaturaDetalheView` permite confirmar
-ou remover um vínculo em revisão.
+reaplica os matches em `GastosDia`. A tela `OpenFinanceView` (hoje fora da
+navegação do visual novo: volta quando o Open Finance estiver ligado, sem "em breve")
+lista cartões, faturas e todas as transações do cartão; `FaturaDetalheView` e
+`CartaoTransacoesView` permitem confirmar ou remover um vínculo em revisão.
 
 | Variável | Default | Descrição |
 | --- | --- | --- |
@@ -419,8 +418,8 @@ gasto), o que evita objetos órfãos no bucket. Fluxos suportados no app:
 
 A nota arquivada mantém a **resolução original** (só é convertida para JPEG, e a
 qualidade cai apenas se passar de 9MB); a redução para 1280px existe só para a
-requisição do OCR. Ver `codificarNotaFiscal` e `comprimirParaOCR` em
-`AddNewGastoSheetView.swift`.
+requisição do OCR. Ver `NotaFiscal.codificar` e `NotaFiscal.comprimirParaOCR` em
+`Services/LancamentoGasto.swift`.
 
 A limpeza do bucket fica em `services/comprovante_cleanup.py`, via listeners do
 SQLAlchemy registrados no import feito pelo `main.py`. O `after_delete` anota as

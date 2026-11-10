@@ -83,7 +83,7 @@ struct OpenFinanceView: View {
                 .font(.system(size: 24, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 52, height: 52)
-                .background(LinearGradient.appPurple)
+                .background(Tema.marca)
                 .clipShape(RoundedRectangle(cornerRadius: 16))
 
             VStack(alignment: .leading, spacing: 4) {
@@ -110,7 +110,7 @@ struct OpenFinanceView: View {
         VStack(spacing: 14) {
             Image(systemName: "creditcard")
                 .font(.system(size: 42))
-                .foregroundStyle(Color.appPurple.opacity(0.6))
+                .foregroundStyle(Tema.marca.opacity(0.6))
             Text("Nenhuma fatura importada")
                 .font(.system(size: 18, weight: .bold))
             Text("Toque em sincronizar depois de linkar o cartão no Pluggy.")
@@ -125,7 +125,7 @@ struct OpenFinanceView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, 18)
                     .padding(.vertical, 12)
-                    .background(Color.appPurple)
+                    .background(Tema.marca)
                     .clipShape(Capsule())
             }
             .disabled(viewModel.isSyncing)
@@ -143,7 +143,7 @@ struct OpenFinanceView: View {
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
-                    .background(Color.appPurple)
+                    .background(Tema.marca)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
 
                 VStack(alignment: .leading, spacing: 4) {
@@ -175,6 +175,45 @@ struct OpenFinanceView: View {
                     .buttonStyle(.plain)
                 }
             }
+
+            if !cartao.transacoes.isEmpty {
+                NavigationLink {
+                    CartaoTransacoesView(cartao: cartao)
+                        .environmentObject(viewModel)
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "list.bullet.rectangle")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Tema.marca)
+                            .frame(width: 38, height: 38)
+                            .background(Tema.marca.opacity(0.12))
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Todas as transações")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(Color("textPrimary"))
+                            Text("Inclui transações que o banco não associou a uma fatura.")
+                                .font(.system(size: 11))
+                                .foregroundStyle(Color("textSecondary"))
+                        }
+
+                        Spacer()
+
+                        Text("\(cartao.transacoes.count)")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Color("textSecondary"))
+
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundStyle(Color("textSecondary"))
+                    }
+                    .padding(12)
+                    .background(Color("cinza").opacity(0.65))
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .buttonStyle(.plain)
+            }
         }
         .padding(16)
         .background(Color("cardBackground"))
@@ -189,9 +228,9 @@ struct OpenFinanceView: View {
         HStack(spacing: 12) {
             Image(systemName: "doc.text")
                 .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(Color.appPurple)
+                .foregroundStyle(Tema.marca)
                 .frame(width: 38, height: 38)
-                .background(Color.appPurple.opacity(0.12))
+                .background(Tema.marca.opacity(0.12))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
             VStack(alignment: .leading, spacing: 3) {
@@ -247,7 +286,7 @@ struct FaturaDetalheView: View {
                 } else {
                     VStack(spacing: 0) {
                         ForEach(Array(transacoesOrdenadas.enumerated()), id: \.element.backendId) { index, transacao in
-                            transacaoRow(transacao)
+                            TransacaoCartaoRow(transacao: transacao)
 
                             if index < transacoesOrdenadas.count - 1 {
                                 Divider()
@@ -282,7 +321,7 @@ struct FaturaDetalheView: View {
             if let minimo = fatura.minimumPaymentAmount {
                 Text("Pagamento mínimo: \(minimo.formattedAsCurrency())")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Color.appPurple)
+                    .foregroundStyle(Tema.marca)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -291,7 +330,68 @@ struct FaturaDetalheView: View {
         .clipShape(RoundedRectangle(cornerRadius: 20))
     }
 
-    private func transacaoRow(_ transacao: TransacaoCartao) -> some View {
+}
+
+struct CartaoTransacoesView: View {
+    let cartao: CartaoOpenFinance
+
+    private var transacoesOrdenadas: [TransacaoCartao] {
+        cartao.transacoes.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(cartao.titulo)
+                        .font(.system(size: 24, weight: .heavy))
+                        .foregroundStyle(Color("textPrimary"))
+                    Text("\(transacoesOrdenadas.count) transação(ões) importada(s)")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color("textSecondary"))
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(18)
+                .background(Color("cardBackground"))
+                .clipShape(RoundedRectangle(cornerRadius: 20))
+
+                if transacoesOrdenadas.isEmpty {
+                    Text("Nenhuma transação importada para este cartão.")
+                        .font(.system(size: 13))
+                        .foregroundStyle(Color("textSecondary"))
+                        .frame(maxWidth: .infinity)
+                        .padding(24)
+                        .background(Color("cardBackground"))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(Array(transacoesOrdenadas.enumerated()), id: \.element.backendId) { index, transacao in
+                            TransacaoCartaoRow(transacao: transacao)
+
+                            if index < transacoesOrdenadas.count - 1 {
+                                Divider()
+                                    .padding(.leading, 62)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 6)
+                    .background(Color("cardBackground"))
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                }
+            }
+            .padding(16)
+        }
+        .background(Color("surfaceBackground"))
+        .navigationTitle("Transações")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+struct TransacaoCartaoRow: View {
+    @EnvironmentObject private var viewModel: OpenFinanceViewModel
+    let transacao: TransacaoCartao
+
+    var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: transacao.matchStatus?.icon ?? "creditcard")

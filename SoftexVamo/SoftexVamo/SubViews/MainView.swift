@@ -1,5 +1,5 @@
 //
-//  TabView.swift
+//  MainView.swift
 //  SoftexVamo
 //
 //  Created by Joao Victor on 06/04/26.
@@ -7,128 +7,285 @@
 
 import SwiftUI
 import SwiftData
+import UIKit
+import Combine
 
+/// Abas da barra de baixo. O redesenho tinha tirado a barra e deixado tudo no menu do avatar, e o
+/// usuário não achava as telas (decisão do usuário de 10/11: voltar com 3 abas).
+enum Aba: Hashable, CaseIterable {
+    case inicio, viagens, gastos
+
+    var titulo: String {
+        switch self {
+        case .inicio: "Início"
+        case .viagens: "Viagens"
+        case .gastos: "Gastos"
+        }
+    }
+
+    var simbolo: String {
+        switch self {
+        case .inicio: "house"
+        case .viagens: "suitcase"
+        case .gastos: "list.bullet"
+        }
+    }
+}
+
+/// Raiz do app autenticado: uma barra com 3 abas (Início, Viagens, Gastos), cada uma com a própria
+/// `NavigationStack`. O avatar do início fica só com o que é da conta (Perfil e ajustes, Sair).
+/// A barra é desenhada à mão, igual à do Safeel (pedido do usuário de 10/11): ícone, nome em negrito
+/// na aba ativa e um traço embaixo dela.
 struct MainView: View {
-    
     @EnvironmentObject var viewModel: CiclosViewModel
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var syncManager = SyncManager.shared
-    @State var sheetview = false
-    @State private var isExpanded = true
+    @ObservedObject private var authService = AuthService.shared
 
-    
-    // Basta o ciclo ter dias locais: gastos criados offline sobem depois,
-    // pelo SyncActor, quando o dia pai receber backendId.
-    var canAddGasto: Bool {
-        !(viewModel.atualCiclo.dias?.isEmpty ?? true)
+    /// "Hoje" fixo (modo de demonstração, DEBUG). `nil` = data atual, que
+    /// acompanha a virada do dia e a volta do app para o primeiro plano.
+    var hojeFixo: Date? = nil
+    /// Desligado só no modo de demonstração, que não tem usuário nem rede.
+    var sincronizar: Bool = true
+    var origem: String? = nil
+    var usuario: UsuarioMenu? = nil
+    var menuInicial: Bool = false
+    /// Pilha e lançamento abertos ao entrar (modo de demonstração, DEBUG).
+    var caminhoInicial: [Rota] = []
+    var lancamentoInicial: Lancamento? = nil
+
+    @State private var aba: Aba = .inicio
+    /// Abas já abertas ficam vivas (escondidas), preservando a pilha e a rolagem de cada uma.
+    @State private var visitadas: Set<Aba> = [.inicio]
+    /// Teclado na tela: a barra sai (10/11, no iPhone ela subia junto com o teclado e o "OK" do
+    /// teclado numérico ficava por cima dela).
+    @State private var tecladoAberto = false
+
+    /// A barra some com o teclado aberto e na Nova viagem, que é um formulário com o próprio "Cancelar".
+    private var mostrarBarra: Bool {
+        !tecladoAberto && caminhos[aba]?.last != .novaViagem
     }
-    
-    var body: some View {
-        NavigationStack {
-            ZStack(alignment: .bottom) {
-            Group {
-                if viewModel.selectedTab == 0 {
-                    CiclosListView()
-                } else {
-                    HistoricoView()
-                }
-            }
-            .environmentObject(viewModel)
-            
-            HStack {
-                Button(action: {
-                    viewModel.selectedTab = 0
-                }) {
-                    VStack(spacing: 4) {
-                        Image(systemName: viewModel.selectedTab == 0 ? "house.fill" : "house")
-                            .font(.system(size: 22))
-                        Text("Início")
-                            .font(.system(size: 12, weight: .semibold))
-                    }
-                    .foregroundColor(viewModel.selectedTab == 0 ? .appPurple : .gray)
-                }
-                .frame(maxWidth: .infinity)
-                
-                Button(action: {
-                    if canAddGasto {
-                        sheetview.toggle()
-                    }
-                }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "plus.circle")
-                            .font(.system(size: 30, weight: .light))
-                            .foregroundColor(.white)
-                        if isExpanded {
-                            Text("Adicionar gasto")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(.white)
-                                .transition(.opacity)
-                        }
-                    }
-                    .padding(.horizontal, isExpanded ? 20 : 17)
-                    .frame(height: 64)
-                    .fixedSize()
-                    .background(
-                        Capsule()
-                            .fill(canAddGasto ? .appPurple : Color.gray.opacity(0.5))
-                            .shadow(color: (canAddGasto ? Color.appPurple : Color.gray).opacity(0.4), radius: 10, x: 0, y: 5)
-                    )
-                }
-                .zIndex(1)
-                .disabled(!canAddGasto)
-                .fullScreenCover(isPresented: $sheetview){
-                    AddNewGastoSheetView(dias: viewModel.atualCiclo.dias ?? [])
-                        .environmentObject(viewModel)
-                }
-                .offset(y: -24)
-                .onAppear {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                        withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
-                            isExpanded = false
-                        }
-                    }
-                }
+    /// Pilha de cada aba: trocar de aba não perde onde o usuário estava na outra.
+    @State private var caminhos: [Aba: [Rota]] = [:]
+    /// Relógio do início: atualizado na virada do dia e ao voltar para o app.
+    @State private var agora: Date = .now
 
-                
-                
-                Button(action: {
-                    viewModel.selectedTab = 1
-                }) {
-                    VStack(spacing: 4) {
-                        Image(systemName: "clock")
-                            .font(.system(size: 22))
-                        Text("Histórico")
-                            .font(.system(size: 12, weight: .semibold))
-                    }
-                    .foregroundColor(viewModel.selectedTab == 1 ? .appPurple : .gray)
+    private var hoje: Date { hojeFixo ?? agora }
+
+    private var usuarioAtual: UsuarioMenu {
+        if let usuario { return usuario }
+        let u = authService.currentUser
+        return UsuarioMenu(nome: u?.nome ?? "", email: u?.email ?? "")
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                ForEach(Aba.allCases.filter(visitadas.contains), id: \.self) { item in
+                    let ativa = item == aba
+                    conteudo(item)
+                        .opacity(ativa ? 1 : 0)
+                        .allowsHitTesting(ativa)
+                        .accessibilityHidden(!ativa)
                 }
-                .frame(maxWidth: .infinity)
             }
-            .padding(.top, 12)
-            .padding(.bottom, 24)
-            .background(Color("surfaceBackground"))
-            .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: -5)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if mostrarBarra {
+                Divider()
+
+                HStack(spacing: 0) {
+                    ForEach(Aba.allCases, id: \.self) { item in
+                        BotaoAba(aba: item, selecionada: item == aba) { selecionar(item) }
+                    }
+                }
+                .padding(.horizontal, Espaco.p)
+                .padding(.top, Espaco.p)
+                .background {
+                    Tema.superficie.ignoresSafeArea(edges: .bottom)
+                }
+            }
         }
-        .ignoresSafeArea(.all, edges: .bottom)
-        .toolbar(.hidden, for: .navigationBar)
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            tecladoAberto = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            tecladoAberto = false
+        }
+        .environment(\.abrirRota) { abrir($0) }
+        .tint(Tema.marcaTexto)
+        .task {
+            guard sincronizar else { return }
+            viewModel.fetchCiclosResumo()
+        }
         .onAppear {
             viewModel.modelContext = modelContext
+            if !caminhoInicial.isEmpty, caminhos.isEmpty { abrirInicial(caminhoInicial) }
+            guard sincronizar else { return }
             syncManager.configure(container: modelContext.container)
             syncManager.limparDadosMortos(context: modelContext)
         }
+        .onChange(of: scenePhase) { _, fase in
+            if fase == .active { agora = .now }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged).receive(on: RunLoop.main)) { _ in
+            agora = .now
+        }
         .onChange(of: syncManager.isSyncing) { _, isSyncing in
-            if !isSyncing, syncManager.lastSyncError == nil {
+            if sincronizar, !isSyncing, syncManager.lastSyncError == nil {
                 viewModel.fetchCiclosResumo()
             }
         }
-        .refreshable {
-            await syncManager.sync(forcar: true)
+    }
+
+    @ViewBuilder
+    private func conteudo(_ item: Aba) -> some View {
+        switch item {
+        case .inicio:
+            pilha(.inicio) {
+                InicioView(hoje: hoje, origem: origem, usuario: usuarioAtual, menuInicial: menuInicial,
+                           lancamentoInicial: lancamentoInicial)
+                    .navigationTitle("Início")
+                    .toolbar(.hidden, for: .navigationBar)
+            }
+        case .viagens:
+            pilha(.viagens) {
+                ViagensView(hoje: hoje, origem: origem)
+            }
+        case .gastos:
+            pilha(.gastos) {
+                // Os gastos da viagem do início (a que o usuário está vendo), como o "Ver todos".
+                TodosGastosView(cicloId: viewModel.cicloInicioEm(hoje)?.id, filtro: .todos, raiz: true)
+            }
+        }
+    }
+
+    /// Toque numa aba: abre a aba; tocar de novo na aba aberta volta para a raiz dela.
+    private func selecionar(_ item: Aba) {
+        if item == aba {
+            caminhos[item] = []
+        } else {
+            aba = item
+            visitadas.insert(item)
+        }
+    }
+
+    /// Uma aba: a tela raiz numa `NavigationStack` com a pilha daquela aba.
+    private func pilha<Raiz: View>(_ aba: Aba, @ViewBuilder raiz: () -> Raiz) -> some View {
+        NavigationStack(path: Binding(get: { caminhos[aba] ?? [] }, set: { caminhos[aba] = $0 })) {
+            raiz()
+                .navigationDestination(for: Rota.self) { rota in
+                    DestinoRota(rota: rota, hoje: hoje, origem: origem, usuario: usuarioAtual)
+                }
+        }
+    }
+
+    /// "Viagens" é uma aba: troca de aba em vez de empilhar a mesma lista de novo. O resto empilha
+    /// na aba atual.
+    private func abrir(_ rota: Rota) {
+        if rota == .viagens {
+            selecionar(.viagens)
+        } else {
+            caminhos[aba, default: []].append(rota)
+        }
+    }
+
+    /// Pilha de entrada do modo de demonstração: começando por Viagens, abre na aba Viagens.
+    private func abrirInicial(_ rotas: [Rota]) {
+        if rotas.first == .viagens {
+            selecionar(.viagens)
+            caminhos[.viagens] = Array(rotas.dropFirst())
+        } else {
+            caminhos[.inicio] = rotas
         }
     }
 }
+
+/// Botão da barra de abas, no desenho do Safeel: ícone, nome (negrito quando ativa) e um traço
+/// embaixo da aba ativa.
+private struct BotaoAba: View {
+    let aba: Aba
+    let selecionada: Bool
+    let acao: () -> Void
+
+    var body: some View {
+        Button(action: acao) {
+            VStack(spacing: 2) {
+                Image(systemName: aba.simbolo)
+                    .font(.body)
+                Text(aba.titulo)
+                    .font(.caption2)
+                    .fontWeight(selecionada ? .bold : .regular)
+                Capsule()
+                    .fill(selecionada ? Tema.texto : .clear)
+                    .frame(width: 24, height: 3)
+            }
+            .foregroundStyle(selecionada ? Tema.texto : Tema.textoFraco)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(aba.titulo)
+        .accessibilityAddTraits(selecionada ? [.isButton, .isSelected] : .isButton)
+    }
+}
+
+/// Tela de cada rota.
+private struct DestinoRota: View {
+    let rota: Rota
+    let hoje: Date
+    let origem: String?
+    let usuario: UsuarioMenu
+
+    @EnvironmentObject var viewModel: CiclosViewModel
+    @Environment(\.formularioNovaViagem) private var formularioNovaViagem
+
+    var body: some View {
+        switch rota {
+        case .novaViagem:
+            // A tela tem o próprio "Cancelar"; esconde a barra do sistema.
+            NewCicloView(formulario: formularioNovaViagem)
+                .toolbar(.hidden, for: .navigationBar)
+        case .viagens:
+            ViagensView(hoje: hoje, origem: origem)
+        case .viagem(let id):
+            // Os gastos da viagem aberta, sem trocar o ciclo do início.
+            DetalheViagemView(cicloId: id, hoje: hoje)
+        case .todosGastos(let filtro, let cicloId):
+            // Sem viagem indicada, a do início (a que o usuário está vendo).
+            TodosGastosView(cicloId: cicloId ?? viewModel.cicloInicioEm(hoje)?.id, filtro: filtro)
+        case .detalheGasto(let id):
+            DetalheGastoView(gastoId: id, hoje: hoje)
+        case .fecharViagem(let id):
+            FecharViagemView(cicloId: id, hoje: hoje)
+        case .perfil:
+            PerfilView(usuario: usuario)
+        }
+    }
+}
+
+extension CiclosViewModel {
+    /// Como `cicloInicio`, com o "hoje" injetável.
+    func cicloInicioEm(_ hoje: Date) -> CicloSoftex? {
+        cicloDoInicio(allCiclos, hoje: hoje)
+    }
+
+    /// As ações de gasto do ViewModel trabalham sobre `atualCiclo`; antes de
+    /// lançar, editar ou exportar a partir de outra tela, aponta para o ciclo certo.
+    func garantirAtual(_ ciclo: CicloSoftex) {
+        if atualCiclo.id != ciclo.id {
+            abrirViagem(ciclo)
+        }
+    }
+
+    func ciclo(id: UUID?) -> CicloSoftex? {
+        guard let id else { return nil }
+        return allCiclos.first { $0.id == id }
+    }
 }
 
 #Preview {
-        MainView()
-            .environmentObject(CiclosViewModel())
+    MainView()
+        .environmentObject(CiclosViewModel())
 }
