@@ -30,8 +30,9 @@ cd Python && SECRET_KEY="..." REFRESH_TOKEN_SECRET_KEY="..." python3 -c "import 
 
 O app usa **SwiftData** como banco local (`CicloSoftex`, `DiaSoftex`, `GastosDia`, `UserModel`).
 
-- O `ModelContainer` é registrado no `SoftexVamoApp.swift` via
-  `.modelContainer(for:)`. O erro cosmético `Failed to create file; code = 2`
+- O `ModelContainer` é criado em `SoftexVamoApp.createModelContainer()` com o
+  schema versionado (ver "Schema versionado e quarentena" abaixo) e registrado
+  via `.modelContainer(_:)`. O erro cosmético `Failed to create file; code = 2`
   do Core Data na primeira execução é esperado — o recovery automático cria o
   diretório e abre o store com sucesso.
 - O `ModelContext` é acessado pelas views via `@Environment(\.modelContext)` e
@@ -41,6 +42,24 @@ O app usa **SwiftData** como banco local (`CicloSoftex`, `DiaSoftex`, `GastosDia
 - Cada model tem `syncStatus` (`pending`, `syncing`, `synced`, `failed`),
   `syncError`, `tentativas` e `proximaTentativaEm` para backoff.
 - Deduplicação é feita pelo `clientId`, gerado no app e enviado nas requisições.
+
+### Schema versionado e quarentena do banco local
+
+Spec completa: `docs/migracao-banco-local-ios.md`.
+
+- `Models/SoftSpendSchema.swift` define `SoftSpendSchemaV1` (`VersionedSchema`,
+  versão 1.0.0) e `SoftSpendMigrationPlan` (`schemas = [V1]`, `stages = []`),
+  ambos `nonisolated`.
+- O V1 aponta para as 7 classes vivas e é **exatamente** o schema que a `main`
+  já gravava sem versão. Por isso **qualquer mudança em um `@Model` exige,
+  antes, congelar o V1** em cópias aninhadas e criar o V2 (seção 5 da spec).
+- O store continua com o nome `"softspend"` e o arquivo `softspend_v1.sqlite`
+  (renomear deixaria os dados atuais órfãos).
+- Não existe mais fallback destrutivo. Se o container não abrir, o erro é logado
+  completo (com `userInfo`) e `.sqlite`, `-wal` e `-shm` são **movidos** para
+  `Application Support/softspend-backup-<yyyyMMdd-HHmmss>/`; depois um banco
+  novo é criado. Nunca `removeItem`. Abertura normal não loga "backup" nem
+  "quarentena".
 
 ### Isolamento de actor (Swift 6 / `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`)
 
