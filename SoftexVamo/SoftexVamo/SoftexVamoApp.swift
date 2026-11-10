@@ -50,6 +50,8 @@ struct SoftexVamoApp: App {
                 #endif
             }
             .preferredColorScheme(tema.esquema)
+            // Toque fora de um campo fecha o teclado, no app inteiro (no lugar do botão "OK", 10/11).
+            .task { FecharTeclado.shared.instalar() }
             .onChange(of: tema, initial: true) { _, novo in
                 // `preferredColorScheme(nil)` nem sempre desfaz um tema forçado
                 // antes; a janela segue a escolha (Automático = do iPhone).

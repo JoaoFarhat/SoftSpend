@@ -173,12 +173,6 @@ struct ConfirmarGastoView: View {
                 .padding(.vertical, Espaco.p)
                 .background(Tema.fundo)
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("OK") { foco = nil }
-            }
-        }
         .escolherComprovante(isPresented: $adicionandoComprovante) { resultado in
             // Anexar depois não passa pela leitura, como antes.
             switch resultado {

@@ -90,13 +90,6 @@ struct NewCicloView: View {
                 .background(Tema.fundo.ignoresSafeArea())
         }
         .background(Tema.fundo.ignoresSafeArea())
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("OK") { foco = nil }
-                    .fontWeight(.semibold)
-            }
-        }
         .onChange(of: foco) { anterior, _ in
             if anterior == .total || anterior == .diaria { form.formatarCampos() }
         }
