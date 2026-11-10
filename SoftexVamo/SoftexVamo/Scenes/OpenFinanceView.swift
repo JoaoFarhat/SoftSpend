@@ -184,9 +184,9 @@ struct OpenFinanceView: View {
                     HStack(spacing: 12) {
                         Image(systemName: "list.bullet.rectangle")
                             .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.appPurple)
+                            .foregroundStyle(Tema.marca)
                             .frame(width: 38, height: 38)
-                            .background(Color.appPurple.opacity(0.12))
+                            .background(Tema.marca.opacity(0.12))
                             .clipShape(RoundedRectangle(cornerRadius: 12))
 
                         VStack(alignment: .leading, spacing: 3) {
