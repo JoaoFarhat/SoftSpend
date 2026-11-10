@@ -162,10 +162,9 @@ struct ConfirmarGastoView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     campoDescricao
-                    HStack(spacing: Espaco.p + 2) {
-                        campoData
-                        campoHora
-                    }
+                    // Sem campo de hora: o servidor não guarda hora do gasto, e a da tela era só a hora
+                    // em que o lançamento abriu (decisão do usuário de 10/11).
+                    campoData
                     categorias
                     faixaSobra
                 }
@@ -347,14 +346,6 @@ struct ConfirmarGastoView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Data, \(rascunho.dia.map { diaPorExtenso($0.data) } ?? "não escolhida")")
-    }
-
-    private var campoHora: some View {
-        caixa("Hora") {
-            Text(horaCurta(rascunho.criadoEm))
-                .monospacedDigit()
-        }
-        .accessibilityElement(children: .combine)
     }
 
     /// "Quarta, 23/07".
