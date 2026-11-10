@@ -11,12 +11,30 @@ import Combine
 
 /// Abas da barra de baixo. O redesenho tinha tirado a barra e deixado tudo no menu do avatar, e o
 /// usuário não achava as telas (decisão do usuário de 10/11: voltar com 3 abas).
-enum Aba: Hashable {
+enum Aba: Hashable, CaseIterable {
     case inicio, viagens, gastos
+
+    var titulo: String {
+        switch self {
+        case .inicio: "Início"
+        case .viagens: "Viagens"
+        case .gastos: "Gastos"
+        }
+    }
+
+    var simbolo: String {
+        switch self {
+        case .inicio: "house"
+        case .viagens: "suitcase"
+        case .gastos: "list.bullet"
+        }
+    }
 }
 
 /// Raiz do app autenticado: uma barra com 3 abas (Início, Viagens, Gastos), cada uma com a própria
 /// `NavigationStack`. O avatar do início fica só com o que é da conta (Perfil e ajustes, Sair).
+/// A barra é desenhada à mão, igual à do Safeel (pedido do usuário de 10/11): ícone, nome em negrito
+/// na aba ativa e um traço embaixo dela.
 struct MainView: View {
     @EnvironmentObject var viewModel: CiclosViewModel
     @Environment(\.modelContext) private var modelContext
@@ -37,6 +55,8 @@ struct MainView: View {
     var lancamentoInicial: Lancamento? = nil
 
     @State private var aba: Aba = .inicio
+    /// Abas já abertas ficam vivas (escondidas), preservando a pilha e a rolagem de cada uma.
+    @State private var visitadas: Set<Aba> = [.inicio]
     /// Pilha de cada aba: trocar de aba não perde onde o usuário estava na outra.
     @State private var caminhos: [Aba: [Rota]] = [:]
     /// Relógio do início: atualizado na virada do dia e ao voltar para o app.
@@ -51,28 +71,30 @@ struct MainView: View {
     }
 
     var body: some View {
-        TabView(selection: $aba) {
-            pilha(.inicio) {
-                InicioView(hoje: hoje, origem: origem, usuario: usuarioAtual, menuInicial: menuInicial,
-                           lancamentoInicial: lancamentoInicial)
-                    .navigationTitle("Início")
-                    .toolbar(.hidden, for: .navigationBar)
+        VStack(spacing: 0) {
+            ZStack {
+                ForEach(Aba.allCases.filter(visitadas.contains), id: \.self) { item in
+                    let ativa = item == aba
+                    conteudo(item)
+                        .opacity(ativa ? 1 : 0)
+                        .allowsHitTesting(ativa)
+                        .accessibilityHidden(!ativa)
+                }
             }
-            .tabItem { Label("Início", systemImage: "house") }
-            .tag(Aba.inicio)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            pilha(.viagens) {
-                ViagensView(hoje: hoje, origem: origem)
-            }
-            .tabItem { Label("Viagens", systemImage: "suitcase") }
-            .tag(Aba.viagens)
+            Divider()
 
-            pilha(.gastos) {
-                // Os gastos da viagem do início (a que o usuário está vendo), como o "Ver todos".
-                TodosGastosView(cicloId: viewModel.cicloInicioEm(hoje)?.id, filtro: .todos)
+            HStack(spacing: 0) {
+                ForEach(Aba.allCases, id: \.self) { item in
+                    BotaoAba(aba: item, selecionada: item == aba) { selecionar(item) }
+                }
             }
-            .tabItem { Label("Gastos", systemImage: "list.bullet") }
-            .tag(Aba.gastos)
+            .padding(.horizontal, Espaco.p)
+            .padding(.top, Espaco.p)
+            .background {
+                Tema.superficie.ignoresSafeArea(edges: .bottom)
+            }
         }
         .environment(\.abrirRota) { abrir($0) }
         .tint(Tema.marcaTexto)
@@ -100,6 +122,38 @@ struct MainView: View {
         }
     }
 
+    @ViewBuilder
+    private func conteudo(_ item: Aba) -> some View {
+        switch item {
+        case .inicio:
+            pilha(.inicio) {
+                InicioView(hoje: hoje, origem: origem, usuario: usuarioAtual, menuInicial: menuInicial,
+                           lancamentoInicial: lancamentoInicial)
+                    .navigationTitle("Início")
+                    .toolbar(.hidden, for: .navigationBar)
+            }
+        case .viagens:
+            pilha(.viagens) {
+                ViagensView(hoje: hoje, origem: origem)
+            }
+        case .gastos:
+            pilha(.gastos) {
+                // Os gastos da viagem do início (a que o usuário está vendo), como o "Ver todos".
+                TodosGastosView(cicloId: viewModel.cicloInicioEm(hoje)?.id, filtro: .todos)
+            }
+        }
+    }
+
+    /// Toque numa aba: abre a aba; tocar de novo na aba aberta volta para a raiz dela.
+    private func selecionar(_ item: Aba) {
+        if item == aba {
+            caminhos[item] = []
+        } else {
+            aba = item
+            visitadas.insert(item)
+        }
+    }
+
     /// Uma aba: a tela raiz numa `NavigationStack` com a pilha daquela aba.
     private func pilha<Raiz: View>(_ aba: Aba, @ViewBuilder raiz: () -> Raiz) -> some View {
         NavigationStack(path: Binding(get: { caminhos[aba] ?? [] }, set: { caminhos[aba] = $0 })) {
@@ -114,7 +168,7 @@ struct MainView: View {
     /// na aba atual.
     private func abrir(_ rota: Rota) {
         if rota == .viagens {
-            aba = .viagens
+            selecionar(.viagens)
         } else {
             caminhos[aba, default: []].append(rota)
         }
@@ -123,11 +177,40 @@ struct MainView: View {
     /// Pilha de entrada do modo de demonstração: começando por Viagens, abre na aba Viagens.
     private func abrirInicial(_ rotas: [Rota]) {
         if rotas.first == .viagens {
-            aba = .viagens
+            selecionar(.viagens)
             caminhos[.viagens] = Array(rotas.dropFirst())
         } else {
             caminhos[.inicio] = rotas
         }
+    }
+}
+
+/// Botão da barra de abas, no desenho do Safeel: ícone, nome (negrito quando ativa) e um traço
+/// embaixo da aba ativa.
+private struct BotaoAba: View {
+    let aba: Aba
+    let selecionada: Bool
+    let acao: () -> Void
+
+    var body: some View {
+        Button(action: acao) {
+            VStack(spacing: 2) {
+                Image(systemName: aba.simbolo)
+                    .font(.body)
+                Text(aba.titulo)
+                    .font(.caption2)
+                    .fontWeight(selecionada ? .bold : .regular)
+                Capsule()
+                    .fill(selecionada ? Tema.texto : .clear)
+                    .frame(width: 24, height: 3)
+            }
+            .foregroundStyle(selecionada ? Tema.texto : Tema.textoFraco)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(aba.titulo)
+        .accessibilityAddTraits(selecionada ? [.isButton, .isSelected] : .isButton)
     }
 }
 
