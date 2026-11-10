@@ -9,12 +9,12 @@ import SwiftUI
 
 struct MenuView: View {
     @Binding var showMenu: Bool
+    var abrirOpenFinance: () -> Void
     @EnvironmentObject var viewModel: CiclosViewModel
     @StateObject var authService = AuthService.shared
     @State private var selectedEnv: APIEnvironment = APIConfig.shared.current
     
     @State private var showPerfil = false
-    @State private var showOpenFinance = false
     @State private var openFinanceEnabled = false
 
     var body: some View {
@@ -99,7 +99,7 @@ struct MenuView: View {
             if openFinanceEnabled {
                 Button {
                     showMenu = false
-                    showOpenFinance = true
+                    abrirOpenFinance()
                 } label: {
                     HStack(spacing: 15) {
                         Image(systemName: "creditcard")
@@ -158,9 +158,6 @@ struct MenuView: View {
         .transition(.asymmetric(insertion: .scale(scale: 0.8, anchor: .topTrailing).combined(with: .opacity),
                                  removal: .opacity))
         .task { await carregarFeatures() }
-        .sheet(isPresented: $showOpenFinance) {
-            OpenFinanceView()
-        }
     }
 
     private func carregarFeatures() async {

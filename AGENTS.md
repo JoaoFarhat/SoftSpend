@@ -337,8 +337,9 @@ No iOS, `CartaoOpenFinance`, `FaturaCartao` e `TransacaoCartao` são models
 SwiftData somente de leitura cacheados por `backendId`. `OpenFinanceViewModel`
 faz upsert a partir dos DTOs, apaga registros que sumiram no backend e
 reaplica os matches em `GastosDia`. A tela `OpenFinanceView` (menu → "Cartão
-corporativo") lista cartões e faturas; `FaturaDetalheView` permite confirmar
-ou remover um vínculo em revisão.
+corporativo") lista cartões, faturas e todas as transações do cartão;
+`FaturaDetalheView` e `CartaoTransacoesView` permitem confirmar ou remover um
+vínculo em revisão.
 
 | Variável | Default | Descrição |
 | --- | --- | --- |

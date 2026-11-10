@@ -15,6 +15,7 @@ struct CiclosListView: View {
     @StateObject var gastosViewModel = GastosViewModel(dias: [])
     @Environment(\.modelContext) private var modelContext
     @State private var showMenu = false
+    @State private var showOpenFinance = false
     
     private var currentUser: UserModel? {
         AuthService.shared.currentUser
@@ -295,9 +296,11 @@ struct CiclosListView: View {
         .background(.backgroundCor)
         .overlay(alignment: .topTrailing) {
             if showMenu {
-                MenuView(showMenu: $showMenu)
-                    .environmentObject(viewModel)
-                    .offset(x: -16, y: 70)
+                MenuView(showMenu: $showMenu) {
+                    showOpenFinance = true
+                }
+                .environmentObject(viewModel)
+                .offset(x: -16, y: 70)
             }
         }
         .fullScreenCover(isPresented: $addNewGastoSheet, onDismiss: {
@@ -313,6 +316,9 @@ struct CiclosListView: View {
         }
         .fullScreenCover(isPresented: $addNewCicloSheet) {
             NewCicloView()
+        }
+        .sheet(isPresented: $showOpenFinance) {
+            OpenFinanceView()
         }
         .sheet(isPresented: Binding(
             get: { exportedFileURL != nil },
