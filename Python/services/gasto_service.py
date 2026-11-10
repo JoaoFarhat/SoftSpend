@@ -16,7 +16,7 @@ def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: str):
         raise HTTPException(status_code=404, detail="Dia não encontrado")
 
     if dia.ciclo.id_usuario != user_id:
-        raise HTTPException(status_code=403, detail="Acesso negado")
+        raise HTTPException(status_code=404, detail="Dia não encontrado")
 
     if gasto.client_id:
         existente = gasto_repository.find_by_client_id(db, gasto.client_id, dia_id)
@@ -48,7 +48,7 @@ def atualizar_gasto(db: Session, gasto_id: int, gasto_request: GastoRequest, use
         raise HTTPException(status_code=404, detail="Gasto não encontrado")
 
     if gasto.dia.ciclo.id_usuario != user_id:
-        raise HTTPException(status_code=403, detail="Acesso negado")
+        raise HTTPException(status_code=404, detail="Gasto não encontrado")
 
     dia_atual = gasto.dia
     novo_dia_id = gasto_request.dia_id
@@ -61,7 +61,7 @@ def atualizar_gasto(db: Session, gasto_id: int, gasto_request: GastoRequest, use
             raise HTTPException(status_code=404, detail="Dia não encontrado")
 
         if novo_dia.ciclo.id_usuario != user_id:
-            raise HTTPException(status_code=403, detail="Acesso negado")
+            raise HTTPException(status_code=404, detail="Dia não encontrado")
 
         if novo_dia.ciclo_id != dia_atual.ciclo_id:
             raise HTTPException(status_code=400, detail="O gasto só pode ser movido dentro do mesmo ciclo")
@@ -93,7 +93,7 @@ def remover_gasto(db: Session, gasto_id: int, user_id: str):
         raise HTTPException(status_code=404, detail="Gasto não encontrado")
 
     if gasto.dia.ciclo.id_usuario != user_id:
-        raise HTTPException(status_code=403, detail="Acesso negado")
+        raise HTTPException(status_code=404, detail="Gasto não encontrado")
 
     dia = gasto.dia
 
@@ -112,7 +112,7 @@ def _buscar_gasto_do_usuario(db: Session, gasto_id: int, user_id: str) -> models
         raise HTTPException(status_code=404, detail="Gasto não encontrado")
 
     if gasto.dia.ciclo.id_usuario != user_id:
-        raise HTTPException(status_code=403, detail="Acesso negado")
+        raise HTTPException(status_code=404, detail="Gasto não encontrado")
 
     return gasto
 
