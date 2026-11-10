@@ -182,7 +182,7 @@ def test_reuso_dentro_da_janela_emite_par_novo_na_mesma_sessao(client):
     rotacionada = _refresh(client, sessao["refresh_token"]).json()
 
     # Replica imediata do token ja rotacionado cai na janela de tolerancia:
-    # com a sessao ainda ativa, um par novo e emitido sem revogar nada.
+    # com a sessao ainda ativa, um par novo e emitido na mesma sessao.
     resp = _refresh(client, sessao["refresh_token"])
     assert resp.status_code == 200, resp.text
     replica = resp.json()
@@ -206,8 +206,68 @@ def test_reuso_dentro_da_janela_emite_par_novo_na_mesma_sessao(client):
         replica["access_token"],
     ):
         assert _status(client, token) == 200
-    # O refresh token emitido na rotacao continua vivo na mesma sessao.
-    assert _refresh(client, rotacionada["refresh_token"]).status_code == 200
+    # A sessao fica com um so refresh token valido: o da replica.
+    _envelhecer_revogados(client)
+    assert _refresh(client, replica["refresh_token"]).status_code == 200
+
+
+def _envelhecer_revogados(client, segundos: int = 120) -> None:
+    """Empurra o revoked_at de todos os refresh tokens para fora da janela."""
+    db = client.SessionLocal()
+    try:
+        for rt in db.query(models.RefreshToken).filter(
+            models.RefreshToken.revoked_at.is_not(None)
+        ):
+            rt.revoked_at = rt.revoked_at - timedelta(seconds=segundos)
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_reuso_na_janela_cancela_o_token_da_rotacao(client):
+    # Ladrao com uma copia do token antigo: o usuario renova primeiro e o
+    # ladrao reapresenta a copia dentro da janela. Os dois nao podem ficar com
+    # refresh tokens validos ao mesmo tempo.
+    sessao = _login(client)
+    do_usuario = _refresh(client, sessao["refresh_token"]).json()
+    do_ladrao = _refresh(client, sessao["refresh_token"]).json()
+    assert do_ladrao["refresh_token"] != do_usuario["refresh_token"]
+
+    # Passada a janela, o token que foi cancelado dispara o alarme e derruba
+    # a sessao inteira, inclusive a cadeia de quem reapresentou.
+    _envelhecer_revogados(client)
+    assert _refresh(client, do_usuario["refresh_token"]).status_code == 401
+    assert _refresh(client, do_ladrao["refresh_token"]).status_code == 401
+    for token in (do_usuario["access_token"], do_ladrao["access_token"]):
+        assert _status(client, token) == 401
+
+
+def test_reuso_repetido_na_janela_deixa_so_o_ultimo_token(client):
+    sessao = _login(client)
+    _refresh(client, sessao["refresh_token"]).raise_for_status()
+    primeira = _refresh(client, sessao["refresh_token"]).json()
+    segunda = _refresh(client, sessao["refresh_token"]).json()
+    # So a sessao deste login (o cadastro abre outra sessao).
+    sid = jwt.decode(
+        sessao["access_token"], options={"verify_signature": False}
+    )["sid"]
+
+    db = client.SessionLocal()
+    try:
+        validos = (
+            db.query(models.RefreshToken)
+            .filter(
+                models.RefreshToken.session_id == sid,
+                models.RefreshToken.revoked_at.is_(None),
+            )
+            .all()
+        )
+        assert [rt.token_hash for rt in validos] == [
+            _auth_service()._hash_token(segunda["refresh_token"])
+        ]
+    finally:
+        db.close()
+    assert primeira["refresh_token"] != segunda["refresh_token"]
 
 
 def test_reuso_na_janela_depois_do_logout_revoga(client):

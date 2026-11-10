@@ -210,6 +210,12 @@ def refresh_access_token(
                 "user_id=%s; emitindo novo par na mesma sessao",
                 rt.user_id,
             )
+            # Cancela o refresh token entregue na rotacao (e qualquer outro da
+            # sessao) antes de emitir o novo: a sessao fica com um so token
+            # valido. Sem isso, quem reapresentasse um token vazado dentro da
+            # janela ganhava uma cadeia propria que nunca colide com a do
+            # usuario, e o alarme de reuso nunca disparava.
+            auth_repository.revogar_sessao(db, rt.session_id)
             access_token = criar_access_token(rt.user_id, rt.session_id)
             novo_refresh_token = criar_refresh_token(
                 db, rt.user_id, rt.session_id

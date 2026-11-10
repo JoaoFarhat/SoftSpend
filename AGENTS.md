@@ -389,8 +389,9 @@ expirado. Assim:
 - o logout revoga a sessão inteira e o access token dela cai na hora;
 - o reuso de refresh token revoga todas as sessões do usuário — exceto dentro
   da janela de `REFRESH_REUSE_GRACE_SECONDS` com a sessão ainda ativa, caso em
-  que um par novo é emitido na mesma sessão (tolera réplica legítima logo após
-  a rotação);
+  que um par novo é emitido na mesma sessão e os outros refresh tokens dela
+  são cancelados, para a sessão ter um só token válido (tolera réplica legítima
+  logo após a rotação sem abrir uma segunda cadeia);
 - a rotação normal não derruba requisições em voo (o token antigo segue válido);
 - tokens sem `sid` (emitidos antes dessa regra) seguem aceitos até expirar.
 
