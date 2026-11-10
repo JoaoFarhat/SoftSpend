@@ -7,6 +7,7 @@ import logging
 import jwt
 import os
 import secrets
+import uuid
 
 import models
 from repositories import auth_repository
@@ -68,7 +69,7 @@ def _gerar_refresh_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def criar_access_token(user_id: str) -> str:
+def criar_access_token(user_id: str, session_id: str | None = None) -> str:
     now = datetime.now(timezone.utc)
     expire = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {
@@ -79,6 +80,10 @@ def criar_access_token(user_id: str) -> str:
         "aud": JWT_AUDIENCE,
         "type": "access",
     }
+    if session_id:
+        # get_current_user so aceita o token enquanto a sessao tiver refresh
+        # token ativo: logout e deteccao de reuso derrubam o acesso na hora.
+        payload["sid"] = session_id
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
@@ -86,16 +91,25 @@ def _utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def criar_refresh_token(db: Session, user_id: str) -> str:
+def criar_refresh_token(db: Session, user_id: str, session_id: str) -> str:
     raw_token = _gerar_refresh_token()
     token = models.RefreshToken(
         user_id=user_id,
+        session_id=session_id,
         token_hash=_hash_token(raw_token),
         expires_at=_utc_now_naive() + timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS),
     )
     db.add(token)
     db.flush()
     return raw_token
+
+
+def iniciar_sessao(db: Session, user_id: str) -> tuple[str, str]:
+    """Abre uma sessao nova (login ou cadeia nova) e devolve (access, refresh)."""
+    session_id = str(uuid.uuid4())
+    access_token = criar_access_token(user_id, session_id)
+    refresh_token = criar_refresh_token(db, user_id, session_id)
+    return access_token, refresh_token
 
 
 def registrar(db: Session, dados: RegisterRequest) -> models.User:
@@ -125,12 +139,16 @@ def login(db: Session, dados: LoginRequest) -> tuple[models.User, str, str]:
     if REVOKE_OLD_REFRESH_TOKENS_ON_LOGIN:
         auth_repository.revogar_todos_refresh_tokens_por_usuario(db, usuario.id)
 
-    access_token = criar_access_token(usuario.id)
-    refresh_token = criar_refresh_token(db, usuario.id)
+    access_token, refresh_token = iniciar_sessao(db, usuario.id)
     return usuario, access_token, refresh_token
 
 
-def validar_token(token: str) -> str | None:
+def decodificar_access_token(token: str) -> tuple[str, str | None] | None:
+    """Devolve (user_id, session_id) de um access token valido, ou None.
+
+    session_id e None em tokens emitidos antes do claim "sid" existir; eles
+    seguem aceitos ate expirar.
+    """
     try:
         payload = jwt.decode(
             token,
@@ -142,9 +160,20 @@ def validar_token(token: str) -> str | None:
         )
         if payload.get("type") != "access":
             return None
-        return payload.get("sub")
+        user_id = payload.get("sub")
+        session_id = payload.get("sid")
+        if not isinstance(user_id, str) or not user_id:
+            return None
+        if session_id is not None and (not isinstance(session_id, str) or not session_id):
+            return None
+        return user_id, session_id
     except jwt.InvalidTokenError:
         return None
+
+
+def validar_token(token: str) -> str | None:
+    dados = decodificar_access_token(token)
+    return dados[0] if dados else None
 
 
 def refresh_access_token(
@@ -184,8 +213,10 @@ def refresh_access_token(
     rt.revoked_at = agora
     db.flush()
 
-    access_token = criar_access_token(rt.user_id)
-    novo_refresh_token = criar_refresh_token(db, rt.user_id)
+    # A rotacao mantem a sessao: o access token anterior continua valido ate
+    # expirar, porque o refresh token novo segura o mesmo session_id ativo.
+    access_token = criar_access_token(rt.user_id, rt.session_id)
+    novo_refresh_token = criar_refresh_token(db, rt.user_id, rt.session_id)
 
     return usuario, access_token, novo_refresh_token
 
@@ -193,7 +224,12 @@ def refresh_access_token(
 def logout(db: Session, refresh_token: str | None) -> None:
     if not refresh_token:
         return
-    auth_repository.revogar_refresh_token_por_hash(db, _hash_token(refresh_token))
+    rt = auth_repository.buscar_refresh_token_por_hash(db, _hash_token(refresh_token))
+    if not rt:
+        return
+    # Revoga a sessao inteira, nao so este token: mesmo que o app mande um
+    # refresh token ja rotacionado, os access tokens da sessao caem na hora.
+    auth_repository.revogar_sessao(db, rt.session_id)
 
 
 def excluir_conta(db: Session, user_id: str) -> None:

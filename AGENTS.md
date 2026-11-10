@@ -259,6 +259,9 @@ Cadeia de migrations:
    cartões de crédito, faturas e transações.
 8. `d6f1a9c3b8e4` — adiciona `expense_transaction_matches`, o vínculo entre
    gastos do SoftSpend e transações da fatura.
+9. `e8a2b5c7d9f1` — adiciona `refresh_tokens.session_id` (indexada, NOT NULL).
+   Linhas antigas recebem o próprio `id`. Sem ela, login e qualquer rota
+   autenticada falham com `Unknown column 'refresh_tokens.session_id'`.
 
 ## Isolamento por usuário (UUID)
 
@@ -356,6 +359,19 @@ Autenticação OAuth2 / refresh tokens (`services/auth_service.py`):
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Tempo de vida do refresh token |
 | `REVOKE_OLD_REFRESH_TOKENS_ON_LOGIN` | `false` | Se `true`, login invalida refresh tokens antigos (apenas uma sessão ativa) |
 | `HSTS_MAX_AGE` | `31536000` | Valor do header `Strict-Transport-Security` em segundos |
+
+Sessões: cada login gera um `session_id` novo, gravado no refresh token e no
+claim `sid` do access token; a rotação (`/auth/refresh`) herda o mesmo
+`session_id`. O `get_current_user` só aceita um token com `sid` se ainda
+existir refresh token dessa sessão, do mesmo usuário, não revogado e não
+expirado. Assim:
+
+- o logout revoga a sessão inteira e o access token dela cai na hora;
+- o reuso de refresh token revoga todas as sessões do usuário;
+- a rotação normal não derruba requisições em voo (o token antigo segue válido);
+- tokens sem `sid` (emitidos antes dessa regra) seguem aceitos até expirar.
+
+Custo: uma consulta indexada em `refresh_tokens.session_id` por requisição autenticada.
 
 ## TLS/HTTPS
 

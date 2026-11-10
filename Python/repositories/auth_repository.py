@@ -46,11 +46,26 @@ def buscar_refresh_token_por_hash(
     return query.first()
 
 
-def revogar_refresh_token_por_hash(db: Session, token_hash: str) -> None:
+def revogar_sessao(db: Session, session_id: str) -> None:
     db.query(models.RefreshToken).filter(
-        models.RefreshToken.token_hash == token_hash,
+        models.RefreshToken.session_id == session_id,
         models.RefreshToken.revoked_at.is_(None),
     ).update({"revoked_at": _agora_naive()}, synchronize_session=False)
+
+
+def sessao_ativa(db: Session, session_id: str, user_id: str) -> bool:
+    """True se a sessao ainda tem refresh token nao revogado e nao expirado."""
+    return (
+        db.query(models.RefreshToken.id)
+        .filter(
+            models.RefreshToken.session_id == session_id,
+            models.RefreshToken.user_id == user_id,
+            models.RefreshToken.revoked_at.is_(None),
+            models.RefreshToken.expires_at > _agora_naive(),
+        )
+        .first()
+        is not None
+    )
 
 
 def revogar_todos_refresh_tokens_por_usuario(db: Session, user_id: str) -> None:

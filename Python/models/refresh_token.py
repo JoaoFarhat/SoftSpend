@@ -14,6 +14,10 @@ class RefreshToken(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
+    # Identifica a sessao (um login). Todos os refresh tokens de uma mesma
+    # cadeia de rotacao compartilham o session_id, e o access token o carrega
+    # no claim "sid": a sessao vale enquanto houver refresh token ativo nela.
+    session_id = Column(String(36), nullable=False, index=True)
     token_hash = Column(String(64), unique=True, nullable=False)
     expires_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)

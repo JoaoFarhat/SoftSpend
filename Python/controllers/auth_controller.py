@@ -34,8 +34,7 @@ def _montar_auth_response(usuario, access_token: str, refresh_token: str) -> Aut
 def register(request: Request, dados: RegisterRequest, db: Session = Depends(get_db)):
     try:
         usuario = auth_service.registrar(db, dados)
-        access_token = auth_service.criar_access_token(usuario.id)
-        refresh_token = auth_service.criar_refresh_token(db, usuario.id)
+        access_token, refresh_token = auth_service.iniciar_sessao(db, usuario.id)
         return _montar_auth_response(usuario, access_token, refresh_token)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

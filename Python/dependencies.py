@@ -13,9 +13,18 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="Token nao fornecido")
 
     token = authorization.replace("Bearer ", "")
-    user_id = auth_service.validar_token(token)
+    dados = auth_service.decodificar_access_token(token)
 
-    if not user_id:
+    if not dados:
+        raise HTTPException(status_code=401, detail="Token invalido ou expirado")
+
+    user_id, session_id = dados
+    # Token com "sid" so vale enquanto a sessao tiver refresh token ativo
+    # (logout e reuso de refresh token derrubam na hora). Token sem "sid" foi
+    # emitido antes dessa regra e segue aceito ate expirar.
+    if session_id is not None and not auth_repository.sessao_ativa(
+        db, session_id, user_id
+    ):
         raise HTTPException(status_code=401, detail="Token invalido ou expirado")
 
     usuario = auth_repository.buscar_por_id(db, user_id)
