@@ -262,15 +262,10 @@ def test_ler_dias_de_ciclo_alheio_retorna_404(ambiente):
     assert response.status_code == 404
 
 
-@pytest.mark.xfail(
-    reason="GET /ciclos/{id} devolve o resultado do service sem checar None; "
-    "para ciclo de outro usuario o response_model falha e a API responde 500 "
-    "em vez de 404"
-)
 def test_ler_ciclo_alheio_retorna_404(ambiente):
     ciclo, _, _ = _criar_ciclo_dia_gasto(ambiente.como(USER_A))
 
-    client_b = ambiente.como(USER_B, raise_server_exceptions=False)
+    client_b = ambiente.como(USER_B)
     response = client_b.get(f"/ciclos/{ciclo['id']}")
 
     assert response.status_code == 404
@@ -327,10 +322,6 @@ def test_criar_dia_em_ciclo_alheio_retorna_404(ambiente):
     assert len(dias_a) == 1
 
 
-@pytest.mark.xfail(
-    reason="atualizar_dia devolve 403 'Acesso negado' para dia de outro "
-    "usuario; o restante da API usa 404 e 403 confirma que o recurso existe"
-)
 def test_editar_dia_alheio_retorna_404(ambiente):
     _, dia, _ = _criar_ciclo_dia_gasto(ambiente.como(USER_A))
 
@@ -342,10 +333,6 @@ def test_editar_dia_alheio_retorna_404(ambiente):
     assert response.status_code == 404
 
 
-@pytest.mark.xfail(
-    reason="remover_dia devolve 403 'Acesso negado' para dia de outro "
-    "usuario; o restante da API usa 404 e 403 confirma que o recurso existe"
-)
 def test_apagar_dia_alheio_retorna_404(ambiente):
     _, dia, _ = _criar_ciclo_dia_gasto(ambiente.como(USER_A))
 
@@ -355,10 +342,6 @@ def test_apagar_dia_alheio_retorna_404(ambiente):
     assert response.status_code == 404
 
 
-@pytest.mark.xfail(
-    reason="criar_gasto devolve 403 'Acesso negado' quando o dia e de outro "
-    "usuario; o restante da API usa 404 e 403 confirma que o recurso existe"
-)
 def test_criar_gasto_em_dia_alheio_retorna_404(ambiente):
     _, dia, _ = _criar_ciclo_dia_gasto(ambiente.como(USER_A))
 
@@ -370,10 +353,6 @@ def test_criar_gasto_em_dia_alheio_retorna_404(ambiente):
     assert response.status_code == 404
 
 
-@pytest.mark.xfail(
-    reason="atualizar_gasto devolve 403 'Acesso negado' para gasto de outro "
-    "usuario; o restante da API usa 404 e 403 confirma que o recurso existe"
-)
 def test_editar_gasto_alheio_retorna_404(ambiente):
     _, _, gasto = _criar_ciclo_dia_gasto(ambiente.como(USER_A))
 
@@ -385,10 +364,6 @@ def test_editar_gasto_alheio_retorna_404(ambiente):
     assert response.status_code == 404
 
 
-@pytest.mark.xfail(
-    reason="remover_gasto devolve 403 'Acesso negado' para gasto de outro "
-    "usuario; o restante da API usa 404 e 403 confirma que o recurso existe"
-)
 def test_apagar_gasto_alheio_retorna_404(ambiente):
     _, _, gasto = _criar_ciclo_dia_gasto(ambiente.como(USER_A))
 

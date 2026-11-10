@@ -45,7 +45,10 @@ def get_ciclos_resumo(
 @router.get("/ciclos/{ciclo_id}", response_model=CicloResponse)
 @limiter.limit("60/minute")
 def get_ciclo(request: Request, ciclo_id: int, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
-    return ciclo_service.get_user_ciclo_by_id(db, ciclo_id, user_id)
+    ciclo = ciclo_service.get_user_ciclo_by_id(db, ciclo_id, user_id)
+    if not ciclo:
+        raise HTTPException(status_code=404, detail="Ciclo não encontrado")
+    return ciclo
 
 
 @router.get("/ciclos/{ciclo_id}/export")

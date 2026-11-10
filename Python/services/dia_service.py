@@ -67,7 +67,7 @@ def atualizar_dia(db: Session, dia_id: int, dia_request: DiaRequest, user_id: st
         raise HTTPException(status_code=404, detail="Dia não encontrado")
 
     if dia.ciclo.id_usuario != user_id:
-        raise HTTPException(status_code=403, detail="Acesso negado")
+        raise HTTPException(status_code=404, detail="Dia não encontrado")
 
     dia.data = dia_request.data
 
@@ -119,7 +119,7 @@ def remover_dia(db: Session, dia_id: int, user_id: str):
         raise HTTPException(status_code=404, detail="Dia não encontrado")
 
     if dia.ciclo.id_usuario != user_id:
-        raise HTTPException(status_code=403, detail="Acesso negado")
+        raise HTTPException(status_code=404, detail="Dia não encontrado")
 
     gasto_total_dia = sum(gasto.valor for gasto in dia.gastos)
     ciclo_repository.incrementar_gasto_total(db, dia.ciclo_id, -gasto_total_dia)
