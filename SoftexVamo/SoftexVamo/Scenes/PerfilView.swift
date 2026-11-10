@@ -6,315 +6,227 @@
 //
 
 import SwiftUI
-import Combine
 
+/// Tela 17: perfil e ajustes. Conta (nome, e-mail, senha), preferências
+/// (avisos de diária, leitura automática do comprovante, tema), sair e excluir
+/// a conta. Sem estatísticas em cartões; "Ambiente API" só em build de desenvolvimento.
 struct PerfilView: View {
-    @Environment(\.dismiss) var dismiss
-    @EnvironmentObject var viewModel: CiclosViewModel
+    let usuario: UsuarioMenu
+
     @ObservedObject private var authService = AuthService.shared
-    @State private var showConfiguracoes = false
-    
-    private let purplePrimary = Color.appPurple
-    private let cardBackground = Color("cardBackground")
-    private let screenBackground = Color("backgroundCor")
-    
-    private var user: UserModel? { authService.currentUser }
-    
-    private var ciclosCriados: Int { viewModel.allCiclos.count }
-    
-    private var ciclosAtivos: Int {
-        viewModel.allCiclos.filter { ciclo in
-            guard let dias = ciclo.dias?.last else { return false }
-            return dias.data >= Date()
-        }.count
-    }
-    
-    private var totalGasto: Decimal {
-        viewModel.allCiclos.reduce(Decimal(0)) { $0 + $1.gasto_total }
-    }
 
-    private var totalOrcado: Decimal {
-        viewModel.allCiclos.reduce(Decimal(0)) { $0 + $1.valor_total }
-    }
+    /// Ausente = ligado (`AvisoDiaria.ativos`).
+    @AppStorage(AvisoDiaria.chaveAtivos) private var avisosDiaria = true
+    /// `nil` = ainda não perguntado; `true` = permitiu; `false` = "Agora não".
+    @AppStorage(Consentimento.chave) private var leituraAutomatica: Bool?
+    @AppStorage(PreferenciaTema.chave) private var tema: PreferenciaTema = .automatico
 
-    private var percentUtilizado: Int {
-        guard totalOrcado > 0 else { return 0 }
-        let ratio = totalGasto / totalOrcado
-        return Int((Double(truncating: NSDecimalNumber(decimal: ratio))) * 100)
-    }
-    
+    @State private var confirmarExclusao = false
+
+    #if DEBUG
+    @State private var ambiente: APIEnvironment = APIConfig.shared.current
+    #endif
+
     var body: some View {
-        ZStack(alignment: .top) {
-            screenBackground.ignoresSafeArea()
-            
-            RadialGradient(
-                colors: [purplePrimary.opacity(0.4), screenBackground],
-                center: .top,
-                startRadius: 0,
-                endRadius: 350
-            )
-            .frame(height: 350)
-            .ignoresSafeArea(edges: .top)
-            
-            ScrollView() {
-                VStack(spacing: 24) {
-                    headerSection
-                    
-                    statsGrid
-                        .padding(.horizontal, 16)
-                    
-                    accountInfoSection
-                        .padding(.horizontal, 16)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                cabecalho
+                secao("Conta")
+                grupo {
+                    linhaValor("Nome", usuario.nome.isEmpty ? "—" : usuario.nome)
+                    divisoria
+                    linhaValor("E-mail", usuario.email.isEmpty ? "—" : usuario.email)
+                    divisoria
+                    linhaValor("Senha", "••••••••")
+                        .accessibilityValue("oculta")
                 }
-                .padding(.bottom, 80)
+                secao("Preferências")
+                grupo {
+                    linhaToggle("Avisos de diária", isOn: $avisosDiaria)
+                    divisoria
+                    linhaToggle("Leitura automática do comprovante", isOn: Binding(
+                        get: { leituraAutomatica == true },
+                        set: { leituraAutomatica = $0 }
+                    ))
+                    divisoria
+                    linhaTema
+                }
+                Text("Ligada, a foto do comprovante é enviada para um serviço de leitura (Google Gemini) que preenche valor, local, data e categoria.")
+                    .font(.footnote)
+                    .foregroundStyle(Tema.textoFraco)
+                    .padding(.horizontal, Espaco.g)
+                    .padding(.top, Espaco.p)
+
+                #if DEBUG
+                if !CommandLine.arguments.contains("-demo") {
+                    secao("Desenvolvimento")
+                    ambienteAPI
+                }
+                #endif
+
+                VStack(spacing: Espaco.g) {
+                    Button("Sair da conta") { authService.logout() }
+                        .font(.body)
+                        .foregroundStyle(Tema.estouro)
+                    Button("Excluir conta") { confirmarExclusao = true }
+                        .font(.footnote)
+                        .foregroundStyle(Tema.textoFraco)
+                        .disabled(authService.isLoading)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.top, 28)
             }
-            .scrollIndicators(.hidden)
+            .padding(.horizontal, Espaco.g + 2)
+            .padding(.bottom, Espaco.g + 8)
         }
+        .background(Tema.fundo.ignoresSafeArea())
+        .navigationTitle("Perfil e ajustes")
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showConfiguracoes = true
-                } label: {
-                    Image(systemName: "gearshape.fill")
-                        .foregroundColor(Color("textSecondary"))
-                        .font(.system(size: 18))
-                }
+        .confirmationDialog("Excluir conta permanentemente?", isPresented: $confirmarExclusao,
+                            titleVisibility: .visible) {
+            Button("Excluir minha conta", role: .destructive) {
+                Task { await authService.deleteAccount() }
             }
-        }
-        .toolbarBackground(.hidden, for: .navigationBar)
-        .tint(Color("textPrimary"))
-        .sheet(isPresented: $showConfiguracoes) {
-            ConfiguracoesView()
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("Todos os seus dados, ciclos e gastos serão apagados. Esta ação não pode ser desfeita.")
         }
     }
-    
-    private var headerSection: some View {
-        VStack(spacing: 14) {
-                ZStack(alignment: .bottomTrailing) {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [purplePrimary, Color.appPurpleDark.opacity(0.6)],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .frame(width: 90, height: 90)
-                        .overlay(
-                            Text(user?.nome.prefix(1).uppercased() ?? "?")
-                                .font(.system(size: 38, weight: .bold))
-                                .foregroundColor(.white)
-                        )
-                        .overlay(
-                            Circle()
-                                .stroke(
-                                    LinearGradient(
-                                        colors: [purplePrimary, .appPurpleDark],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    lineWidth: 3
-                                )
-                        )
-                    
-                    Circle()
-                        .fill(Color("cardBackground"))
-                        .frame(width: 28, height: 28)
-                        .overlay(
-                            Image(systemName: "camera.fill")
-                                .font(.system(size: 12))
-                                .foregroundColor(Color("textSecondary"))
-                        )
-                        .offset(x: -2, y: -2)
-                }
-                
-                // Name + badge
-                VStack(spacing: 6) {
-                    Text(user?.nome ?? "Usuário")
-                        .font(.system(size: 22, weight: .bold))
-                        .foregroundColor(Color("textPrimary"))
-                    
-                    HStack(spacing: 4) {
-                        Image(systemName: "star.fill")
-                            .font(.system(size: 10))
-                            .foregroundColor(purplePrimary)
-                        Text("VIAJANTE")
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(purplePrimary)
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 4)
-                    .background(purplePrimary.opacity(0.15))
-                    .cornerRadius(10)
-                    
-                    Text(user?.email ?? "email@exemplo.com")
-                        .font(.system(size: 14))
-                        .foregroundColor(Color("textSecondary"))
-                }
-            }
-        
-    }
-    
-    private var statsGrid: some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-            StatCard(
-                icon: "calendar",
-                value: "\(ciclosCriados)",
-                label: "CICLOS CRIADOS",
-                subtitle: ciclosCriados > 0 ? "+\(min(ciclosCriados, 2)) este mês" : nil,
-                subtitleColor: purplePrimary,
-                accentColor: purplePrimary
-            )
-            
-            StatCard(
-                icon: "chart.line.uptrend.xyaxis",
-                value: "\(ciclosAtivos)",
-                label: "CICLOS ATIVOS",
-                subtitle: ciclosAtivos > 0 ? "\(ciclosAtivos) em andamento" : nil,
-                subtitleColor: Color(hex: 0x06B6D4),
-                accentColor: Color(hex: 0x06B6D4)
-            )
-            
-            StatCard(
-                icon: "dollarsign.circle",
-                value: formatCurrency(totalGasto),
-                label: "TOTAL GASTO",
-                subtitle: nil,
-                subtitleColor: .red,
-                accentColor: .red
-            )
-            
-            StatCard(
-                icon: "wallet.bifold",
-                value: formatCurrency(totalOrcado),
-                label: "TOTAL ORÇADO",
-                subtitle: totalOrcado > 0 ? "\(percentUtilizado)% utilizado" : nil,
-                subtitleColor: .green,
-                accentColor: .green
-            )
-        }
-    }
-    
-    private var accountInfoSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("INFORMAÇÕES DA CONTA")
-                .font(.system(size: 13, weight: .bold))
-                .foregroundStyle(Color("textSecondary"))
+
+    // MARK: Partes
+
+    private var cabecalho: some View {
+        VStack(spacing: Espaco.p) {
+            Text(usuario.iniciais)
+                .font(.title2.weight(.bold))
+                .foregroundStyle(Tema.marcaTexto)
+                .frame(width: 80, height: 80)
+                .background(Tema.marcaFundo, in: Circle())
+                .accessibilityHidden(true)
                 .padding(.bottom, 4)
-            
-            VStack(spacing: 0) {
-                AccountInfoRow(
-                    icon: "person.fill",
-                    title: "Nome completo",
-                    value: user?.nome ?? "—"
-                )
-                
-                Divider()
-                    .background(Color("textPrimary").opacity(0.08))
-                
-                AccountInfoRow(
-                    icon: "envelope.fill",
-                    title: "E-mail",
-                    value: user?.email ?? "—"
-                )
+            Text(usuario.nome.isEmpty ? "Usuário" : usuario.nome)
+                .font(.title3.weight(.bold))
+                .foregroundStyle(Tema.texto)
+                .multilineTextAlignment(.center)
+            if !usuario.email.isEmpty {
+                Text(usuario.email)
+                    .font(.subheadline)
+                    .foregroundStyle(Tema.textoFraco)
             }
-            .background(cardBackground)
-            .cornerRadius(16)
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .stroke(Color("textPrimary").opacity(0.08), lineWidth: 1)
-            )
         }
+        .frame(maxWidth: .infinity)
+        .padding(.top, Espaco.p)
+        .accessibilityElement(children: .combine)
     }
-    
-    private func formatCurrency(_ value: Decimal) -> String {
-        value.formattedAsCurrency()
-    }
-}
 
-private struct StatCard: View {
-    let icon: String
-    let value: String
-    let label: String
-    let subtitle: String?
-    let subtitleColor: Color
-    let accentColor: Color
-    
-    private let cardBg = Color("cardBackground")
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Image(systemName: icon)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundColor(accentColor)
-                .frame(width: 36, height: 36)
-                .background(accentColor.opacity(0.12))
-                .cornerRadius(10)
-            
-            Text(value)
-                .font(.system(size: 20, weight: .bold))
-                .foregroundColor(Color("textPrimary"))
+    private func secao(_ titulo: String) -> some View {
+        Text(titulo)
+            .font(.title3.weight(.bold))
+            .foregroundStyle(Tema.texto)
+            .accessibilityAddTraits(.isHeader)
+            .padding(.horizontal, Espaco.p)
+            .padding(.top, 28)
+            .padding(.bottom, Espaco.m)
+    }
+
+    private func grupo<C: View>(@ViewBuilder _ conteudo: () -> C) -> some View {
+        VStack(spacing: 0) { conteudo() }
+            .background(Tema.superficie, in: RoundedRectangle(cornerRadius: Raio.lista, style: .continuous))
+    }
+
+    private var divisoria: some View {
+        Rectangle().fill(Tema.borda).frame(height: 0.5).padding(.leading, Espaco.g)
+    }
+
+    private func linhaValor(_ titulo: String, _ valor: String) -> some View {
+        HStack(spacing: Espaco.m) {
+            Text(titulo)
+                .foregroundStyle(Tema.texto)
+            Spacer(minLength: Espaco.p)
+            Text(valor)
+                .foregroundStyle(Tema.textoFraco)
                 .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            
-            Text(label)
-                .font(.system(size: 11, weight: .bold))
-                .foregroundColor(Color("textSecondary"))
-            
-            Text(subtitle ?? " ")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(subtitle != nil ? subtitleColor : .clear)
+                .truncationMode(.middle)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(cardBg)
-        .cornerRadius(18)
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(Color("textPrimary").opacity(0.08), lineWidth: 1)
-        )
-        .shadow(color: .black.opacity(0.1), radius: 8, y: 4)
+        .font(.body)
+        .padding(.horizontal, Espaco.g)
+        .frame(minHeight: 50)
+        .accessibilityElement(children: .combine)
     }
-}
 
-private struct AccountInfoRow: View {
-    let icon: String
-    let title: String
-    let value: String
-    
-    private let purplePrimary = Color.appPurple
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 16))
-                .foregroundColor(purplePrimary)
-                .frame(width: 36, height: 36)
-                .background(purplePrimary.opacity(0.1))
-                .cornerRadius(10)
-            
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 12))
-                    .foregroundColor(Color("textSecondary"))
-                Text(value)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(Color("textPrimary"))
+    private func linhaToggle(_ titulo: String, isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            Text(titulo)
+                .font(.body)
+                .foregroundStyle(Tema.texto)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .tint(Tema.marcaBotao)
+        .padding(.horizontal, Espaco.g)
+        .padding(.vertical, Espaco.p)
+        .frame(minHeight: 50)
+    }
+
+    private var linhaTema: some View {
+        HStack(spacing: Espaco.m) {
+            Text("Tema")
+                .font(.body)
+                .foregroundStyle(Tema.texto)
+            Spacer(minLength: Espaco.p)
+            Menu {
+                Picker("Tema", selection: $tema) {
+                    ForEach(PreferenciaTema.allCases) { opcao in
+                        Text(opcao.nome).tag(opcao)
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(tema.nome)
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.footnote.weight(.semibold))
+                        .accessibilityHidden(true)
+                }
+                .font(.body)
+                .foregroundStyle(Tema.textoFraco)
             }
-            
-            Spacer()
-            
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(Color("textSecondary"))
+            .accessibilityLabel("Tema, \(tema.nome)")
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        .padding(.horizontal, Espaco.g)
+        .frame(minHeight: 50)
     }
+
+    #if DEBUG
+    private var ambienteAPI: some View {
+        VStack(alignment: .leading, spacing: Espaco.p) {
+            Text("Ambiente API (só em desenvolvimento)")
+                .font(.footnote)
+                .foregroundStyle(Tema.textoFraco)
+            Picker("Ambiente API", selection: $ambiente) {
+                ForEach(APIEnvironment.allCases, id: \.self) { env in
+                    Text(env.displayName).tag(env)
+                }
+            }
+            .pickerStyle(.segmented)
+            .onChange(of: ambiente) { _, novo in
+                APIConfig.shared.current = novo
+            }
+        }
+        .padding(Espaco.g)
+        .background(Tema.superficie, in: RoundedRectangle(cornerRadius: Raio.lista, style: .continuous))
+    }
+    #endif
 }
 
-#Preview {
-    PerfilView()
-        .environmentObject(CiclosViewModel())
+#Preview("Claro") {
+    NavigationStack {
+        PerfilView(usuario: UsuarioMenu(nome: "João Victor Farhat", email: "joao@empresa.com"))
+    }
+    .preferredColorScheme(.light)
+}
+
+#Preview("Escuro") {
+    NavigationStack {
+        PerfilView(usuario: UsuarioMenu(nome: "João Victor Farhat", email: "joao@empresa.com"))
+    }
+    .preferredColorScheme(.dark)
 }

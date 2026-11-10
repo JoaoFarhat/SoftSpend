@@ -158,8 +158,9 @@ final class CiclosViewModel: ObservableObject {
             if !ciclosLocais.isEmpty {
                 if !append {
                     self.allCiclos = ciclosLocais
-                    self.atualCiclo = ciclosLocais[0]
-                    self.index = 0
+                    let inicio = cicloDoInicio(ciclosLocais, hoje: .now) ?? ciclosLocais[0]
+                    self.atualCiclo = inicio
+                    self.index = ciclosLocais.firstIndex(where: { $0.id == inicio.id }) ?? 0
                 } else {
                     let idsExistentes = Set(self.allCiclos.map { $0.id })
                     let novos = ciclosLocais.filter { !idsExistentes.contains($0.id) }
@@ -203,8 +204,9 @@ final class CiclosViewModel: ObservableObject {
                     self.allCiclos = ciclosAtualizados
                     self.index = 0
                     
-                    if let primeiro = self.allCiclos.first {
-                        self.atualCiclo = primeiro
+                    if let inicio = self.cicloInicio ?? self.allCiclos.first {
+                        self.atualCiclo = inicio
+                        self.index = self.allCiclos.firstIndex(where: { $0.id == inicio.id }) ?? 0
                     } else {
                         self.atualCiclo = CicloSoftex.vazio
                     }
@@ -224,8 +226,10 @@ final class CiclosViewModel: ObservableObject {
                         return
                     }
                     
+                    // Sem zerar `dias`: isso desligava os dias locais do ciclo
+                    // (os pendentes ficavam órfãos). O upsert por `backendId`
+                    // religa os do servidor e tira os que sumiram de lá.
                     self.atualCiclo = cicloParaSalvar
-                    self.atualCiclo.dias = []
                     self.diasSkip = 0
                     self.hasMoreDias = true
                     loadMoreDiasTask?.cancel()
@@ -318,43 +322,118 @@ final class CiclosViewModel: ObservableObject {
         salvarLocal()
     }
     
+    /// Mostra os dias locais do `atualCiclo` e busca no servidor todas as
+    /// páginas de dias (viagens com mais de `diasLimit` dias inclusive).
     func loadMoreDias(cicloId: Int) async {
+        guard NetworkMonitor.shared.isConnected else {
+            carregarDiasLocais()
+            return
+        }
+        await carregarDiasDoServidor(cicloId: cicloId) { skip, limit in
+            try await NetworkManager.shared.fetchDias(cicloId: cicloId, skip: skip, limit: limit)
+        }
+    }
+
+    /// Busca página a página (até uma vir com menos de `diasLimit`), faz o
+    /// upsert por `backendId` e tira os dias sincronizados que sumiram do
+    /// servidor. `buscar` recebe `skip` e `limit`; injetável nos testes.
+    func carregarDiasDoServidor(
+        cicloId: Int,
+        buscar: @escaping @MainActor (_ skip: Int, _ limit: Int) async throws -> [DiaSoftex]
+    ) async {
+        guard !Task.isCancelled else { return }
         carregarDiasLocais()
 
         loadMoreDiasTask?.cancel()
-        loadMoreDiasTask = Task {
-            guard hasMoreDias, !isLoadingDias else { return }
+        let ciclo = atualCiclo
+        // Só busca para a viagem que está aberta: se o `atualCiclo` já é
+        // outro, os dias do servidor seriam gravados na viagem errada.
+        guard ciclo.backendId == cicloId else { return }
+        let limite = diasLimit
+        // Candidatos à remoção: dias já sincronizados ANTES da busca. Um dia
+        // que o SyncActor enviar durante a busca não está aqui e não é apagado.
+        let sincronizadosAntes = idsDeDiasSincronizados(de: ciclo)
+        let tarefa = Task {
             isLoadingDias = true
             defer { isLoadingDias = false }
-            
-            guard NetworkMonitor.shared.isConnected else { return }
-            
+            var skip = 0
+            var idsServidor = Set<Int>()
+            var listaCompleta = false
             do {
-                let dias = try await NetworkManager.shared.fetchDias(cicloId: cicloId, skip: diasSkip, limit: diasLimit)
-                
-                await MainActor.run {
-                    guard !Task.isCancelled else { return }
-                    
-                    hasMoreDias = dias.count == diasLimit
-                    diasSkip += dias.count
-
-                    if atualCiclo.dias == nil {
-                        atualCiclo.dias = []
-                    }
-
+                // Teto de páginas: protege contra um servidor que ignore o `skip`.
+                for _ in 0..<100 {
+                    let dias = try await buscar(skip, limite)
+                    guard !Task.isCancelled, atualCiclo.id == ciclo.id else { return }
                     for dia in dias {
-                        salvarOuAtualizarDiaLocal(dia, no: atualCiclo)
+                        if let id = dia.backendId { idsServidor.insert(id) }
+                        salvarOuAtualizarDiaLocal(dia, no: ciclo)
                     }
-
+                    skip += dias.count
                     salvarLocal()
                     carregarDiasLocais()
+                    if dias.count < limite {
+                        listaCompleta = true
+                        break
+                    }
+                }
+                diasSkip = skip
+                hasMoreDias = false
+                // Sem a última página (teto atingido), a lista está incompleta:
+                // não dá para saber o que sumiu do servidor.
+                if listaCompleta {
+                    removerDiasSumidos(de: ciclo, candidatos: sincronizadosAntes, mantendo: idsServidor)
                 }
             } catch {
-                await MainActor.run {
-                    guard !Task.isCancelled else { return }
-                    showError(error)
-                }
+                guard !Task.isCancelled else { return }
+                // Com dias locais na tela, a falha de rede em segundo plano
+                // não interrompe o usuário (offline-first).
+                if (ciclo.dias ?? []).isEmpty { showError(error) }
             }
+        }
+        loadMoreDiasTask = tarefa
+        await tarefa.value
+    }
+
+    private func idsDeDiasSincronizados(de ciclo: CicloSoftex) -> Set<Int> {
+        Set((ciclo.dias ?? []).compactMap { dia in
+            dia.syncStatus == .synced ? dia.backendId : nil
+        })
+    }
+
+    /// Com a lista completa do servidor, um dia já sincronizado antes da busca
+    /// que não veio nela foi apagado lá: sai daqui também. Nunca apaga um dia
+    /// com gastos (o delete em cascata levaria gastos junto) nem um dia com
+    /// alteração local pendente.
+    private func removerDiasSumidos(de ciclo: CicloSoftex, candidatos: Set<Int>, mantendo ids: Set<Int>) {
+        let sumidos = (ciclo.dias ?? []).filter { dia in
+            guard let id = dia.backendId, candidatos.contains(id),
+                  dia.deletadoEm == nil, dia.syncStatus == .synced else { return false }
+            return !ids.contains(id) && dia.gastos.isEmpty
+        }
+        guard !sumidos.isEmpty else { return }
+        for dia in sumidos { modelContext?.delete(dia) }
+        salvarLocal()
+        carregarDiasLocais()
+    }
+
+    /// Viagem mostrada no início: a que contém hoje, senão a próxima, senão a última encerrada.
+    var cicloInicio: CicloSoftex? {
+        cicloDoInicio(allCiclos, hoje: .now)
+    }
+
+    /// Carrega a viagem escolhida em Viagens sem mudar `cicloInicio`.
+    func abrirViagem(_ ciclo: CicloSoftex) {
+        loadMoreDiasTask?.cancel()
+        loadMoreDiasTask = nil
+        atualCiclo = ciclo
+        index = allCiclos.firstIndex(where: { $0.id == ciclo.id }) ?? 0
+        diasSkip = 0
+        carregarDiasLocais()
+        if let cicloId = ciclo.backendId, NetworkMonitor.shared.isConnected {
+            hasMoreDias = true
+            loadMoreDiasTask = Task { await loadMoreDias(cicloId: cicloId) }
+        } else {
+            hasMoreDias = false
         }
     }
 
@@ -383,8 +462,10 @@ final class CiclosViewModel: ObservableObject {
 
         // Recuperação defensiva: ciclos antigos/corrompidos podem ter perdido
         // seus dias. Se o ciclo tem um periodo valido, re-gera os dias localmente
-        // para o usuario nao ficar bloqueado.
-        if diasAtualizados.isEmpty, !atualCiclo.periodo.isEmpty {
+        // para o usuario nao ficar bloqueado. Só para ciclo nunca sincronizado:
+        // os dias de um ciclo com `backendId` vêm do servidor (`loadMoreDias`);
+        // recriá-los aqui geraria clientIds novos que subiriam como duplicatas.
+        if diasAtualizados.isEmpty, atualCiclo.backendId == nil, !atualCiclo.periodo.isEmpty {
             diasAtualizados = reconstruirDiasParaCicloAtual()
         }
 
@@ -431,21 +512,21 @@ final class CiclosViewModel: ObservableObject {
     }
     
     private func salvarOuAtualizarDiaLocal(_ dia: DiaSoftex, no ciclo: CicloSoftex) {
-        if let backendId = dia.backendId {
-            let descriptor = FetchDescriptor<DiaSoftex>(
-                predicate: #Predicate { $0.backendId == backendId }
-            )
-            if let existente = try? modelContext?.fetch(descriptor).first {
-                existente.data = dia.data
-                existente.saldo = dia.saldo
-                existente.ciclo = ciclo
-                for gasto in dia.gastos {
-                    salvarOuAtualizarGastoLocal(gasto, no: existente)
-                }
-                existente.syncStatus = .synced
-                existente.syncError = nil
-                return
+        // Casa pelo backendId e, sem ele, pelo clientId: um dia criado no iPhone que ainda não tinha
+        // recebido o backendId não era reconhecido e o do servidor entrava como outro dia (10/11:
+        // cada data aparecia duas vezes ao escolher a data do gasto).
+        if let existente = diaLocal(backendId: dia.backendId) ?? diaLocal(clientId: dia.clientId) {
+            existente.backendId = dia.backendId ?? existente.backendId
+            existente.data = dia.data
+            existente.saldo = dia.saldo
+            existente.ciclo = ciclo
+            for gasto in dia.gastos {
+                salvarOuAtualizarGastoLocal(gasto, no: existente)
             }
+            existente.syncStatus = .synced
+            existente.syncError = nil
+            absorverDuplicatas(de: existente)
+            return
         }
         dia.syncStatus = .synced
         dia.syncError = nil
@@ -453,6 +534,34 @@ final class CiclosViewModel: ObservableObject {
         modelContext?.insert(dia)
         for gasto in dia.gastos {
             salvarOuAtualizarGastoLocal(gasto, no: dia)
+        }
+    }
+
+    private func diaLocal(backendId: Int?) -> DiaSoftex? {
+        guard let backendId else { return nil }
+        let descriptor = FetchDescriptor<DiaSoftex>(predicate: #Predicate { $0.backendId == backendId })
+        return try? modelContext?.fetch(descriptor).first
+    }
+
+    private func diaLocal(clientId: String) -> DiaSoftex? {
+        let descriptor = FetchDescriptor<DiaSoftex>(
+            predicate: #Predicate { $0.clientId == clientId && $0.deletadoEm == nil }
+        )
+        return try? modelContext?.fetch(descriptor).first
+    }
+
+    /// Duplicatas que já ficaram no aparelho (mesmo clientId, outro registro): os gastos delas
+    /// passam para o dia que ficou e elas saem. Roda a cada carga dos dias do servidor.
+    private func absorverDuplicatas(de dia: DiaSoftex) {
+        let clientId = dia.clientId
+        let id = dia.id
+        let descriptor = FetchDescriptor<DiaSoftex>(
+            predicate: #Predicate { $0.clientId == clientId && $0.id != id }
+        )
+        guard let outros = try? modelContext?.fetch(descriptor), !outros.isEmpty else { return }
+        for outro in outros {
+            for gasto in Array(outro.gastos) { gasto.dia = dia }
+            modelContext?.delete(outro)
         }
     }
 
@@ -617,7 +726,7 @@ final class CiclosViewModel: ObservableObject {
         }
 
         if self.atualCiclo.id == cicloId {
-            if let primeiroCiclo = self.allCiclos.first {
+            if let primeiroCiclo = self.cicloInicio ?? self.allCiclos.first {
                 self.atualCiclo = primeiroCiclo
                 if let firstIndex = self.allCiclos.firstIndex(of: primeiroCiclo) {
                     self.index = firstIndex
@@ -845,15 +954,8 @@ final class CiclosViewModel: ObservableObject {
         let gastoAntigoValor = gastoLocal.valor
         let diferenca = value - gastoAntigoValor
 
-        if oldDiaIndex == newDiaIndex {
-            guard (self.atualCiclo.dias?[oldDiaIndex].saldo ?? 0) - diferenca >= 0 else {
-                throw APIError.serverError(message: "Saldo do dia insuficiente", requestId: "-", statusCode: 400)
-            }
-        } else {
-            guard (self.atualCiclo.dias?[newDiaIndex].saldo ?? 0) - value >= 0 else {
-                throw APIError.serverError(message: "Saldo do dia de destino insuficiente", requestId: "-", statusCode: 400)
-            }
-        }
+        // Editar um gasto pode passar da diária: o saldo do dia fica negativo
+        // e a interface mostra quanto passou.
 
         gastoLocal.titulo = titulo
         gastoLocal.valor = value
