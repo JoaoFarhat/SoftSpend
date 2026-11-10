@@ -56,7 +56,6 @@ struct NewCicloView: View {
                 campoDestino
                 datas
                 textoDias
-                if !isEditing { seletorModo }
                 campoValor(.total)
                 Label("um calcula o outro", systemImage: "arrow.up.arrow.down")
                     .font(.subheadline)
@@ -189,31 +188,6 @@ struct NewCicloView: View {
             .foregroundStyle(n < 1 ? Tema.estouro : Tema.textoFraco)
             .padding(.horizontal, 2)
             .padding(.vertical, 2)
-    }
-
-    /// Diária | Cartão corporativo. O cartão fica para quando o Open Finance voltar.
-    private var seletorModo: some View {
-        HStack(spacing: 0) {
-            Text("Diária")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Tema.texto)
-                .frame(maxWidth: .infinity, minHeight: 34)
-                .padding(.vertical, 4)
-                .background(Tema.superficie, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                .accessibilityAddTraits(.isSelected)
-            (Text("Cartão corporativo ") + Text("em breve").font(.caption))
-                .font(.subheadline)
-                .foregroundStyle(Tema.textoFraco)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: .infinity, minHeight: 34)
-                .padding(.vertical, 4)
-                .accessibilityLabel("Cartão corporativo, em breve")
-                .accessibilityAddTraits(.isStaticText)
-        }
-        .padding(3)
-        .background(Tema.superficie2, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .padding(.bottom, Espaco.p)
-        .accessibilityElement(children: .contain)
     }
 
     private func campoValor(_ campo: FormularioViagem.Campo) -> some View {

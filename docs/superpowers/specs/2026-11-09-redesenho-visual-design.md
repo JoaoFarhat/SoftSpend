@@ -117,7 +117,7 @@ Sem ciclo ativo: estado vazio com uma frase e o botão "Nova viagem".
 ### Demais telas (do mapa aprovado; cada grupo ganha esboço antes de ser programado)
 
 - **Entrar / Criar conta:** só os campos e o botão, sem enfeite; acentos corrigidos ("Não tem conta?", "começar", "usuário"); botão com contraste correto.
-- **Nova viagem:** cidade, datas e os campos ligados total ↔ diária (ver "Decisões do usuário" abaixo). Opção "uso cartão corporativo" aparece desabilitada com "em breve" (ou oculta enquanto `GET /api/features` disser `open_finance: false`, como o menu já faz).
+- **Nova viagem:** cidade, datas e os campos ligados total ↔ diária (ver "Decisões do usuário" abaixo). Opção "uso cartão corporativo" aparece desabilitada com "em breve" (ou oculta enquanto `GET /api/features` disser `open_finance: false`, como o menu já faz). **(10/11, decisão do usuário: nada de "em breve" no app; a App Store recusa recurso anunciado que não existe. A opção do cartão sai da Nova viagem e só volta quando o recurso funcionar.)**
 - **Câmera:** abre direto do botão principal; ao tirar a foto, a leitura do comprovante (a mesma de hoje) preenche valor, local, data e categoria.
 - **Confirmar gasto:** mostra o que foi lido para corrigir e salvar; também serve para lançar sem foto e anexar depois. Sem "com IA" e sem brilhos: a leitura é um detalhe, não um anúncio.
 - **Detalhe do gasto:** foto do comprovante grande, editar, apagar.
