@@ -156,7 +156,7 @@ struct MainView: View {
         case .gastos:
             pilha(.gastos) {
                 // Os gastos da viagem do início (a que o usuário está vendo), como o "Ver todos".
-                TodosGastosView(cicloId: viewModel.cicloInicioEm(hoje)?.id, filtro: .todos)
+                TodosGastosView(cicloId: viewModel.cicloInicioEm(hoje)?.id, filtro: .todos, raiz: true)
             }
         }
     }

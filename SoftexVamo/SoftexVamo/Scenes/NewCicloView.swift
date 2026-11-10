@@ -53,23 +53,6 @@ struct NewCicloView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Espaco.p) {
-                Button(action: fechar) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "chevron.left").fontWeight(.semibold)
-                        Text("Cancelar")
-                    }
-                    .font(.body)
-                    .foregroundStyle(Tema.marcaTexto)
-                }
-                .buttonStyle(.plain)
-                .padding(.top, Espaco.p)
-
-                Text(isEditing ? "Editar viagem" : "Nova viagem")
-                    .font(.largeTitle.weight(.bold))
-                    .foregroundStyle(Tema.texto)
-                    .accessibilityAddTraits(.isHeader)
-                    .padding(.bottom, Espaco.m)
-
                 campoDestino
                 datas
                 textoDias
@@ -92,9 +75,11 @@ struct NewCicloView: View {
                 }
             }
             .padding(.horizontal, Espaco.g + 10)
+            .padding(.top, Espaco.p)
             .padding(.bottom, Espaco.g)
         }
         .scrollDismissesKeyboard(.interactively)
+        .safeAreaInset(edge: .top) { barraTopo }
         .safeAreaInset(edge: .bottom) {
             BotaoPrincipal(isEditing ? "Salvar alterações" : "Criar viagem", acao: salvar)
                 .disabled(salvando)
@@ -265,6 +250,32 @@ struct NewCicloView: View {
     }
 
     // MARK: Ações
+
+    /// Barra fixa no topo: "Cancelar" à esquerda e o título pequeno no meio, como nos formulários do
+    /// iPhone. O título grande empurrava os campos para baixo e "Criar viagem" colava no teclado (10/11).
+    private var barraTopo: some View {
+        ZStack {
+            Text(isEditing ? "Editar viagem" : "Nova viagem")
+                .font(.headline)
+                .foregroundStyle(Tema.texto)
+                .accessibilityAddTraits(.isHeader)
+            HStack {
+                Button(action: fechar) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left").fontWeight(.semibold)
+                        Text("Cancelar")
+                    }
+                    .font(.body)
+                    .foregroundStyle(Tema.marcaTexto)
+                }
+                .buttonStyle(.plain)
+                Spacer()
+            }
+        }
+        .padding(.horizontal, Espaco.g + 2)
+        .padding(.vertical, Espaco.m)
+        .background(Tema.fundo.ignoresSafeArea(edges: .top))
+    }
 
     private func fechar() {
         foco = nil

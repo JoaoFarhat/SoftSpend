@@ -59,7 +59,7 @@ struct FecharViagemView: View {
         }
         .background(Tema.fundo.ignoresSafeArea())
         .navigationTitle("Fechar viagem")
-        .navigationBarTitleDisplayMode(.large)
+        .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: Binding(get: { arquivo != nil }, set: { if !$0 { arquivo = nil } })) {
             if let arquivo { ActivityViewController(activityItems: [arquivo]) }
         }

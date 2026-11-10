@@ -63,6 +63,8 @@ private func valorCurtoSemSimbolo(_ valor: Decimal) -> String {
 /// Tela 12: todos os gastos da viagem do início, por dia, com busca e filtros.
 struct TodosGastosView: View {
     let cicloId: UUID?
+    /// Raiz da aba Gastos: título grande. Aberta a partir de outra tela, título pequeno (10/11).
+    let raiz: Bool
 
     @EnvironmentObject private var viewModel: CiclosViewModel
     @Environment(\.abrirRota) private var abrirRota
@@ -72,8 +74,9 @@ struct TodosGastosView: View {
 
     @ScaledMetric(relativeTo: .body) private var tamanhoIcone: CGFloat = 36
 
-    init(cicloId: UUID?, filtro: FiltroGastos = .todos) {
+    init(cicloId: UUID?, filtro: FiltroGastos = .todos, raiz: Bool = false) {
         self.cicloId = cicloId
+        self.raiz = raiz
         _filtro = State(initialValue: filtro)
     }
 
@@ -98,8 +101,17 @@ struct TodosGastosView: View {
         }
         .scrollDismissesKeyboard(.immediately)
         .background(Tema.fundo.ignoresSafeArea())
-        .navigationTitle(ciclo.map { "Gastos em \(nomeCidade($0.titulo))" } ?? "Todos os gastos")
-        .navigationBarTitleDisplayMode(.large)
+        // Título curto; a viagem vai no subtítulo ("Florianópolis · 10 a 17 de novembro"), para o
+        // título não ocupar três linhas nem repetir o nome da aba (10/11).
+        .navigationTitle("Gastos")
+        .navigationSubtitle(ciclo.map(subtitulo) ?? "")
+        .navigationBarTitleDisplayMode(raiz ? .large : .inline)
+    }
+
+    private func subtitulo(_ ciclo: CicloSoftex) -> String {
+        let cidade = nomeCidade(ciclo.titulo)
+        guard let datas = intervaloViagem(ciclo) else { return cidade }
+        return "\(cidade) · \(periodoPorExtenso(de: datas.ini, ate: datas.fim))"
     }
 
     // MARK: Busca e filtros
