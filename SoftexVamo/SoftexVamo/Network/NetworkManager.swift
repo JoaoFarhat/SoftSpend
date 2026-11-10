@@ -75,7 +75,34 @@ final class NetworkManager: Sendable {
 
     private nonisolated let decoder: JSONDecoder = {
         let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
+        d.dateDecodingStrategy = .custom { decoder in
+            let container = try decoder.singleValueContainer()
+            let value = try container.decode(String.self)
+
+            let isoFormatter = ISO8601DateFormatter()
+            isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = isoFormatter.date(from: value) {
+                return date
+            }
+
+            isoFormatter.formatOptions = [.withInternetDateTime]
+            if let date = isoFormatter.date(from: value) {
+                return date
+            }
+
+            let utcFormatter = DateFormatter()
+            utcFormatter.locale = Locale(identifier: "en_US_POSIX")
+            utcFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+            utcFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+            if let date = utcFormatter.date(from: value) {
+                return date
+            }
+
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Data inválida: \(value)"
+            )
+        }
         return d
     }()
 
@@ -386,6 +413,13 @@ final class NetworkManager: Sendable {
 
         let response = try decoder.decode(GastosDiaResponse.self, from: try await execute(makeRequest(url: url, method: "DELETE")))
         return response.toGastosDia()
+    }
+
+    nonisolated func fetchFeatures() async throws -> FeaturesResponse {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/features") else {
+            throw URLError(.badURL)
+        }
+        return try decoder.decode(FeaturesResponse.self, from: try await execute(makeRequest(url: url)))
     }
 
     nonisolated func fetchOpenFinanceConnections() async throws -> [OpenFinanceConnectionResponse] {

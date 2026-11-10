@@ -297,6 +297,7 @@ Open Finance com Pluggy (`services/open_finance_service.py`):
 
 | Variável | Default | Descrição |
 | --- | --- | --- |
+| `OPEN_FINANCE_ENABLED` | `false` | Com `false` as rotas `/api/open-finance/*`, `/api/connect-token` e `/api/webhooks/pluggy` não são registradas (404) e `GET /api/features` devolve `{"open_finance": false}`; nenhuma variável `PLUGGY_*` é necessária. Com `true` tudo funciona como antes |
 | `PLUGGY_CLIENT_ID` | — | Credencial da aplicação no Pluggy; sem ela `/api/connect-token` responde 503 |
 | `PLUGGY_CLIENT_SECRET` | — | Segredo da aplicação no Pluggy; somente no backend |
 | `PLUGGY_API_URL` | `https://api.pluggy.ai` | Base URL da API |
@@ -334,8 +335,9 @@ No iOS, `CartaoOpenFinance`, `FaturaCartao` e `TransacaoCartao` são models
 SwiftData somente de leitura cacheados por `backendId`. `OpenFinanceViewModel`
 faz upsert a partir dos DTOs, apaga registros que sumiram no backend e
 reaplica os matches em `GastosDia`. A tela `OpenFinanceView` (hoje fora da
-navegação do visual novo) lista cartões e faturas; `FaturaDetalheView` permite confirmar
-ou remover um vínculo em revisão.
+navegação do visual novo: volta quando o Open Finance estiver ligado, sem "em breve")
+lista cartões, faturas e todas as transações do cartão; `FaturaDetalheView` e
+`CartaoTransacoesView` permitem confirmar ou remover um vínculo em revisão.
 
 | Variável | Default | Descrição |
 | --- | --- | --- |

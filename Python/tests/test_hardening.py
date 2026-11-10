@@ -19,6 +19,20 @@ from services.comprovante_cleanup import (
 )
 
 
+def _app_com_open_finance(monkeypatch):
+    """Recarrega `main` com OPEN_FINANCE_ENABLED=true e devolve o app.
+
+    O registro das rotas do Pluggy e decidido na importacao do modulo,
+    entao `main` precisa ser reimportado quando a flag muda de valor.
+    """
+    import importlib
+    import sys
+
+    monkeypatch.setenv("OPEN_FINANCE_ENABLED", "true")
+    sys.modules.pop("main", None)
+    return importlib.import_module("main").app
+
+
 def _request(client: str, forwarded: str | None = None) -> Request:
     headers = []
     if forwarded:
@@ -184,7 +198,7 @@ def test_https_behind_proxy_includes_hsts_header():
 
 
 def test_pluggy_webhook_requires_configured_secret(monkeypatch):
-    from main import app
+    app = _app_com_open_finance(monkeypatch)
 
     monkeypatch.delenv("PLUGGY_WEBHOOK_SECRET", raising=False)
     client = TestClient(app)
@@ -198,8 +212,9 @@ def test_pluggy_webhook_requires_configured_secret(monkeypatch):
 
 
 def test_pluggy_webhook_processes_valid_event_in_background(monkeypatch):
-    from main import app
     from services import open_finance_service
+
+    app = _app_com_open_finance(monkeypatch)
 
     eventos = []
 
@@ -229,7 +244,7 @@ def test_pluggy_webhook_processes_valid_event_in_background(monkeypatch):
 
 
 def test_pluggy_webhook_rejects_invalid_secret(monkeypatch):
-    from main import app
+    app = _app_com_open_finance(monkeypatch)
 
     monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "webhook-secret")
     client = TestClient(app)
@@ -244,8 +259,9 @@ def test_pluggy_webhook_rejects_invalid_secret(monkeypatch):
 
 
 def test_pluggy_webhook_accepts_secret_in_url_token(monkeypatch):
-    from main import app
     from services import open_finance_service
+
+    app = _app_com_open_finance(monkeypatch)
 
     eventos = []
 
@@ -266,7 +282,7 @@ def test_pluggy_webhook_accepts_secret_in_url_token(monkeypatch):
 
 
 def test_pluggy_webhook_accepts_dashboard_probe_with_empty_body(monkeypatch):
-    from main import app
+    app = _app_com_open_finance(monkeypatch)
 
     monkeypatch.setenv("PLUGGY_WEBHOOK_SECRET", "webhook-secret")
     client = TestClient(app)
@@ -282,8 +298,9 @@ def test_pluggy_webhook_accepts_dashboard_probe_with_empty_body(monkeypatch):
 
 def test_connect_token_uses_authenticated_user(monkeypatch):
     from dependencies import get_current_user_id
-    from main import app
     from services import open_finance_service
+
+    app = _app_com_open_finance(monkeypatch)
 
     chamadas = []
 
@@ -741,8 +758,9 @@ def test_pluggy_item_webhook_triggers_import(monkeypatch):
 def test_open_finance_cards_are_scoped_to_authenticated_user(monkeypatch, tmp_path):
     from database import Base, get_db
     from dependencies import get_current_user_id
-    from main import app
     import models
+
+    app = _app_com_open_finance(monkeypatch)
 
     engine = create_engine(f"sqlite:///{tmp_path}/open_finance.db")
     Base.metadata.create_all(engine)
@@ -873,8 +891,9 @@ def test_open_finance_cards_are_scoped_to_authenticated_user(monkeypatch, tmp_pa
 
 def test_open_finance_manual_sync_uses_authenticated_user(monkeypatch):
     from dependencies import get_current_user_id
-    from main import app
     from services import open_finance_service
+
+    app = _app_com_open_finance(monkeypatch)
 
     chamadas = []
 
