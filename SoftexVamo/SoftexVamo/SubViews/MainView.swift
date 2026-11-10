@@ -7,6 +7,7 @@
 
 import SwiftUI
 import SwiftData
+import UIKit
 import Combine
 
 /// Abas da barra de baixo. O redesenho tinha tirado a barra e deixado tudo no menu do avatar, e o
@@ -57,6 +58,14 @@ struct MainView: View {
     @State private var aba: Aba = .inicio
     /// Abas já abertas ficam vivas (escondidas), preservando a pilha e a rolagem de cada uma.
     @State private var visitadas: Set<Aba> = [.inicio]
+    /// Teclado na tela: a barra sai (10/11, no iPhone ela subia junto com o teclado e o "OK" do
+    /// teclado numérico ficava por cima dela).
+    @State private var tecladoAberto = false
+
+    /// A barra some com o teclado aberto e na Nova viagem, que é um formulário com o próprio "Cancelar".
+    private var mostrarBarra: Bool {
+        !tecladoAberto && caminhos[aba]?.last != .novaViagem
+    }
     /// Pilha de cada aba: trocar de aba não perde onde o usuário estava na outra.
     @State private var caminhos: [Aba: [Rota]] = [:]
     /// Relógio do início: atualizado na virada do dia e ao voltar para o app.
@@ -83,18 +92,26 @@ struct MainView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            Divider()
+            if mostrarBarra {
+                Divider()
 
-            HStack(spacing: 0) {
-                ForEach(Aba.allCases, id: \.self) { item in
-                    BotaoAba(aba: item, selecionada: item == aba) { selecionar(item) }
+                HStack(spacing: 0) {
+                    ForEach(Aba.allCases, id: \.self) { item in
+                        BotaoAba(aba: item, selecionada: item == aba) { selecionar(item) }
+                    }
+                }
+                .padding(.horizontal, Espaco.p)
+                .padding(.top, Espaco.p)
+                .background {
+                    Tema.superficie.ignoresSafeArea(edges: .bottom)
                 }
             }
-            .padding(.horizontal, Espaco.p)
-            .padding(.top, Espaco.p)
-            .background {
-                Tema.superficie.ignoresSafeArea(edges: .bottom)
-            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)) { _ in
+            tecladoAberto = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)) { _ in
+            tecladoAberto = false
         }
         .environment(\.abrirRota) { abrir($0) }
         .tint(Tema.marcaTexto)
