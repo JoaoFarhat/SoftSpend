@@ -95,24 +95,18 @@ struct SoftexVamoApp: App {
 
     private static let appLogger = Logger(subsystem: "br.com.softspend", category: "SoftexVamoApp")
 
-    /// Cria o ModelContainer com fallback destrutivo: se o banco existente for
-    /// incompatível com o schema atual (ex: UserModel.id mudou de Int para
-    /// String, CicloSoftex ganhou userId, etc.), apaga o arquivo e cria um
-    /// novo. Isso perde dados locais não-sincronizados, mas evita crash/save
-    /// silencioso enquanto o app ainda não tem um SchemaMigrationPlan oficial.
-    /// TODO: substituir por VersionedSchema + SchemaMigrationPlan antes do
-    /// release para usuários reais.
+    /// Abre o banco local com o schema versionado (`SoftSpendSchemaV1`) e o
+    /// `SoftSpendMigrationPlan`. O nome `"softspend"` e o arquivo
+    /// `softspend_v1.sqlite` não mudam: o banco da `main` é reconhecido como V1.
+    ///
+    /// Se o container não abrir (banco de build antiga que não bate com nenhuma
+    /// versão do plano, ou erro inesperado), o banco vai para quarentena: o
+    /// `.sqlite`, o `-wal` e o `-shm` são movidos para
+    /// `Application Support/softspend-backup-<yyyyMMdd-HHmmss>/` e um banco novo
+    /// é criado. Nada é apagado; o que já estava sincronizado volta do backend.
+    /// Spec: docs/migracao-banco-local-ios.md.
     private static func createModelContainer() -> ModelContainer {
-        let models: [any PersistentModel.Type] = [
-            CicloSoftex.self,
-            DiaSoftex.self,
-            GastosDia.self,
-            UserModel.self,
-            CartaoOpenFinance.self,
-            FaturaCartao.self,
-            TransacaoCartao.self,
-        ]
-        let schema = Schema(models)
+        let schema = Schema(versionedSchema: SoftSpendSchemaV1.self)
 
         let supportDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         try? FileManager.default.createDirectory(at: supportDir, withIntermediateDirectories: true)
@@ -126,27 +120,73 @@ struct SoftexVamoApp: App {
             cloudKitDatabase: .none
         )
 
-        do {
-            return try ModelContainer(for: schema, configurations: [config])
-        } catch {
-            appLogger.error("Falha ao abrir banco local em \(storeURL, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            appLogger.warning("Apagando banco incompatível e recriando (fallback destrutivo).")
+        func abrir() throws -> ModelContainer {
+            try ModelContainer(
+                for: schema,
+                migrationPlan: SoftSpendMigrationPlan.self,
+                configurations: [config]
+            )
+        }
 
-            if FileManager.default.fileExists(atPath: storeURL.path) {
-                do {
-                    try FileManager.default.removeItem(at: storeURL)
-                    appLogger.warning("Banco antigo removido: \(storeURL, privacy: .public)")
-                } catch {
-                    appLogger.error("Não conseguiu apagar banco antigo: \(error.localizedDescription, privacy: .public)")
-                }
+        do {
+            return try abrir()
+        } catch {
+            let nsError = error as NSError
+            appLogger.error("Falha ao abrir banco local em \(storeURL.path, privacy: .public): \(String(describing: error), privacy: .public)")
+            appLogger.error("userInfo do erro: \(String(describing: nsError.userInfo), privacy: .public)")
+
+            if let backupDir = moverParaQuarentena(storeURL: storeURL, supportDir: supportDir) {
+                appLogger.warning("Banco antigo em quarentena (backup) em \(backupDir.path, privacy: .public). Criando banco novo.")
             }
 
             do {
-                return try ModelContainer(for: schema, configurations: [config])
+                return try abrir()
             } catch {
-                appLogger.fault("Falha fatal ao recriar banco: \(error.localizedDescription, privacy: .public)")
+                let nsError = error as NSError
+                appLogger.fault("Falha fatal ao recriar banco: \(String(describing: error), privacy: .public) userInfo: \(String(describing: nsError.userInfo), privacy: .public)")
                 fatalError("Não foi possível criar o banco local: \(error)")
             }
         }
+    }
+
+    /// Move o `.sqlite`, o `-wal` e o `-shm` do banco para uma pasta de backup
+    /// datada ao lado. Nunca apaga. Devolve a pasta se moveu ao menos um arquivo.
+    private static func moverParaQuarentena(storeURL: URL, supportDir: URL) -> URL? {
+        let fm = FileManager.default
+        let nome = storeURL.lastPathComponent
+        let arquivos = [nome, nome + "-wal", nome + "-shm"]
+            .map { storeURL.deletingLastPathComponent().appendingPathComponent($0) }
+            .filter { fm.fileExists(atPath: $0.path) }
+
+        guard !arquivos.isEmpty else {
+            appLogger.warning("Nenhum arquivo do banco para pôr em quarentena em \(storeURL.path, privacy: .public).")
+            return nil
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        var backupDir = supportDir.appendingPathComponent("softspend-backup-\(formatter.string(from: Date()))")
+        if fm.fileExists(atPath: backupDir.path) {
+            backupDir = supportDir.appendingPathComponent("softspend-backup-\(formatter.string(from: Date()))-\(UUID().uuidString.prefix(8))")
+        }
+
+        do {
+            try fm.createDirectory(at: backupDir, withIntermediateDirectories: true)
+        } catch {
+            appLogger.error("Não conseguiu criar a pasta de backup \(backupDir.path, privacy: .public): \(String(describing: error), privacy: .public)")
+            return nil
+        }
+
+        var moveuAlgum = false
+        for arquivo in arquivos {
+            do {
+                try fm.moveItem(at: arquivo, to: backupDir.appendingPathComponent(arquivo.lastPathComponent))
+                moveuAlgum = true
+            } catch {
+                appLogger.error("Não conseguiu mover \(arquivo.lastPathComponent, privacy: .public) para o backup: \(String(describing: error), privacy: .public)")
+            }
+        }
+        return moveuAlgum ? backupDir : nil
     }
 }
