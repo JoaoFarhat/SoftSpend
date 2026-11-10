@@ -15,6 +15,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+import models
+
 SENHA = "Senha123!"
 ROTA_PROTEGIDA = "/usuario/ciclos"
 
@@ -25,6 +27,7 @@ def _app(monkeypatch):
         "REFRESH_TOKEN_SECRET_KEY", "refresh-secret-com-pelo-menos-32-chars!"
     )
     monkeypatch.delenv("OPEN_FINANCE_ENABLED", raising=False)
+    monkeypatch.delenv("REFRESH_REUSE_GRACE_SECONDS", raising=False)
     sys.modules.pop("main", None)
     return importlib.import_module("main").app
 
@@ -55,6 +58,9 @@ def client(monkeypatch, tmp_path):
     app.dependency_overrides[get_db] = override_db
     try:
         with TestClient(app) as c:
+            # Testes que mexem nas linhas de refresh_tokens (janela de
+            # tolerancia, expiracao) usam a mesma engine da app.
+            c.SessionLocal = SessionLocal
             c.post(
                 "/auth/register",
                 json={
@@ -143,6 +149,23 @@ def test_reuso_de_refresh_derruba_todos_os_access_tokens(client):
     sessao_b = _login(client)
     rotacionada = _refresh(client, sessao_a["refresh_token"]).json()
 
+    # Empurra o revoked_at para alem da janela de tolerancia: um token vazado
+    # reapresentado depois nao entra na excecao da janela.
+    db = client.SessionLocal()
+    try:
+        rt = (
+            db.query(models.RefreshToken)
+            .filter(
+                models.RefreshToken.token_hash
+                == _auth_service()._hash_token(sessao_a["refresh_token"])
+            )
+            .one()
+        )
+        rt.revoked_at = rt.revoked_at - timedelta(seconds=120)
+        db.commit()
+    finally:
+        db.close()
+
     # Reapresentar o refresh token ja rotacionado indica vazamento.
     assert _refresh(client, sessao_a["refresh_token"]).status_code == 401
 
@@ -151,6 +174,89 @@ def test_reuso_de_refresh_derruba_todos_os_access_tokens(client):
         rotacionada["access_token"],
         sessao_b["access_token"],
     ):
+        assert _status(client, token) == 401
+
+
+def test_reuso_dentro_da_janela_emite_par_novo_na_mesma_sessao(client):
+    sessao = _login(client)
+    rotacionada = _refresh(client, sessao["refresh_token"]).json()
+
+    # Replica imediata do token ja rotacionado cai na janela de tolerancia:
+    # com a sessao ainda ativa, um par novo e emitido sem revogar nada.
+    resp = _refresh(client, sessao["refresh_token"])
+    assert resp.status_code == 200, resp.text
+    replica = resp.json()
+
+    assert replica["refresh_token"] not in (
+        sessao["refresh_token"],
+        rotacionada["refresh_token"],
+    )
+    sid = jwt.decode(
+        sessao["access_token"], options={"verify_signature": False}
+    )["sid"]
+    assert (
+        jwt.decode(
+            replica["access_token"], options={"verify_signature": False}
+        )["sid"]
+        == sid
+    )
+    for token in (
+        sessao["access_token"],
+        rotacionada["access_token"],
+        replica["access_token"],
+    ):
+        assert _status(client, token) == 200
+    # O refresh token emitido na rotacao continua vivo na mesma sessao.
+    assert _refresh(client, rotacionada["refresh_token"]).status_code == 200
+
+
+def test_reuso_na_janela_depois_do_logout_revoga(client):
+    sessao = _login(client)
+    rotacionada = _refresh(client, sessao["refresh_token"]).json()
+
+    resp = client.post(
+        "/auth/logout", json={"refresh_token": rotacionada["refresh_token"]}
+    )
+    assert resp.status_code == 204
+
+    # Dentro da janela, mas a sessao nao esta mais ativa: conta como reuso.
+    assert _refresh(client, sessao["refresh_token"]).status_code == 401
+    for token in (sessao["access_token"], rotacionada["access_token"]):
+        assert _status(client, token) == 401
+
+
+def test_janela_zero_desliga_tolerancia(client, monkeypatch):
+    monkeypatch.setenv("REFRESH_REUSE_GRACE_SECONDS", "0")
+    sessao = _login(client)
+    rotacionada = _refresh(client, sessao["refresh_token"]).json()
+
+    # Replica imediata: sem janela, volta ao comportamento de reuso.
+    assert _refresh(client, sessao["refresh_token"]).status_code == 401
+    for token in (sessao["access_token"], rotacionada["access_token"]):
+        assert _status(client, token) == 401
+
+
+def test_reuso_na_janela_com_refresh_novo_expirado_revoga(client):
+    sessao = _login(client)
+    rotacionada = _refresh(client, sessao["refresh_token"]).json()
+
+    # Expira o refresh token emitido na rotacao: a sessao deixa de estar
+    # ativa e a replica do token antigo volta a contar como reuso.
+    db = client.SessionLocal()
+    try:
+        passado = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(
+            seconds=1
+        )
+        db.query(models.RefreshToken).filter(
+            models.RefreshToken.token_hash
+            == _auth_service()._hash_token(rotacionada["refresh_token"])
+        ).update({"expires_at": passado})
+        db.commit()
+    finally:
+        db.close()
+
+    assert _refresh(client, sessao["refresh_token"]).status_code == 401
+    for token in (sessao["access_token"], rotacionada["access_token"]):
         assert _status(client, token) == 401
 
 

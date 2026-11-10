@@ -377,6 +377,7 @@ Autenticação OAuth2 / refresh tokens (`services/auth_service.py`):
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | `15` | Tempo de vida do access token |
 | `REFRESH_TOKEN_EXPIRE_DAYS` | `7` | Tempo de vida do refresh token |
 | `REVOKE_OLD_REFRESH_TOKENS_ON_LOGIN` | `false` | Se `true`, login invalida refresh tokens antigos (apenas uma sessão ativa) |
+| `REFRESH_REUSE_GRACE_SECONDS` | `60` | Janela de tolerância (segundos) para reuso de refresh token recém-rotacionado com a sessão ainda ativa; `0` desliga. Lida a cada chamada |
 | `HSTS_MAX_AGE` | `31536000` | Valor do header `Strict-Transport-Security` em segundos |
 
 Sessões: cada login gera um `session_id` novo, gravado no refresh token e no
@@ -386,7 +387,10 @@ existir refresh token dessa sessão, do mesmo usuário, não revogado e não
 expirado. Assim:
 
 - o logout revoga a sessão inteira e o access token dela cai na hora;
-- o reuso de refresh token revoga todas as sessões do usuário;
+- o reuso de refresh token revoga todas as sessões do usuário — exceto dentro
+  da janela de `REFRESH_REUSE_GRACE_SECONDS` com a sessão ainda ativa, caso em
+  que um par novo é emitido na mesma sessão (tolera réplica legítima logo após
+  a rotação);
 - a rotação normal não derruba requisições em voo (o token antigo segue válido);
 - tokens sem `sid` (emitidos antes dessa regra) seguem aceitos até expirar.
 

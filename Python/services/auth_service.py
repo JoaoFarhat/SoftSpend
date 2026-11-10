@@ -190,8 +190,31 @@ def refresh_access_token(
         raise ValueError("Refresh token invalido ou expirado")
 
     # Reuso de token ja rotacionado indica vazamento: derruba todas as sessoes
-    # do usuario (recomendacao do OAuth 2.0 Security BCP).
+    # do usuario (recomendacao do OAuth 2.0 Security BCP). A janela de
+    # tolerancia absorve replicas legitimas logo apos a rotacao (cliente que
+    # repete o refresh por timeout ou corrida) sem derrubar a sessao, desde
+    # que ela ainda esteja ativa.
     if rt.revoked_at is not None:
+        # Lida a cada chamada para permitir ajuste sem restart.
+        janela = int(os.getenv("REFRESH_REUSE_GRACE_SECONDS", "60"))
+        if (
+            janela > 0
+            and agora - rt.revoked_at <= timedelta(seconds=janela)
+            and auth_repository.sessao_ativa(db, rt.session_id, rt.user_id)
+        ):
+            usuario = auth_repository.buscar_por_id(db, rt.user_id)
+            if not usuario:
+                raise ValueError("Refresh token invalido ou expirado")
+            logger.info(
+                "Reuso de refresh token dentro da janela de tolerancia para "
+                "user_id=%s; emitindo novo par na mesma sessao",
+                rt.user_id,
+            )
+            access_token = criar_access_token(rt.user_id, rt.session_id)
+            novo_refresh_token = criar_refresh_token(
+                db, rt.user_id, rt.session_id
+            )
+            return usuario, access_token, novo_refresh_token
         logger.warning(
             "Reuso de refresh token detectado para user_id=%s; revogando todas as sessoes",
             rt.user_id,
