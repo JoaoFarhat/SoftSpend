@@ -16,6 +16,11 @@ final class SyncManager: ObservableObject {
     @Published var pendentesRestantes: Int = 0
     @Published var lastSyncError: Error?
     private var syncActor: SyncActor?
+    /// T9: pedidos de sync que chegam com `isSyncing == true` não são mais
+    /// descartados — `pedidoPendente` manda rodar mais uma vez ao fim e
+    /// `forcarPendente` junta o `forcar` dos pedidos com OU.
+    private var pedidoPendente = false
+    private var forcarPendente = false
     private var networkObservationTask: Task<Void, Never>?
     private let logger = Logger(subsystem: "br.com.softspend", category: "SyncManager")
 
@@ -47,6 +52,12 @@ final class SyncManager: ObservableObject {
                 await sync(forcar: true)
             }
         }
+    }
+
+    /// Liga um `SyncActor` pronto sem disparar sync. Usado pelos testes para
+    /// injetar a `FakeSyncAPI`; em produção o caminho é o `configure`.
+    func injetarSyncActor(_ syncActor: SyncActor) {
+        self.syncActor = syncActor
     }
 
     /// Remove do banco local ciclos, dias e gastos que já foram sincronizados
@@ -92,9 +103,17 @@ final class SyncManager: ObservableObject {
     ///   conexão volta — senão um item que falhou algumas vezes fica até 1h
     ///   sem ser reenviado, mesmo com internet disponível.
     func sync(forcar: Bool = false) async {
-        guard let syncActor, !isSyncing else {
-            if syncActor == nil { logger.error("SyncManager: syncActor ainda não configurado") }
-            if isSyncing { logger.warning("SyncManager: sync já em andamento, ignorado") }
+        guard let syncActor else {
+            logger.error("SyncManager: syncActor ainda não configurado")
+            return
+        }
+        if isSyncing {
+            // T9: lembra o pedido e roda mais uma vez ao fim — uma edição
+            // feita durante o envio não espera o próximo gatilho (abrir o
+            // app, a rede voltar) para subir.
+            pedidoPendente = true
+            forcarPendente = forcarPendente || forcar
+            logger.info("SyncManager: sync já em andamento, pedido guardado para o fim")
             return
         }
         guard NetworkMonitor.shared.isConnected else {
@@ -108,12 +127,19 @@ final class SyncManager: ObservableObject {
         }
         isSyncing = true
         defer { isSyncing = false }
-        lastSyncError = nil
-        let agora = Date()
-        logger.info("SyncManager: iniciando sync para userId \(userId, privacy: .private), forcar=\(forcar, privacy: .public)")
-        let restantes = await syncActor.sync(agora: agora, userId: userId, forcar: forcar)
-        pendentesRestantes = restantes
-        logger.info("SyncManager: sync finalizado, pendentes restantes=\(restantes, privacy: .public)")
+        var forcarRodada = forcar
+        repeat {
+            pedidoPendente = false
+            let forcarAtual = forcarRodada
+            forcarRodada = forcarPendente
+            forcarPendente = false
+            lastSyncError = nil
+            let agora = Date()
+            logger.info("SyncManager: iniciando sync para userId \(userId, privacy: .private), forcar=\(forcarAtual, privacy: .public)")
+            let restantes = await syncActor.sync(agora: agora, userId: userId, forcar: forcarAtual)
+            pendentesRestantes = restantes
+            logger.info("SyncManager: sync finalizado, pendentes restantes=\(restantes, privacy: .public)")
+        } while pedidoPendente
     }
 
 }
@@ -233,8 +259,18 @@ actor SyncActor: ModelActor {
         let ciclos = (try? contexto.fetchCount(cicloDesc)) ?? 0
         let todosDias = (try? contexto.fetch(diaDesc)) ?? []
         let todosGastos = (try? contexto.fetch(gastoDesc)) ?? []
-        let dias = todosDias.filter { $0.ciclo?.userId == userId }.count
-        let gastos = todosGastos.filter { $0.dia?.ciclo?.userId == userId }.count
+        // T8: filho de um pai já marcado como apagado não conta como pendente
+        // nem é enviado — o DELETE do pai (syncDeletions) apaga tudo em
+        // cascata no servidor. Filtro em memória: #Predicate não atravessa
+        // relacionamentos opcionais.
+        let dias = todosDias.filter {
+            $0.ciclo?.userId == userId && $0.ciclo?.deletadoEm == nil
+        }.count
+        let gastos = todosGastos.filter {
+            $0.dia?.ciclo?.userId == userId
+                && $0.dia?.deletadoEm == nil
+                && $0.dia?.ciclo?.deletadoEm == nil
+        }.count
         return ciclos + dias + gastos
     }
 
@@ -444,7 +480,10 @@ actor SyncActor: ModelActor {
             sortBy: [SortDescriptor(\.criadoEm)]
         )
         let todos = (try? contexto.fetch(descriptor)) ?? []
-        let dias = todos.filter { $0.ciclo?.userId == userId && deveTentar($0, agora: agora, forcar: forcar) }
+        // T8: dia de ciclo apagado não sobe — o DELETE do ciclo o remove em cascata.
+        let dias = todos.filter {
+            $0.ciclo?.userId == userId && $0.ciclo?.deletadoEm == nil && deveTentar($0, agora: agora, forcar: forcar)
+        }
 
         for dia in dias {
             guard let cicloId = dia.ciclo?.backendId else {
@@ -505,7 +544,13 @@ actor SyncActor: ModelActor {
             sortBy: [SortDescriptor(\.criadoEm)]
         )
         let todos = (try? contexto.fetch(descriptor)) ?? []
-        let gastos = todos.filter { $0.dia?.ciclo?.userId == userId && deveTentar($0, agora: agora, forcar: forcar) }
+        // T8: gasto de dia ou ciclo apagado não sobe — o DELETE do pai o remove em cascata.
+        let gastos = todos.filter {
+            $0.dia?.ciclo?.userId == userId
+                && $0.dia?.deletadoEm == nil
+                && $0.dia?.ciclo?.deletadoEm == nil
+                && deveTentar($0, agora: agora, forcar: forcar)
+        }
 
         for gasto in gastos {
             guard let diaIdReal = gasto.dia?.backendId else {
@@ -566,7 +611,15 @@ actor SyncActor: ModelActor {
             sortBy: [SortDescriptor(\.criadoEm)]
         )
         let todos = (try? contexto.fetch(descriptor)) ?? []
-        let gastos = todos.filter { $0.dia?.ciclo?.userId == userId && $0.backendId != nil && deveTentar($0, agora: agora, forcar: forcar) }
+        // T8: comprovante de gasto de dia ou ciclo apagado não sobe — o DELETE
+        // do pai remove tudo em cascata.
+        let gastos = todos.filter {
+            $0.dia?.ciclo?.userId == userId
+                && $0.dia?.deletadoEm == nil
+                && $0.dia?.ciclo?.deletadoEm == nil
+                && $0.backendId != nil
+                && deveTentar($0, agora: agora, forcar: forcar)
+        }
 
         for gasto in gastos {
             guard let backendId = gasto.backendId else { continue }
