@@ -236,6 +236,17 @@ veio na lista do dia, sai do aparelho. Para ciclos, com a lista completa de `fet
 ausente sai. Nunca remover item `pending`/`failed` nem com `deletadoEm`. Depende de T1. Testes dos dois casos mais o
 "item pendente é preservado".
 
+**Feito (11/11, na branch, sem merge). Pendência: validação no Mac** — build + `ExclusaoNoServidorTests` + suíte
+completa no simulador (feito no Windows, sem Xcode). Implementação em `CiclosViewModel`:
+- Gastos (`removerSumidos`, que substitui `removerDiasSumidos`): candidatos são os gastos `synced`, com `backendId` e sem
+  `deletadoEm` antes da busca; comparados com os gastos de **todos** os dias da lista (gasto movido de dia não sai).
+- Dia ausente da lista sai só se todos os gastos dele também saem (o delete em cascata nunca leva gasto vivo ou pendente).
+- Ciclos (`iniciarLeituraDeCiclos` + `registrarPaginaDeCiclos`): acumula as páginas desde `skip == 0`; só apaga na última
+  página (menor que `limit`) e só se nenhuma foi pulada (`proximoSkip`); falha, cancelamento ou offline invalidam a leitura.
+- Ciclo fica se ele ou qualquer dia/gasto dele tiver alteração local; se a viagem aberta sai, abre a do início.
+- Limite conhecido: ciclo apagado no servidor **entre** duas páginas desloca a lista e pode tirar daqui um ciclo que
+  existe; ele volta no próximo carregamento (só sai o que já estava sincronizado, nada pendente se perde).
+
 ### T7 — Apagar o que talvez já exista no servidor sem `backendId` (R7) — Complexa
 
 Em `syncDeletions` e `deleteCiclo`: item sem `backendId` mas com `tentativas > 0` ou `syncStatus == .failed` pode ter sido
