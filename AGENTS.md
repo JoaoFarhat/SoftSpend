@@ -184,6 +184,14 @@ predicado. Chama `marcarFalha` em falha (backoff) e `marcarSucesso` apenas se
 marca `.synced` se não há comprovante pendente — o gasto permanece `.pending`
 até o comprovante ser processado.
 
+**Exclusão vinda do servidor (T5)**: no `CiclosViewModel`, com a lista completa
+de dias (`listaCompleta`), `removerSumidos` apaga gasto `.synced` com `backendId`
+que não veio em nenhum dia da lista e dia ausente cujos gastos todos saíram. Com
+a lista de ciclos lida até a última página sem buraco (`LeituraDeCiclos`), sai o
+ciclo `.synced` ausente sem nenhuma alteração local na viagem. Candidatos são
+tirados antes da busca; nada `pending`/`failed`/`deletadoEm` sai. Testes em
+`SoftSpendTests/ExclusaoNoServidorTests.swift`.
+
 ### ComprovanteCrypto
 
 `GastosDia.comprovanteData` é uma propriedade `@Transient` que encripta/decripta

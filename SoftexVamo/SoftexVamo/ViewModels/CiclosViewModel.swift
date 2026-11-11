@@ -95,6 +95,7 @@ final class CiclosViewModel: ObservableObject {
         self.skip = 0
         self.diasSkip = 0
         self.hasMoreDias = true
+        self.leituraDeCiclos = nil
     }
 
     func limparDadosLocais() {
@@ -136,9 +137,11 @@ final class CiclosViewModel: ObservableObject {
         
         loadCiclosTask = Task {
             isLoading = true
-            
+            let skipDaPagina = skip
+
             if !append {
                 deduplicarCiclosLocais()
+                iniciarLeituraDeCiclos()
             }
             
             let userId = currentUser?.id ?? ""
@@ -181,15 +184,15 @@ final class CiclosViewModel: ObservableObject {
             }
 
             do {
-                let ciclos = try await NetworkManager.shared.fetchCicloResumo(skip: skip, limit: limit)
-                
+                let ciclos = try await NetworkManager.shared.fetchCicloResumo(skip: skipDaPagina, limit: limit)
+
                 guard !Task.isCancelled else { return }
-                
+
                 hasMorePages = ciclos.count == limit
-                
-                for ciclo in ciclos {
-                    salvarOuAtualizarCicloLocal(ciclo)
-                }
+
+                // Lido antes: depois do delete, o `atualCiclo` pode ser um objeto apagado.
+                let idAberto = self.atualCiclo.id
+                let removidos = registrarPaginaDeCiclos(ciclos, skip: skipDaPagina, limit: limit)
 
                 salvarLocal()
                 
@@ -212,8 +215,17 @@ final class CiclosViewModel: ObservableObject {
                     }
                 } else {
                     self.allCiclos = ciclosAtualizados
+                    // A viagem aberta foi apagada em outro aparelho (T5): abre a do início.
+                    if removidos.contains(idAberto) {
+                        if let inicio = self.cicloInicio ?? self.allCiclos.first {
+                            abrirViagem(inicio)
+                        } else {
+                            self.atualCiclo = CicloSoftex.vazio
+                            self.index = 0
+                        }
+                    }
                 }
-                
+
                 if !append, self.allCiclos.indices.contains(self.index) {
                     let cicloParaSalvar = self.allCiclos[self.index]
                     
@@ -246,8 +258,10 @@ final class CiclosViewModel: ObservableObject {
                 
             } catch {
                 guard !Task.isCancelled else { return }
+                // Página perdida: a leitura não chega mais ao fim sem buraco.
+                leituraDeCiclos = nil
                 showError(error)
-                
+
                 if !append, self.allCiclos.isEmpty {
                     self.allCiclos = []
                     self.atualCiclo = CicloSoftex.vazio
@@ -259,6 +273,85 @@ final class CiclosViewModel: ObservableObject {
         }
     }
     
+    // MARK: Ciclos apagados no servidor (T5)
+
+    /// Leitura das páginas de `fetchCicloResumo` desde a primeira (`skip == 0`).
+    /// Só com todas as páginas lidas em sequência, sem buraco, dá para saber o
+    /// que sumiu do servidor.
+    struct LeituraDeCiclos {
+        /// Ciclos já sincronizados antes da primeira página: um ciclo que o
+        /// `SyncActor` enviar durante a leitura não está aqui e não é apagado.
+        let candidatos: Set<Int>
+        var vistos: Set<Int> = []
+        /// `skip` que a próxima página precisa ter para não deixar buraco.
+        var proximoSkip = 0
+    }
+    private(set) var leituraDeCiclos: LeituraDeCiclos?
+
+    /// Começa uma leitura nova (antes da primeira página). Interno para os testes.
+    func iniciarLeituraDeCiclos() {
+        let candidatos = ciclosLocaisDoUsuario()
+            .filter { $0.syncStatus == .synced }
+            .compactMap(\.backendId)
+        leituraDeCiclos = LeituraDeCiclos(candidatos: Set(candidatos))
+    }
+
+    /// Grava uma página do servidor e, se foi a última de uma leitura sem buraco,
+    /// apaga os ciclos que sumiram de lá. Devolve os `id`s locais apagados.
+    /// Interno para os testes.
+    @discardableResult
+    func registrarPaginaDeCiclos(_ ciclos: [CicloSoftex], skip: Int, limit: Int) -> Set<UUID> {
+        let ids = ciclos.compactMap(\.backendId)
+        for ciclo in ciclos {
+            salvarOuAtualizarCicloLocal(ciclo)
+        }
+        // Página fora de ordem (outra pulada por falha, cancelamento ou offline):
+        // a leitura não serve mais para apagar nada até recomeçar do zero.
+        guard var leitura = leituraDeCiclos, leitura.proximoSkip == skip else {
+            leituraDeCiclos = nil
+            return []
+        }
+        leitura.vistos.formUnion(ids)
+        leitura.proximoSkip += ciclos.count
+        guard ciclos.count < limit else {
+            leituraDeCiclos = leitura
+            return []
+        }
+        leituraDeCiclos = nil
+        return removerCiclosSumidos(candidatos: leitura.candidatos, mantendo: leitura.vistos)
+    }
+
+    private func ciclosLocaisDoUsuario() -> [CicloSoftex] {
+        let userId = currentUser?.id ?? ""
+        let descriptor = FetchDescriptor<CicloSoftex>(
+            predicate: #Predicate { $0.deletadoEm == nil && $0.userId == userId }
+        )
+        return (try? modelContext?.fetch(descriptor)) ?? []
+    }
+
+    /// Ciclo sincronizado antes da leitura e ausente da lista completa foi apagado
+    /// no servidor: sai daqui (o delete em cascata leva dias e gastos). Fica se ele
+    /// ou qualquer dia/gasto dele tiver alteração local ainda não enviada.
+    private func removerCiclosSumidos(candidatos: Set<Int>, mantendo vistos: Set<Int>) -> Set<UUID> {
+        let sumidos = ciclosLocaisDoUsuario().filter { ciclo in
+            guard let id = ciclo.backendId, candidatos.contains(id), !vistos.contains(id),
+                  !Self.temAlteracaoLocal(ciclo.syncStatus, deletadoEm: ciclo.deletadoEm) else { return false }
+            return !Self.temAlteracaoNaViagem(ciclo)
+        }
+        guard !sumidos.isEmpty else { return [] }
+        let removidos = Set(sumidos.map(\.id))
+        for ciclo in sumidos { modelContext?.delete(ciclo) }
+        salvarLocal()
+        return removidos
+    }
+
+    private static func temAlteracaoNaViagem(_ ciclo: CicloSoftex) -> Bool {
+        (ciclo.dias ?? []).contains { dia in
+            temAlteracaoLocal(dia.syncStatus, deletadoEm: dia.deletadoEm)
+                || dia.gastos.contains { temAlteracaoLocal($0.syncStatus, deletadoEm: $0.deletadoEm) }
+        }
+    }
+
     private func deduplicarCiclosLocais() {
         guard let context = modelContext else { return }
         let userId = currentUser?.id ?? ""
@@ -353,11 +446,13 @@ final class CiclosViewModel: ObservableObject {
         // Candidatos à remoção: dias já sincronizados ANTES da busca. Um dia
         // que o SyncActor enviar durante a busca não está aqui e não é apagado.
         let sincronizadosAntes = idsDeDiasSincronizados(de: ciclo)
+        let gastosSincronizadosAntes = idsDeGastosSincronizados(de: ciclo)
         let tarefa = Task {
             isLoadingDias = true
             defer { isLoadingDias = false }
             var skip = 0
             var idsServidor = Set<Int>()
+            var idsGastosServidor = Set<Int>()
             var listaCompleta = false
             do {
                 // Teto de páginas: protege contra um servidor que ignore o `skip`.
@@ -366,6 +461,9 @@ final class CiclosViewModel: ObservableObject {
                     guard !Task.isCancelled, atualCiclo.id == ciclo.id else { return }
                     for dia in dias {
                         if let id = dia.backendId { idsServidor.insert(id) }
+                        // `GET /dias` traz todos os gastos de cada dia (joinedload).
+                        // Lidos antes do upsert, que move os objetos para o dia local.
+                        idsGastosServidor.formUnion(dia.gastos.compactMap(\.backendId))
                         salvarOuAtualizarDiaLocal(dia, no: ciclo)
                     }
                     skip += dias.count
@@ -381,7 +479,11 @@ final class CiclosViewModel: ObservableObject {
                 // Sem a última página (teto atingido), a lista está incompleta:
                 // não dá para saber o que sumiu do servidor.
                 if listaCompleta {
-                    removerDiasSumidos(de: ciclo, candidatos: sincronizadosAntes, mantendo: idsServidor)
+                    removerSumidos(
+                        de: ciclo,
+                        dias: Candidatos(antes: sincronizadosAntes, noServidor: idsServidor),
+                        gastos: Candidatos(antes: gastosSincronizadosAntes, noServidor: idsGastosServidor)
+                    )
                 }
             } catch {
                 guard !Task.isCancelled else { return }
@@ -400,18 +502,51 @@ final class CiclosViewModel: ObservableObject {
         })
     }
 
-    /// Com a lista completa do servidor, um dia já sincronizado antes da busca
-    /// que não veio nela foi apagado lá: sai daqui também. Nunca apaga um dia
-    /// com gastos (o delete em cascata levaria gastos junto) nem um dia com
-    /// alteração local pendente.
-    private func removerDiasSumidos(de ciclo: CicloSoftex, candidatos: Set<Int>, mantendo ids: Set<Int>) {
-        let sumidos = (ciclo.dias ?? []).filter { dia in
-            guard let id = dia.backendId, candidatos.contains(id),
-                  dia.deletadoEm == nil, dia.syncStatus == .synced else { return false }
-            return !ids.contains(id) && dia.gastos.isEmpty
+    /// Gastos já sincronizados da viagem (por `backendId`), tirados antes da busca (T5).
+    private func idsDeGastosSincronizados(de ciclo: CicloSoftex) -> Set<Int> {
+        Set((ciclo.dias ?? []).flatMap(\.gastos).compactMap { gasto in
+            gasto.syncStatus == .synced && gasto.deletadoEm == nil ? gasto.backendId : nil
+        })
+    }
+
+    /// `backendId`s já sincronizados antes da busca e os que vieram na lista do servidor.
+    struct Candidatos {
+        let antes: Set<Int>
+        let noServidor: Set<Int>
+
+        /// Sincronizado antes da busca e ausente da lista completa: foi apagado no servidor.
+        func sumiu(_ backendId: Int?, status: SyncStatus, deletadoEm: Date?) -> Bool {
+            guard let backendId, antes.contains(backendId), !noServidor.contains(backendId) else { return false }
+            return !CiclosViewModel.temAlteracaoLocal(status, deletadoEm: deletadoEm)
         }
-        guard !sumidos.isEmpty else { return }
-        for dia in sumidos { modelContext?.delete(dia) }
+    }
+
+    /// Com a lista completa do servidor, o que já estava sincronizado antes da busca
+    /// e não veio nela foi apagado lá (em outro aparelho): sai daqui também (T5).
+    /// - Gasto: compara com os gastos de todos os dias da viagem, então um gasto
+    ///   movido para outro dia não sai.
+    /// - Dia: só sai se todos os gastos dele também sumiram (o delete em cascata
+    ///   nunca leva um gasto que ainda existe ou que tem alteração local).
+    /// Nada com alteração local (`pending`/`failed`/`deletadoEm`) é apagado.
+    /// Tudo é decidido antes do primeiro delete e salvo uma vez só.
+    private func removerSumidos(de ciclo: CicloSoftex, dias: Candidatos, gastos: Candidatos) {
+        let todosOsDias = ciclo.dias ?? []
+        let gastosSumidos = todosOsDias.flatMap(\.gastos).filter {
+            gastos.sumiu($0.backendId, status: $0.syncStatus, deletadoEm: $0.deletadoEm)
+        }
+        let idsGastosSumidos = Set(gastosSumidos.map(\.id))
+        let diasSumidos = todosOsDias.filter { dia in
+            dias.sumiu(dia.backendId, status: dia.syncStatus, deletadoEm: dia.deletadoEm)
+                && dia.gastos.allSatisfy { idsGastosSumidos.contains($0.id) }
+        }
+        guard !gastosSumidos.isEmpty || !diasSumidos.isEmpty else { return }
+        let idsDiasSumidos = Set(diasSumidos.map(\.id))
+        for gasto in gastosSumidos {
+            // Os gastos de um dia que sai vão no delete em cascata dele.
+            if let diaId = gasto.dia?.id, idsDiasSumidos.contains(diaId) { continue }
+            modelContext?.delete(gasto)
+        }
+        for dia in diasSumidos { modelContext?.delete(dia) }
         salvarLocal()
         carregarDiasLocais()
     }
