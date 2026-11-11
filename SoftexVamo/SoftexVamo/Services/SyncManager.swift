@@ -265,13 +265,16 @@ actor SyncActor: ModelActor {
         // nem é enviado — o DELETE do pai (syncDeletions) apaga tudo em
         // cascata no servidor. Filtro em memória: #Predicate não atravessa
         // relacionamentos opcionais.
+        // T4: item com falha final por 404 (texto fixo no syncError) também
+        // não conta — ele não é mais enviado.
         let dias = todosDias.filter {
-            $0.ciclo?.userId == userId && $0.ciclo?.deletadoEm == nil
+            $0.ciclo?.userId == userId && $0.ciclo?.deletadoEm == nil && !falhouDefinitivo($0)
         }.count
         let gastos = todosGastos.filter {
             $0.dia?.ciclo?.userId == userId
                 && $0.dia?.deletadoEm == nil
                 && $0.dia?.ciclo?.deletadoEm == nil
+                && !falhouDefinitivo($0)
         }.count
         return ciclos + dias + gastos
     }
@@ -407,6 +410,29 @@ actor SyncActor: ModelActor {
         item.syncStatus = .failed
     }
 
+    /// T4: `syncError` com este texto marca a falha final por 404 — o pai (dia
+    /// ou ciclo/"viagem") ou o próprio item foi apagado em outro aparelho. O
+    /// item fica no aparelho, não volta para a fila e não conta em
+    /// `contarPendentes`. O texto fixo é o identificador: um campo novo no
+    /// `@Model` exigiria um schema V2.
+    nonisolated static let erroApagadoEmOutroAparelho = "O dia ou a viagem foi apagado em outro aparelho"
+
+    /// 404 ao enviar dia ou gasto: falha final. Só muda `syncStatus` e
+    /// `syncError` — `tentativas` e `proximaTentativaEm` ficam como estão
+    /// (não é falha transitória, retry não resolve).
+    private func marcarFalhaFinal(_ item: any Syncavel) {
+        item.syncStatus = .failed
+        item.syncError = SyncActor.erroApagadoEmOutroAparelho
+    }
+
+    /// Falha final por 404, reconhecida pelo texto fixo do `syncError`.
+    /// `syncDias`, `syncGastos`, `syncComprovantes` e `contarPendentes`
+    /// ignoram esses itens — o `syncDeletions` não, porque o DELETE de um
+    /// item que o usuário apagou continua saindo (404 lá é sucesso).
+    private func falhouDefinitivo(_ item: any Syncavel) -> Bool {
+        item.syncError == SyncActor.erroApagadoEmOutroAparelho
+    }
+
     private func marcarSucesso(_ item: any Syncavel) {
         item.tentativas = 0
         item.proximaTentativaEm = nil
@@ -483,8 +509,10 @@ actor SyncActor: ModelActor {
         )
         let todos = (try? contexto.fetch(descriptor)) ?? []
         // T8: dia de ciclo apagado não sobe — o DELETE do ciclo o remove em cascata.
+        // T4: dia com falha final por 404 também não sobe.
         let dias = todos.filter {
-            $0.ciclo?.userId == userId && $0.ciclo?.deletadoEm == nil && deveTentar($0, agora: agora, forcar: forcar)
+            $0.ciclo?.userId == userId && $0.ciclo?.deletadoEm == nil
+                && !falhouDefinitivo($0) && deveTentar($0, agora: agora, forcar: forcar)
         }
 
         for dia in dias {
@@ -519,10 +547,18 @@ actor SyncActor: ModelActor {
                     }
                 }
             } catch {
-                let erro = error.localizedDescription
-                gravarDia(diaUUID, etapa: "syncDias-catch") { atual in
-                    atual.syncError = erro
-                    marcarFalha(atual)
+                if isNotFoundError(error) {
+                    // T4: o ciclo foi apagado em outro aparelho — falha final,
+                    // o dia fica no aparelho mas sai da fila.
+                    gravarDia(diaUUID, etapa: "syncDias-404") { atual in
+                        marcarFalhaFinal(atual)
+                    }
+                } else {
+                    let erro = error.localizedDescription
+                    gravarDia(diaUUID, etapa: "syncDias-catch") { atual in
+                        atual.syncError = erro
+                        marcarFalha(atual)
+                    }
                 }
             }
         }
@@ -547,10 +583,12 @@ actor SyncActor: ModelActor {
         )
         let todos = (try? contexto.fetch(descriptor)) ?? []
         // T8: gasto de dia ou ciclo apagado não sobe — o DELETE do pai o remove em cascata.
+        // T4: gasto com falha final por 404 também não sobe.
         let gastos = todos.filter {
             $0.dia?.ciclo?.userId == userId
                 && $0.dia?.deletadoEm == nil
                 && $0.dia?.ciclo?.deletadoEm == nil
+                && !falhouDefinitivo($0)
                 && deveTentar($0, agora: agora, forcar: forcar)
         }
 
@@ -592,10 +630,19 @@ actor SyncActor: ModelActor {
                     concluirGasto(atual, mudou: FotoGasto(atual) != foto)
                 }
             } catch {
-                let erro = error.localizedDescription
-                gravarGasto(gastoUUID, etapa: "syncGastos-catch") { atual in
-                    atual.syncError = erro
-                    marcarFalha(atual)
+                if isNotFoundError(error) {
+                    // T4: o dia (POST) ou o gasto (PUT) foi apagado em outro
+                    // aparelho — falha final, o gasto fica no aparelho mas sai
+                    // da fila.
+                    gravarGasto(gastoUUID, etapa: "syncGastos-404") { atual in
+                        marcarFalhaFinal(atual)
+                    }
+                } else {
+                    let erro = error.localizedDescription
+                    gravarGasto(gastoUUID, etapa: "syncGastos-catch") { atual in
+                        atual.syncError = erro
+                        marcarFalha(atual)
+                    }
                 }
             }
         }
@@ -615,11 +662,13 @@ actor SyncActor: ModelActor {
         let todos = (try? contexto.fetch(descriptor)) ?? []
         // T8: comprovante de gasto de dia ou ciclo apagado não sobe — o DELETE
         // do pai remove tudo em cascata.
+        // T4: comprovante de gasto com falha final por 404 também não sobe.
         let gastos = todos.filter {
             $0.dia?.ciclo?.userId == userId
                 && $0.dia?.deletadoEm == nil
                 && $0.dia?.ciclo?.deletadoEm == nil
                 && $0.backendId != nil
+                && !falhouDefinitivo($0)
                 && deveTentar($0, agora: agora, forcar: forcar)
         }
 
