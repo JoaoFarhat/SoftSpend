@@ -47,6 +47,8 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
         var valor: Decimal
         var categoria: Categoria
         var comprovanteUrl: String?
+        /// Bytes do último comprovante recebido (nil depois do delete).
+        var comprovante: Data? = nil
     }
 
     static let erroSimulado = APIError.serverError(message: "Falha simulada", requestId: "-", statusCode: 500)
@@ -255,6 +257,7 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
             guard let i = _gastos.firstIndex(where: { $0.id == gastoId }) else { throw Self.naoEncontrado }
             let extensao = mime == "application/pdf" ? "pdf" : "jpg"
             _gastos[i].comprovanteUrl = "https://fake.softspend/gastos/\(gastoId)/comprovante.\(extensao)"
+            _gastos[i].comprovante = imageData
             return respostaGasto(_gastos[i])
         }
     }
@@ -264,6 +267,7 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
         return try lock.withLock {
             guard let i = _gastos.firstIndex(where: { $0.id == gastoId }) else { throw Self.naoEncontrado }
             _gastos[i].comprovanteUrl = nil
+            _gastos[i].comprovante = nil
             return respostaGasto(_gastos[i])
         }
     }
@@ -273,6 +277,7 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
 actor Portao {
     private var chegou = false
     private var liberado = false
+    private var desistiu = false
     private var esperandoChegada: [CheckedContinuation<Void, Never>] = []
     private var esperandoLiberacao: [CheckedContinuation<Void, Never>] = []
 
@@ -287,8 +292,28 @@ actor Portao {
 
     /// Chamado pelo teste: volta quando a requisição já está "no servidor".
     func aguardarChegada() async {
-        guard !chegou else { return }
+        guard !chegou, !desistiu else { return }
         await withCheckedContinuation { esperandoChegada.append($0) }
+    }
+
+    var jaChegou: Bool { chegou }
+
+    /// Solta quem espera a chegada (agora e depois) mesmo sem ela acontecer.
+    func desistirDaChegada() {
+        desistiu = true
+        esperandoChegada.forEach { $0.resume() }
+        esperandoChegada.removeAll()
+    }
+
+    /// Espera a chamada chegar, ou o sync terminar sem ela (devolve `false`):
+    /// um teste que falha não fica travado esperando uma chamada que não vem.
+    func chegouAntes(doFimDe tarefa: Task<Int, Never>) async -> Bool {
+        Task { [weak self] in
+            _ = await tarefa.value
+            await self?.desistirDaChegada()
+        }
+        await aguardarChegada()
+        return chegou
     }
 
     /// Deixa passar a chamada parada e as próximas.
