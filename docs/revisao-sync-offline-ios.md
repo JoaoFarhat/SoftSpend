@@ -138,6 +138,12 @@ Nas três funções `salvarOuAtualizar*Local`: se o registro local existe e `syn
 pendente de exclusão, nunca reviver. Testes: edição pendente sobrevive a um refresh que traz o valor antigo e depois sobe;
 exclusão pendente sobrevive ao refresh e o `syncDeletions` a envia; registro `synced` continua sendo atualizado.
 
+**Feito (11/11, falta rodar no Mac):** regra em `CiclosViewModel.temAlteracaoLocal`; testes em
+`SoftSpendTests/RefreshPendenteTests.swift`. Dois ajustes a mais, necessários para a exclusão de dia chegar ao servidor:
+- `diaLocal(clientId:)` também acha dia com `deletadoEm` (dia apagado antes de receber o `backendId` voltava como novo).
+- `carregarDiasLocais` põe em `atualCiclo.dias` também os dias apagados: com só os vivos, o SwiftData fazia
+  `dia.ciclo = nil` no dia com exclusão pendente e o `syncDeletions` (filtra por `dia.ciclo?.userId`) o ignorava.
+
 ### T2 — Não marcar `.synced` se o item mudou durante o envio (R2) — Complexa
 
 Em `syncGastos` (POST e PUT), `syncComprovantes`, `sincronizarEdicaoCiclo` e `syncDias`: guardar uma foto dos campos enviados

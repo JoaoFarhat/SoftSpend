@@ -439,8 +439,11 @@ final class CiclosViewModel: ObservableObject {
 
     private func carregarDiasLocais() {
         let cicloLocalId = self.atualCiclo.id
+        // Busca também os dias apagados: `atualCiclo.dias = ...` com só os vivos desligava do
+        // ciclo (`dia.ciclo = nil`) o dia com exclusão pendente, e o `syncDeletions` (que filtra
+        // por `dia.ciclo?.userId`) nunca o enviava (T1). As telas já filtram `deletadoEm == nil`.
         var descriptor = FetchDescriptor<DiaSoftex>(
-            predicate: #Predicate { $0.deletadoEm == nil && $0.ciclo?.id == cicloLocalId },
+            predicate: #Predicate { $0.ciclo?.id == cicloLocalId },
             sortBy: [SortDescriptor(\.data)]
         )
         descriptor.relationshipKeyPathsForPrefetching = [\.ciclo]
@@ -465,8 +468,9 @@ final class CiclosViewModel: ObservableObject {
         // para o usuario nao ficar bloqueado. Só para ciclo nunca sincronizado:
         // os dias de um ciclo com `backendId` vêm do servidor (`loadMoreDias`);
         // recriá-los aqui geraria clientIds novos que subiriam como duplicatas.
-        if diasAtualizados.isEmpty, atualCiclo.backendId == nil, !atualCiclo.periodo.isEmpty {
-            diasAtualizados = reconstruirDiasParaCicloAtual()
+        if !diasAtualizados.contains(where: { $0.deletadoEm == nil }),
+           atualCiclo.backendId == nil, !atualCiclo.periodo.isEmpty {
+            diasAtualizados += reconstruirDiasParaCicloAtual()
         }
 
         self.atualCiclo.dias = diasAtualizados
@@ -516,6 +520,19 @@ final class CiclosViewModel: ObservableObject {
         // recebido o backendId não era reconhecido e o do servidor entrava como outro dia (10/11:
         // cada data aparecia duas vezes ao escolher a data do gasto).
         if let existente = diaLocal(backendId: dia.backendId) ?? diaLocal(clientId: dia.clientId) {
+            // T1: com alteração local ainda não enviada, o servidor traz a versão antiga.
+            // Só completa o que falta para casar; campos e status ficam como o usuário deixou.
+            if Self.temAlteracaoLocal(existente.syncStatus, deletadoEm: existente.deletadoEm) {
+                if existente.backendId == nil { existente.backendId = dia.backendId }
+                if existente.ciclo == nil { existente.ciclo = ciclo }
+                // Dia com exclusão pendente: nada do servidor entra nele (não revive).
+                guard existente.deletadoEm == nil else { return }
+                for gasto in dia.gastos {
+                    salvarOuAtualizarGastoLocal(gasto, no: existente)
+                }
+                absorverDuplicatas(de: existente)
+                return
+            }
             existente.backendId = dia.backendId ?? existente.backendId
             existente.data = dia.data
             existente.saldo = dia.saldo
@@ -543,11 +560,20 @@ final class CiclosViewModel: ObservableObject {
         return try? modelContext?.fetch(descriptor).first
     }
 
+    /// Prefere o dia vivo; sem ele, devolve o que tem exclusão pendente. Sem isso, um dia apagado
+    /// no aparelho antes de receber o `backendId` voltava como dia novo no próximo refresh (T1).
     private func diaLocal(clientId: String) -> DiaSoftex? {
         let descriptor = FetchDescriptor<DiaSoftex>(
-            predicate: #Predicate { $0.clientId == clientId && $0.deletadoEm == nil }
+            predicate: #Predicate { $0.clientId == clientId }
         )
-        return try? modelContext?.fetch(descriptor).first
+        let dias = (try? modelContext?.fetch(descriptor)) ?? []
+        return dias.first(where: { $0.deletadoEm == nil }) ?? dias.first
+    }
+
+    /// Registro com edição ou exclusão ainda não enviada ao servidor: o refresh não pode
+    /// sobrescrever os campos nem marcar `.synced` (o `SyncActor` sobe a versão local depois).
+    static func temAlteracaoLocal(_ status: SyncStatus, deletadoEm: Date?) -> Bool {
+        status != .synced || deletadoEm != nil
     }
 
     /// Duplicatas que já ficaram no aparelho (mesmo clientId, outro registro): os gastos delas
@@ -571,6 +597,11 @@ final class CiclosViewModel: ObservableObject {
                 predicate: #Predicate { $0.backendId == backendId }
             )
             if let existente = try? modelContext?.fetch(descriptor).first {
+                // T1: edição ou exclusão pendente vence a versão do servidor (casou pelo
+                // `backendId`, então não falta nada a preencher). Nem o dia muda.
+                if Self.temAlteracaoLocal(existente.syncStatus, deletadoEm: existente.deletadoEm) {
+                    return
+                }
                 existente.titulo = gasto.titulo
                 existente.valor = gasto.valor
                 existente.categoria = gasto.categoria
@@ -596,40 +627,27 @@ final class CiclosViewModel: ObservableObject {
         modelContext?.insert(gasto)
     }
     
+    /// Upsert de um ciclo vindo do servidor: casa pelo `backendId` e, sem ele, pelo `clientId`.
+    /// Interno (não `private`) para os testes.
     @discardableResult
-    private func salvarOuAtualizarCicloLocal(_ ciclo: CicloSoftex) -> CicloSoftex? {
+    func salvarOuAtualizarCicloLocal(_ ciclo: CicloSoftex) -> CicloSoftex? {
         let userId = currentUser?.id ?? ""
         ciclo.userId = userId
 
-        if let backendId = ciclo.backendId {
-            let descriptor = FetchDescriptor<CicloSoftex>(
-                predicate: #Predicate { $0.backendId == backendId && $0.userId == userId }
-            )
-            if let existente = try? modelContext?.fetch(descriptor).first {
-                existente.titulo = ciclo.titulo
-                existente.valor_total = ciclo.valor_total
-                existente.gasto_total = ciclo.gasto_total
-                existente.periodo = ciclo.periodo
-                existente.diaria = ciclo.diaria
-                existente.backendId = backendId
-                existente.userId = userId
-                existente.syncStatus = .synced
-                existente.syncError = nil
+        if let existente = buscarCicloLocal(backendId: ciclo.backendId, userId: userId)
+            ?? buscarCicloLocal(clientId: ciclo.clientId, userId: userId) {
+            // T1: edição ou exclusão pendente vence a versão (antiga) do servidor; só
+            // completa o `backendId` para o próximo sync fazer PUT/DELETE em vez de POST.
+            if Self.temAlteracaoLocal(existente.syncStatus, deletadoEm: existente.deletadoEm) {
+                if existente.backendId == nil { existente.backendId = ciclo.backendId }
                 return existente
             }
-        }
-
-        let clientId = ciclo.clientId
-        let descriptorPorClient = FetchDescriptor<CicloSoftex>(
-            predicate: #Predicate { $0.clientId == clientId && $0.userId == userId }
-        )
-        if let existente = try? modelContext?.fetch(descriptorPorClient).first {
             existente.titulo = ciclo.titulo
             existente.valor_total = ciclo.valor_total
             existente.gasto_total = ciclo.gasto_total
             existente.periodo = ciclo.periodo
             existente.diaria = ciclo.diaria
-            existente.backendId = ciclo.backendId
+            existente.backendId = ciclo.backendId ?? existente.backendId
             existente.userId = userId
             existente.syncStatus = .synced
             existente.syncError = nil
@@ -640,6 +658,22 @@ final class CiclosViewModel: ObservableObject {
         ciclo.syncError = nil
         modelContext?.insert(ciclo)
         return ciclo
+    }
+
+    /// Inclui ciclos com exclusão pendente: casar com eles impede que o refresh os reviva.
+    private func buscarCicloLocal(backendId: Int?, userId: String) -> CicloSoftex? {
+        guard let backendId else { return nil }
+        let descriptor = FetchDescriptor<CicloSoftex>(
+            predicate: #Predicate { $0.backendId == backendId && $0.userId == userId }
+        )
+        return try? modelContext?.fetch(descriptor).first
+    }
+
+    private func buscarCicloLocal(clientId: String, userId: String) -> CicloSoftex? {
+        let descriptor = FetchDescriptor<CicloSoftex>(
+            predicate: #Predicate { $0.clientId == clientId && $0.userId == userId }
+        )
+        return try? modelContext?.fetch(descriptor).first
     }
     
     func createNewCiclo(startDate: Date, endDate: Date, totalValue: Decimal, titulo: String) async throws {
