@@ -253,12 +253,6 @@ actor SyncActor: ModelActor {
 
         let cicloUUID = ciclo.id
         let foto = FotoCiclo(ciclo)
-        let diasAtivos = diasLocais(doCiclo: cicloUUID, em: contexto).filter { $0.deletadoEm == nil }
-        let idsDiasEnviados = Set(diasAtivos.map(\.id))
-
-        let diasRequest: [DiaLoteRequest]? = diasAtivos.isEmpty ? nil : diasAtivos.map {
-            DiaLoteRequest(clientId: $0.clientId, data: $0.data)
-        }
         let updateRequest = CicloUpdateRequest(
             titulo: ciclo.titulo,
             valor_total: ciclo.valor_total,
@@ -267,16 +261,14 @@ actor SyncActor: ModelActor {
         )
 
         do {
-            var diasRemotos: [DiaSoftex]?
-            if let diasRequest {
-                diasRemotos = try await api.syncDiasLote(cicloId: backendId, dias: diasRequest)
-                logger.info("sincronizarEdicaoCiclo: dias/lote ok backendId=\(backendId, privacy: .public)")
-            }
-
+            // A edição do ciclo não envia mais a lista de dias: o PUT /dias/lote
+            // apagava no servidor (com os gastos) os dias que este aparelho não
+            // conhecia. Dia novo sobe pelo syncDias e dia removido pelo
+            // syncDeletions. Ver T3 em docs/revisao-sync-offline-ios.md.
             let cicloEditado = try await api.putCiclo(cicloId: backendId, request: updateRequest)
             logger.info("sincronizarEdicaoCiclo: PUT ok backendId=\(backendId, privacy: .public)")
 
-            gravarCiclo(cicloUUID, etapa: "sincronizarEdicaoCiclo") { atual, conferencia in
+            gravarCiclo(cicloUUID, etapa: "sincronizarEdicaoCiclo") { atual, _ in
                 if FotoCiclo(atual) == foto {
                     atual.titulo = cicloEditado.titulo
                     atual.valor_total = cicloEditado.valor_total
@@ -288,13 +280,6 @@ actor SyncActor: ModelActor {
                     marcarMudancaDuranteEnvio(atual)
                 }
                 atual.gasto_total = cicloEditado.gasto_total
-
-                if let diasRemotos {
-                    reconciliarDias(
-                        diasRemotos, ciclo: atual, idsEnviados: idsDiasEnviados,
-                        contexto: conferencia, backendId: backendId
-                    )
-                }
             }
         } catch {
             let erro = error.localizedDescription

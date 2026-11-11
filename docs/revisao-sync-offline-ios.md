@@ -182,6 +182,11 @@ Confirmado no código: `NetworkManager.syncDiasLote` é `PUT /ciclos/{id}/dias/l
   `syncDias`; reduzir o período apaga só os dias removidos, por `DELETE`.
 - Pronto quando o `xcodebuild` compilar e os testes passarem no simulador (Mac).
 
+**Feito (11/11, falta rodar no Mac):** `sincronizarEdicaoCiclo` ficou só com o `putCiclo`; o `syncDiasLote` continua no
+`SyncAPI`/`NetworkManager`/`FakeSyncAPI` (o `PUT` segue no backend para versões já instaladas). Testes em
+`SoftSpendTests/EdicaoCicloSyncTests.swift`, incluindo o cenário do R3 (dia e gasto criados por outro aparelho
+sobrevivem a uma edição de título).
+
 ### T8 — Apagar ciclo com filhos pendentes (R8) — Simples
 
 Em `deleteCiclo` (com `backendId`), marcar também os dias e gastos vivos do ciclo como `deletadoEm` (como o `editCiclo`
