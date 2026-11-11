@@ -169,6 +169,15 @@ mais uma passada. Uma nota anexada durante o upload não é apagada. Testes em
 uma única vez após o try/catch. Em sucesso ou 404, o item é deletado localmente.
 Em falha real, `marcarFalha` + `continue` (sem delete).
 
+**Falha final por 404 (T4)**: 404 no POST/PUT de `syncGastos` ou no POST de
+`syncDias` (o pai ou o item foi apagado em outro aparelho) é terminal:
+`marcarFalhaFinal` põe `.failed` + `syncError = SyncActor.erroApagadoEmOutroAparelho`
+sem mexer em `tentativas`/`proximaTentativaEm`. O texto fixo é o identificador
+(`falhouDefinitivo`) — criar um campo no `@Model` exigiria schema V2. As etapas
+de envio e o `contarPendentes` ignoram esses itens; `syncDeletions` não (DELETE
+de item apagado pelo usuário continua saindo). O item fica no aparelho.
+Testes em `SoftSpendTests/FalhaFinal404Tests.swift`.
+
 **Comprovantes**: `syncComprovantes` filtra por `syncStatusRaw != synced` no
 predicado. Chama `marcarFalha` em falha (backoff) e `marcarSucesso` apenas se
 `comprovanteData == nil && !comprovanteParaRemover`. `syncGastos` também só

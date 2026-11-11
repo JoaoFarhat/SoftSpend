@@ -218,6 +218,15 @@ Tratar 404 em `syncGastos` (PUT e POST) e `syncDias` como terminal: sem backoff,
 texto claro ("O dia/gasto foi apagado em outro aparelho") e fora do `contarPendentes`. O que fazer com o gasto depois é
 **decisão do usuário** (ver abaixo); até lá, manter o gasto local, sem apagar.
 
+**Feito (11/11, falta rodar no Mac):** em `SyncActor` (`Services/SyncManager.swift`). `isNotFoundError` no catch de
+`syncGastos` e `syncDias` chama `marcarFalhaFinal`: `.failed` + `syncError = SyncActor.erroApagadoEmOutroAparelho`
+("O dia ou a viagem foi apagado em outro aparelho"), sem tocar em `tentativas`/`proximaTentativaEm`. O texto fixo é o
+identificador (`falhouDefinitivo`) — `syncDias`, `syncGastos`, `syncComprovantes` e `contarPendentes` ignoram esses
+itens em memória; `syncDeletions` não (o DELETE de item apagado pelo usuário continua saindo, 404 lá é sucesso).
+Uma edição do usuário limpa o `syncError` (`editGasto` já faz isso) e o item volta a tentar — e toma 404 de novo se o
+pai seguir apagado. Testes em `SoftSpendTests/FalhaFinal404Tests.swift`: POST e PUT de gasto, POST de dia e o
+contraste do 500 com backoff.
+
 ### T5 — Propagar exclusões do servidor (R5) — Complexa
 
 Com a lista de dias completa (`listaCompleta`, como em `removerDiasSumidos`): gasto local `synced`, com `backendId`, que não
