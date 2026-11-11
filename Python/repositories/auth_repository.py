@@ -68,6 +68,20 @@ def sessao_ativa(db: Session, session_id: str, user_id: str) -> bool:
     )
 
 
+def apagar_refresh_tokens_expirados(
+    db: Session, user_id: str, agora: datetime
+) -> None:
+    """Remove os refresh tokens expirados do usuario.
+
+    Linhas revogadas ainda nao expiradas sao mantidas de proposito: a
+    deteccao de reuso em refresh_access_token depende do revoked_at delas.
+    """
+    db.query(models.RefreshToken).filter(
+        models.RefreshToken.user_id == user_id,
+        models.RefreshToken.expires_at < agora,
+    ).delete(synchronize_session=False)
+
+
 def revogar_todos_refresh_tokens_por_usuario(db: Session, user_id: str) -> None:
     db.query(models.RefreshToken).filter(
         models.RefreshToken.user_id == user_id,

@@ -6,7 +6,9 @@ em `tmp_path` e um `get_db` que faz commit/rollback como o de producao.
 
 import importlib
 import importlib.util
+import secrets
 import sys
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -279,6 +281,133 @@ def test_logout_nao_derruba_outra_sessao_do_mesmo_usuario(client):
     assert _status(client, sessao_a["access_token"]) == 401
     assert _status(client, sessao_b["access_token"]) == 200
     assert _refresh(client, sessao_b["refresh_token"]).status_code == 200
+
+
+def _registrar_outro(client) -> dict:
+    resp = client.post(
+        "/auth/register",
+        json={
+            "nome": "Outro",
+            "username": "outro_usuario",
+            "email": "outro@example.com",
+            "senha": SENHA,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _inserir_refresh_token(
+    db, user_id: str, *, expires_at: datetime, revoked_at: datetime | None = None
+) -> str:
+    rt = models.RefreshToken(
+        user_id=user_id,
+        session_id=str(uuid.uuid4()),
+        token_hash=secrets.token_hex(32),
+        expires_at=expires_at,
+        revoked_at=revoked_at,
+    )
+    db.add(rt)
+    db.flush()
+    return rt.id
+
+
+def _user_id_por_email(client, email: str) -> str:
+    db = client.SessionLocal()
+    try:
+        return db.query(models.User).filter_by(email=email).one().id
+    finally:
+        db.close()
+
+
+def _ids_refresh_tokens(client) -> set:
+    db = client.SessionLocal()
+    try:
+        return {rt.id for rt in db.query(models.RefreshToken).all()}
+    finally:
+        db.close()
+
+
+def _semente_tokens_expirados(client, user_a: str, user_b: str) -> dict:
+    """Semeia tokens expirados/validos/revogados para A e B; devolve os ids."""
+    agora = datetime.now(timezone.utc).replace(tzinfo=None)
+    passado = agora - timedelta(seconds=1)
+    futuro = agora + timedelta(days=1)
+    db = client.SessionLocal()
+    try:
+        ids = {
+            "a_expirado": _inserir_refresh_token(
+                db, user_a, expires_at=passado
+            ),
+            "a_expirado_revogado": _inserir_refresh_token(
+                db, user_a, expires_at=passado, revoked_at=passado
+            ),
+            "a_valido": _inserir_refresh_token(db, user_a, expires_at=futuro),
+            "a_revogado_valido": _inserir_refresh_token(
+                db, user_a, expires_at=futuro, revoked_at=agora
+            ),
+            "b_expirado": _inserir_refresh_token(
+                db, user_b, expires_at=passado
+            ),
+            "b_valido": _inserir_refresh_token(db, user_b, expires_at=futuro),
+        }
+        db.commit()
+        return ids
+    finally:
+        db.close()
+
+
+def _assert_limpeza_so_do_usuario_a(restantes: set, ids: dict):
+    assert ids["a_expirado"] not in restantes
+    assert ids["a_expirado_revogado"] not in restantes
+    assert {
+        ids["a_valido"],
+        ids["a_revogado_valido"],
+        ids["b_expirado"],
+        ids["b_valido"],
+    } <= restantes
+
+
+def test_login_apaga_apenas_os_expirados_do_proprio_usuario(client):
+    outro = _registrar_outro(client)
+    user_a = _user_id_por_email(client, "teste@example.com")
+    ids = _semente_tokens_expirados(client, user_a, outro["id"])
+
+    assert _login(client)["id"] == user_a
+
+    _assert_limpeza_so_do_usuario_a(_ids_refresh_tokens(client), ids)
+
+
+def test_refresh_apaga_apenas_os_expirados_do_proprio_usuario(client):
+    sessao = _login(client)
+    outro = _registrar_outro(client)
+    ids = _semente_tokens_expirados(client, sessao["id"], outro["id"])
+
+    resp = _refresh(client, sessao["refresh_token"])
+    assert resp.status_code == 200, resp.text
+
+    restantes = _ids_refresh_tokens(client)
+    _assert_limpeza_so_do_usuario_a(restantes, ids)
+    # O token usado no refresh fica revogado mas nao expirado: tem que
+    # continuar na tabela para a deteccao de reuso.
+    rt_rotacionado = _id_por_token_hash(client, sessao["refresh_token"])
+    assert rt_rotacionado in restantes
+
+
+def _id_por_token_hash(client, refresh_token: str):
+    db = client.SessionLocal()
+    try:
+        return (
+            db.query(models.RefreshToken)
+            .filter(
+                models.RefreshToken.token_hash
+                == _auth_service()._hash_token(refresh_token)
+            )
+            .one()
+            .id
+        )
+    finally:
+        db.close()
 
 
 def test_migration_session_id_gera_sql_mysql():
