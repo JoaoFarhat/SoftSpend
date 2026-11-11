@@ -152,8 +152,18 @@ na fila (`continue`) para a próxima passada.
 
 **Logging**: `SyncActor` usa `os.Logger` (subsystem `br.com.softspend`,
 category `SyncActor`) para logar falhas de save e dias remotos sem `backendId`.
-O helper `salvarContexto(_:)` substitui `try? modelContext.save()` — erros de
+O helper `salvar(_:etapa:)` substitui `try? modelContext.save()` — erros de
 save aparecem no Console.app em vez de serem silenciados.
+
+**Mudança durante o envio (T2)**: o `SyncActor` não usa o próprio
+`modelContext`. Cada etapa lista os itens num `ModelContext(modelContainer)`
+novo, tira uma foto (`FotoCiclo`, `FotoDia`, `FotoGasto`) dos campos enviados e,
+depois do `await`, `gravar(...)` relê o item (por `id`) em outro contexto novo:
+grava sempre o que o servidor devolveu (`backendId`, URL), mas só chama
+`marcarSucesso` se a releitura bate com a foto. Se o usuário mudou o item no
+meio, `marcarMudancaDuranteEnvio` deixa `.pending` sem backoff e o `sync` roda
+mais uma passada. Uma nota anexada durante o upload não é apagada. Testes em
+`SoftSpendTests/MudancaDuranteEnvioTests.swift`.
 
 **Delete centralizado**: Em `syncDeletions`, o `modelContext.delete` é chamado
 uma única vez após o try/catch. Em sucesso ou 404, o item é deletado localmente.

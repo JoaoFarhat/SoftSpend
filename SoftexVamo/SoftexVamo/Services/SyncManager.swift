@@ -118,15 +118,32 @@ final class SyncManager: ObservableObject {
 
 }
 
-/// Sincronização em background, com o próprio `ModelContext`.
+/// Sincronização em background.
 ///
 /// Conformidade com `ModelActor` escrita à mão (é o mesmo que o macro
 /// `@ModelActor` gera) para o `init` poder receber a API: em produção o
 /// `NetworkManager.shared`, nos testes uma API falsa.
+///
+/// **Mudança durante o envio (T2 de `docs/revisao-sync-offline-ios.md`).** O
+/// usuário pode editar, apagar ou trocar o comprovante de um item enquanto a
+/// requisição dele está em voo. Por isso cada envio segue três passos:
+/// 1. lista os itens e monta o pedido num contexto novo (vê o que a tela já salvou)
+///    e tira uma foto (`Foto*`) dos campos que o servidor vai receber;
+/// 2. faz o `await`;
+/// 3. relê o item em **outro** contexto novo (`gravar`), grava sempre o que o
+///    servidor devolveu (`backendId`, URL do comprovante), e só marca `.synced` se a
+///    releitura bate com a foto. Se não bate, o item fica `.pending` sem backoff e
+///    `sync` roda mais uma passada para enviar o valor novo.
+///
+/// O `modelContext` do próprio actor não é usado: um contexto que já carregou o
+/// objeto pode não enxergar o que outro contexto salvou durante o `await`.
 actor SyncActor: ModelActor {
     nonisolated let modelExecutor: any ModelExecutor
     nonisolated let modelContainer: ModelContainer
     private let api: any SyncAPI
+
+    /// Algum item mudou durante o envio nesta passada: vale rodar outra.
+    private var mudouDuranteEnvio = false
 
     init(modelContainer: ModelContainer, api: any SyncAPI = NetworkManager.shared) {
         let modelContext = ModelContext(modelContainer)
@@ -137,12 +154,45 @@ actor SyncActor: ModelActor {
 
     private let logger = Logger(subsystem: "br.com.softspend", category: "SyncActor")
 
-    private func salvarContexto(_ contexto: String) {
+    private func contextoNovo() -> ModelContext {
+        ModelContext(modelContainer)
+    }
+
+    private func salvar(_ contexto: ModelContext, etapa: String) {
         do {
-            try modelContext.save()
+            try contexto.save()
         } catch {
-            logger.error("Falha ao salvar após \(contexto, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            logger.error("Falha ao salvar após \(etapa, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    /// Relê o item num contexto novo (depois do `await`), aplica `alterar` e salva.
+    private func gravar<T: PersistentModel>(
+        _ descritor: FetchDescriptor<T>,
+        etapa: String,
+        _ alterar: (T, ModelContext) -> Void
+    ) {
+        let contexto = contextoNovo()
+        var descritor = descritor
+        descritor.fetchLimit = 1
+        guard let item = (try? contexto.fetch(descritor))?.first else {
+            logger.warning("\(etapa, privacy: .public): item não existe mais no banco local, resposta descartada")
+            return
+        }
+        alterar(item, contexto)
+        salvar(contexto, etapa: etapa)
+    }
+
+    private func gravarCiclo(_ uuid: UUID, etapa: String, _ alterar: (CicloSoftex, ModelContext) -> Void) {
+        gravar(FetchDescriptor<CicloSoftex>(predicate: #Predicate { $0.id == uuid }), etapa: etapa, alterar)
+    }
+
+    private func gravarDia(_ uuid: UUID, etapa: String, _ alterar: (DiaSoftex) -> Void) {
+        gravar(FetchDescriptor<DiaSoftex>(predicate: #Predicate { $0.id == uuid }), etapa: etapa) { dia, _ in alterar(dia) }
+    }
+
+    private func gravarGasto(_ uuid: UUID, etapa: String, _ alterar: (GastosDia) -> Void) {
+        gravar(FetchDescriptor<GastosDia>(predicate: #Predicate { $0.id == uuid }), etapa: etapa) { gasto, _ in alterar(gasto) }
     }
 
     func sync(agora: Date, userId: String, forcar: Bool = false) async -> Int {
@@ -150,6 +200,7 @@ actor SyncActor: ModelActor {
 
         var pendentesDepois = 0
         for passada in 0..<maxPassadas {
+            mudouDuranteEnvio = false
             let pendentesAntes = contarPendentes(agora: agora, userId: userId)
             logger.info("SyncActor: passada \(passada, privacy: .public), pendentesAntes=\(pendentesAntes, privacy: .public)")
             await syncCiclos(agora: agora, userId: userId, forcar: forcar)
@@ -158,13 +209,15 @@ actor SyncActor: ModelActor {
             await syncComprovantes(agora: agora, userId: userId, forcar: forcar)
             await syncDeletions(agora: agora, userId: userId, forcar: forcar)
             pendentesDepois = contarPendentes(agora: agora, userId: userId)
-            logger.info("SyncActor: passada \(passada, privacy: .public), pendentesDepois=\(pendentesDepois, privacy: .public)")
+            logger.info("SyncActor: passada \(passada, privacy: .public), pendentesDepois=\(pendentesDepois, privacy: .public), mudouDuranteEnvio=\(self.mudouDuranteEnvio, privacy: .public)")
+            if mudouDuranteEnvio { continue }
             if pendentesDepois == 0 || pendentesDepois >= pendentesAntes { break }
         }
         return pendentesDepois
     }
 
     private func contarPendentes(agora: Date, userId: String) -> Int {
+        let contexto = contextoNovo()
         let synced = SyncStatus.synced.rawValue
         let cicloDesc = FetchDescriptor<CicloSoftex>(
             predicate: #Predicate { $0.syncStatusRaw != synced && $0.deletadoEm == nil && $0.userId == userId }
@@ -177,15 +230,20 @@ actor SyncActor: ModelActor {
             predicate: #Predicate { $0.syncStatusRaw != synced && $0.deletadoEm == nil }
         )
         gastoDesc.relationshipKeyPathsForPrefetching = [\.dia]
-        let ciclos = (try? modelContext.fetchCount(cicloDesc)) ?? 0
-        let todosDias = (try? modelContext.fetch(diaDesc)) ?? []
-        let todosGastos = (try? modelContext.fetch(gastoDesc)) ?? []
+        let ciclos = (try? contexto.fetchCount(cicloDesc)) ?? 0
+        let todosDias = (try? contexto.fetch(diaDesc)) ?? []
+        let todosGastos = (try? contexto.fetch(gastoDesc)) ?? []
         let dias = todosDias.filter { $0.ciclo?.userId == userId }.count
         let gastos = todosGastos.filter { $0.dia?.ciclo?.userId == userId }.count
         return ciclos + dias + gastos
     }
 
-    private func sincronizarEdicaoCiclo(_ ciclo: CicloSoftex, agora: Date, forcar: Bool = false) async {
+    private func sincronizarEdicaoCiclo(
+        _ ciclo: CicloSoftex,
+        contexto: ModelContext,
+        agora: Date,
+        forcar: Bool = false
+    ) async {
         guard let backendId = ciclo.backendId, deveTentar(ciclo, agora: agora, forcar: forcar) else {
             logger.info("sincronizarEdicaoCiclo: pulado backendId=\(String(describing: ciclo.backendId), privacy: .public)")
             return
@@ -193,36 +251,22 @@ actor SyncActor: ModelActor {
 
         logger.info("sincronizarEdicaoCiclo: iniciando backendId=\(backendId, privacy: .public) titulo=\(ciclo.titulo, privacy: .private)")
 
-        let cicloId = ciclo.id
-        var diasDesc = FetchDescriptor<DiaSoftex>(
-            predicate: #Predicate { _ in true },
-            sortBy: [SortDescriptor(\.data)]
-        )
-        diasDesc.relationshipKeyPathsForPrefetching = [\.ciclo]
-        let todosDias = ((try? modelContext.fetch(diasDesc)) ?? [])
-        let locais = todosDias.filter {
-            guard let diaCiclo = $0.ciclo else { return false }
-            return diaCiclo.id == cicloId
-        }
-        let diasAtivos = locais.filter { $0.deletadoEm == nil }
+        let cicloUUID = ciclo.id
+        let foto = FotoCiclo(ciclo)
+        let diasAtivos = diasLocais(doCiclo: cicloUUID, em: contexto).filter { $0.deletadoEm == nil }
+        let idsDiasEnviados = Set(diasAtivos.map(\.id))
 
         let diasRequest: [DiaLoteRequest]? = diasAtivos.isEmpty ? nil : diasAtivos.map {
             DiaLoteRequest(clientId: $0.clientId, data: $0.data)
         }
-
-        let tituloAntes = ciclo.titulo
-        let valorTotalAntes = ciclo.valor_total
-        let diariaAntes = ciclo.diaria
-        let periodoAntes = ciclo.periodo
+        let updateRequest = CicloUpdateRequest(
+            titulo: ciclo.titulo,
+            valor_total: ciclo.valor_total,
+            diaria: ciclo.diaria,
+            periodo: ciclo.periodo
+        )
 
         do {
-            let updateRequest = CicloUpdateRequest(
-                titulo: ciclo.titulo,
-                valor_total: ciclo.valor_total,
-                diaria: ciclo.diaria,
-                periodo: ciclo.periodo
-            )
-
             var diasRemotos: [DiaSoftex]?
             if let diasRequest {
                 diasRemotos = try await api.syncDiasLote(cicloId: backendId, dias: diasRequest)
@@ -232,64 +276,92 @@ actor SyncActor: ModelActor {
             let cicloEditado = try await api.putCiclo(cicloId: backendId, request: updateRequest)
             logger.info("sincronizarEdicaoCiclo: PUT ok backendId=\(backendId, privacy: .public)")
 
-            let houveReedicao = ciclo.titulo != tituloAntes
-                || ciclo.valor_total != valorTotalAntes
-                || ciclo.diaria != diariaAntes
-                || ciclo.periodo != periodoAntes
-
-            if !houveReedicao {
-                ciclo.titulo = cicloEditado.titulo
-                ciclo.valor_total = cicloEditado.valor_total
-                ciclo.periodo = cicloEditado.periodo
-                ciclo.diaria = cicloEditado.diaria
-            }
-
-            ciclo.gasto_total = cicloEditado.gasto_total
-            ciclo.syncStatus = .synced
-            ciclo.syncError = nil
-
-            if let diasRemotos {
-                let idsRemotos = Set(diasRemotos.compactMap { $0.backendId })
-                let clientIdsRemotos = Set(diasRemotos.compactMap { $0.clientId })
-
-                for local in locais where local.deletadoEm == nil {
-                    let aindaExiste = (local.backendId != nil && idsRemotos.contains(local.backendId!))
-                        || clientIdsRemotos.contains(local.clientId)
-                    // Só marcamos como deletado se o dia já tinha backendId (já foi sincronizado
-                    // alguma vez). Dias criados offline ainda não enviados não devem ser apagados
-                    // só porque o servidor ainda não os conhece.
-                    if local.backendId != nil && !aindaExiste {
-                        local.deletadoEm = Date()
-                        local.syncStatus = .pending
-                    }
+            gravarCiclo(cicloUUID, etapa: "sincronizarEdicaoCiclo") { atual, conferencia in
+                if FotoCiclo(atual) == foto {
+                    atual.titulo = cicloEditado.titulo
+                    atual.valor_total = cicloEditado.valor_total
+                    atual.periodo = cicloEditado.periodo
+                    atual.diaria = cicloEditado.diaria
+                    marcarSucesso(atual)
+                } else {
+                    // Editado durante o envio: os campos locais são os novos.
+                    marcarMudancaDuranteEnvio(atual)
                 }
+                atual.gasto_total = cicloEditado.gasto_total
 
-                for diaRemoto in diasRemotos {
-                    if let local = locais.first(where: { $0.backendId == diaRemoto.backendId })
-                        ?? locais.first(where: { $0.clientId == diaRemoto.clientId }) {
-                        local.data = diaRemoto.data
-                        local.saldo = diaRemoto.saldo
-                        local.backendId = diaRemoto.backendId
-                        local.clientId = diaRemoto.clientId ?? local.clientId
-                        local.deletadoEm = nil
-                        local.syncStatus = .synced
-                    } else if diaRemoto.backendId != nil {
-                        diaRemoto.ciclo = ciclo
-                        diaRemoto.syncStatus = .synced
-                        modelContext.insert(diaRemoto)
-                        // Não faça append manual na relação inversa: ao setar diaRemoto.ciclo,
-                        // o SwiftData atualiza ciclo.dias automaticamente.
-                    } else if diaRemoto.backendId == nil {
-                        logger.warning("Dia remoto sem backendId ignorado no ciclo \(String(describing: backendId), privacy: .public)")
-                    }
+                if let diasRemotos {
+                    reconciliarDias(
+                        diasRemotos, ciclo: atual, idsEnviados: idsDiasEnviados,
+                        contexto: conferencia, backendId: backendId
+                    )
                 }
             }
-
-            try modelContext.save()
         } catch {
-            ciclo.syncError = error.localizedDescription
-            marcarFalha(ciclo)
-            salvarContexto("sincronizarEdicaoCiclo-catch")
+            let erro = error.localizedDescription
+            gravarCiclo(cicloUUID, etapa: "sincronizarEdicaoCiclo-catch") { atual, _ in
+                atual.syncError = erro
+                marcarFalha(atual)
+            }
+        }
+    }
+
+    /// Todos os dias locais do ciclo (inclusive os apagados), por data.
+    private func diasLocais(doCiclo cicloUUID: UUID, em contexto: ModelContext) -> [DiaSoftex] {
+        var diasDesc = FetchDescriptor<DiaSoftex>(
+            predicate: #Predicate { _ in true },
+            sortBy: [SortDescriptor(\.data)]
+        )
+        diasDesc.relationshipKeyPathsForPrefetching = [\.ciclo]
+        return ((try? contexto.fetch(diasDesc)) ?? []).filter { $0.ciclo?.id == cicloUUID }
+    }
+
+    /// Aplica a resposta do `dias/lote` aos dias locais, relidos depois do `await`.
+    private func reconciliarDias(
+        _ diasRemotos: [DiaSoftex],
+        ciclo: CicloSoftex,
+        idsEnviados: Set<UUID>,
+        contexto: ModelContext,
+        backendId: Int
+    ) {
+        let locais = diasLocais(doCiclo: ciclo.id, em: contexto)
+        let idsRemotos = Set(diasRemotos.compactMap { $0.backendId })
+        let clientIdsRemotos = Set(diasRemotos.compactMap { $0.clientId })
+
+        for local in locais where local.deletadoEm == nil {
+            let aindaExiste = (local.backendId != nil && idsRemotos.contains(local.backendId!))
+                || clientIdsRemotos.contains(local.clientId)
+            // Só marcamos como deletado se o dia já tinha backendId (já foi sincronizado
+            // alguma vez). Dias criados offline ainda não enviados não devem ser apagados
+            // só porque o servidor ainda não os conhece.
+            if local.backendId != nil && !aindaExiste {
+                local.deletadoEm = Date()
+                local.syncStatus = .pending
+            }
+        }
+
+        for diaRemoto in diasRemotos {
+            if let local = locais.first(where: { $0.backendId == diaRemoto.backendId })
+                ?? locais.first(where: { $0.clientId == diaRemoto.clientId }) {
+                if local.deletadoEm != nil && idsEnviados.contains(local.id) {
+                    // Apagado durante o envio: não reviver; o syncDeletions envia o delete.
+                    local.backendId = local.backendId ?? diaRemoto.backendId
+                    continue
+                }
+                local.data = diaRemoto.data
+                local.saldo = diaRemoto.saldo
+                local.backendId = diaRemoto.backendId
+                local.clientId = diaRemoto.clientId ?? local.clientId
+                local.deletadoEm = nil
+                local.syncStatus = .synced
+            } else if diaRemoto.backendId != nil {
+                diaRemoto.ciclo = ciclo
+                diaRemoto.syncStatus = .synced
+                contexto.insert(diaRemoto)
+                // Não faça append manual na relação inversa: ao setar diaRemoto.ciclo,
+                // o SwiftData atualiza ciclo.dias automaticamente.
+            } else {
+                logger.warning("Dia remoto sem backendId ignorado no ciclo \(backendId, privacy: .public)")
+            }
         }
     }
 
@@ -319,52 +391,74 @@ actor SyncActor: ModelActor {
         item.syncError = nil
     }
 
+    /// O envio deu certo, mas o usuário mudou o item no meio: fica `.pending`
+    /// para a próxima passada, sem contar tentativa nem backoff (não foi falha).
+    private func marcarMudancaDuranteEnvio(_ item: any Syncavel) {
+        item.tentativas = 0
+        item.proximaTentativaEm = nil
+        item.syncStatus = .pending
+        item.syncError = nil
+        mudouDuranteEnvio = true
+    }
+
     private func syncCiclos(agora: Date, userId: String, forcar: Bool = false) async {
+        let contexto = contextoNovo()
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<CicloSoftex>(
             predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm == nil && item.userId == userId },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
-        let todos = (try? modelContext.fetch(descriptor)) ?? []
+        let todos = (try? contexto.fetch(descriptor)) ?? []
         let ciclos = todos.filter { deveTentar($0, agora: agora, forcar: forcar) }
         logger.info("syncCiclos: \(ciclos.count, privacy: .public) ciclo(s) pendente(s) para userId \(userId, privacy: .private)")
 
         for ciclo in ciclos {
             if ciclo.backendId != nil {
-                await sincronizarEdicaoCiclo(ciclo, agora: agora, forcar: forcar)
-            } else {
-                logger.info("syncCiclos: POST ciclo clientId=\(ciclo.clientId, privacy: .private) titulo=\(ciclo.titulo, privacy: .private)")
-                do {
-                    let createRequest = CicloCreateRequest(
-                        client_id: ciclo.clientId,
-                        titulo: ciclo.titulo,
-                        valor_total: ciclo.valor_total,
-                        diaria: ciclo.diaria,
-                        periodo: ciclo.periodo
-                    )
-                    let response = try await api.postCiclo(request: createRequest)
-                    ciclo.backendId = response.backendId
-                    ciclo.gasto_total = response.gasto_total
-                    marcarSucesso(ciclo)
-                    logger.info("syncCiclos: POST ok, backendId=\(response.backendId.map(String.init) ?? "nil", privacy: .public)")
-                } catch {
-                    ciclo.syncError = error.localizedDescription
-                    marcarFalha(ciclo)
-                    logger.error("syncCiclos: POST falhou: \(error.localizedDescription, privacy: .public)")
+                await sincronizarEdicaoCiclo(ciclo, contexto: contexto, agora: agora, forcar: forcar)
+                continue
+            }
+
+            logger.info("syncCiclos: POST ciclo clientId=\(ciclo.clientId, privacy: .private) titulo=\(ciclo.titulo, privacy: .private)")
+            let cicloUUID = ciclo.id
+            let foto = FotoCiclo(ciclo)
+            let createRequest = CicloCreateRequest(
+                client_id: ciclo.clientId,
+                titulo: ciclo.titulo,
+                valor_total: ciclo.valor_total,
+                diaria: ciclo.diaria,
+                periodo: ciclo.periodo
+            )
+            do {
+                let response = try await api.postCiclo(request: createRequest)
+                gravarCiclo(cicloUUID, etapa: "syncCiclos") { atual, _ in
+                    atual.backendId = response.backendId
+                    atual.gasto_total = response.gasto_total
+                    if FotoCiclo(atual) == foto {
+                        marcarSucesso(atual)
+                    } else {
+                        marcarMudancaDuranteEnvio(atual)
+                    }
                 }
+                logger.info("syncCiclos: POST ok, backendId=\(response.backendId.map(String.init) ?? "nil", privacy: .public)")
+            } catch {
+                let erro = error.localizedDescription
+                gravarCiclo(cicloUUID, etapa: "syncCiclos-catch") { atual, _ in
+                    atual.syncError = erro
+                    marcarFalha(atual)
+                }
+                logger.error("syncCiclos: POST falhou: \(erro, privacy: .public)")
             }
         }
-
-        salvarContexto("syncCiclos")
     }
 
     private func syncDias(agora: Date, userId: String, forcar: Bool = false) async {
+        let contexto = contextoNovo()
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<DiaSoftex>(
             predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm == nil },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
-        let todos = (try? modelContext.fetch(descriptor)) ?? []
+        let todos = (try? contexto.fetch(descriptor)) ?? []
         let dias = todos.filter { $0.ciclo?.userId == userId && deveTentar($0, agora: agora, forcar: forcar) }
 
         for dia in dias {
@@ -373,35 +467,59 @@ actor SyncActor: ModelActor {
                 continue
             }
 
+            let diaUUID = dia.id
+            let foto = FotoDia(dia)
+            let saldoEnviado = dia.saldo
             let request = DiaLoteRequest(clientId: dia.clientId, data: dia.data)
             do {
                 let response = try await api.postDiasLote(cicloId: cicloId, dias: [request])
-                if let primeiro = response.first {
-                    dia.backendId = primeiro.backendId
-                    // Reconcilia saldo com servidor (backend pode ajustar inicial)
-                    dia.saldo = primeiro.saldo
+                gravarDia(diaUUID, etapa: "syncDias") { atual in
+                    guard let primeiro = response.first else {
+                        atual.syncError = "Falha ao sincronizar dia"
+                        marcarFalha(atual)
+                        return
+                    }
+                    atual.backendId = primeiro.backendId
+                    // Reconcilia saldo com servidor (backend pode ajustar inicial), a
+                    // menos que um gasto local tenha mexido no saldo durante o envio.
+                    if atual.saldo == saldoEnviado {
+                        atual.saldo = primeiro.saldo
+                    }
                     // diaId dos gastos é derivado de dia?.backendId — não precisa atualizar manualmente
-                    marcarSucesso(dia)
-                } else {
-                    dia.syncError = "Falha ao sincronizar dia"
-                    marcarFalha(dia)
+                    if FotoDia(atual) == foto {
+                        marcarSucesso(atual)
+                    } else {
+                        marcarMudancaDuranteEnvio(atual)
+                    }
                 }
             } catch {
-                dia.syncError = error.localizedDescription
-                marcarFalha(dia)
+                let erro = error.localizedDescription
+                gravarDia(diaUUID, etapa: "syncDias-catch") { atual in
+                    atual.syncError = erro
+                    marcarFalha(atual)
+                }
             }
         }
+    }
 
-        salvarContexto("syncDias")
+    /// Depois de um envio do gasto que deu certo: `.synced` só se nada mudou
+    /// desde a foto e não há comprovante pendente (o `syncComprovantes` resolve).
+    private func concluirGasto(_ atual: GastosDia, mudou: Bool) {
+        if mudou {
+            marcarMudancaDuranteEnvio(atual)
+        } else if atual.comprovanteData == nil && !atual.comprovanteParaRemover {
+            marcarSucesso(atual)
+        }
     }
 
     private func syncGastos(agora: Date, userId: String, forcar: Bool = false) async {
+        let contexto = contextoNovo()
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<GastosDia>(
             predicate: #Predicate { item in item.syncStatusRaw != synced && item.deletadoEm == nil },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
-        let todos = (try? modelContext.fetch(descriptor)) ?? []
+        let todos = (try? contexto.fetch(descriptor)) ?? []
         let gastos = todos.filter { $0.dia?.ciclo?.userId == userId && deveTentar($0, agora: agora, forcar: forcar) }
 
         for gasto in gastos {
@@ -409,7 +527,10 @@ actor SyncActor: ModelActor {
                 continue
             }
 
+            let gastoUUID = gasto.id
+            let foto = FotoGasto(gasto)
             do {
+                let response: GastosDia
                 if let backendId = gasto.backendId {
                     let updateRequest = GastoUpdateRequest(
                         titulo: gasto.titulo,
@@ -417,13 +538,7 @@ actor SyncActor: ModelActor {
                         categoria: gasto.categoria,
                         dia_id: diaIdReal
                     )
-                    let response = try await api.putGasto(gastoId: backendId, request: updateRequest)
-                    gasto.comprovanteUrl = response.comprovanteUrl
-                    gasto.copiarOpenFinance(de: response)
-                    // Só marca sucesso se não há comprovante pendente; syncComprovantes resolve o resto
-                    if gasto.comprovanteData == nil && !gasto.comprovanteParaRemover {
-                        marcarSucesso(gasto)
-                    }
+                    response = try await api.putGasto(gastoId: backendId, request: updateRequest)
                 } else {
                     let createRequest = GastoCreateRequest(
                         client_id: gasto.clientId,
@@ -432,28 +547,30 @@ actor SyncActor: ModelActor {
                         categoria: gasto.categoria,
                         dia_id: diaIdReal
                     )
-                    let response = try await api.postGasto(request: createRequest)
-                    guard let novoGastoId = response.backendId else {
+                    response = try await api.postGasto(request: createRequest)
+                    guard response.backendId != nil else {
                         throw URLError(.cannotParseResponse)
                     }
-                    gasto.backendId = novoGastoId
-                    gasto.comprovanteUrl = response.comprovanteUrl
-                    gasto.copiarOpenFinance(de: response)
-                    // Só marca sucesso se não há comprovante pendente; syncComprovantes resolve o resto
-                    if gasto.comprovanteData == nil && !gasto.comprovanteParaRemover {
-                        marcarSucesso(gasto)
-                    }
+                }
+                gravarGasto(gastoUUID, etapa: "syncGastos") { atual in
+                    // Sempre grava o backendId, mesmo se mudou: senão o POST se repetiria.
+                    if let novoId = response.backendId { atual.backendId = novoId }
+                    atual.comprovanteUrl = response.comprovanteUrl
+                    atual.copiarOpenFinance(de: response)
+                    concluirGasto(atual, mudou: FotoGasto(atual) != foto)
                 }
             } catch {
-                gasto.syncError = error.localizedDescription
-                marcarFalha(gasto)
+                let erro = error.localizedDescription
+                gravarGasto(gastoUUID, etapa: "syncGastos-catch") { atual in
+                    atual.syncError = erro
+                    marcarFalha(atual)
+                }
             }
         }
-
-        salvarContexto("syncGastos")
     }
 
     private func syncComprovantes(agora: Date, userId: String, forcar: Bool = false) async {
+        let contexto = contextoNovo()
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<GastosDia>(
             predicate: #Predicate { item in
@@ -463,31 +580,31 @@ actor SyncActor: ModelActor {
             },
             sortBy: [SortDescriptor(\.criadoEm)]
         )
-        let todos = (try? modelContext.fetch(descriptor)) ?? []
+        let todos = (try? contexto.fetch(descriptor)) ?? []
         let gastos = todos.filter { $0.dia?.ciclo?.userId == userId && $0.backendId != nil && deveTentar($0, agora: agora, forcar: forcar) }
 
         for gasto in gastos {
             guard let backendId = gasto.backendId else { continue }
+            let gastoUUID = gasto.id
+            let foto = FotoGasto(gasto)
             do {
-                try await sincronizarComprovante(gasto, backendId: backendId)
-                 if gasto.comprovanteData == nil && !gasto.comprovanteParaRemover {
-                    marcarSucesso(gasto)
-                }
+                try await sincronizarComprovante(gasto, backendId: backendId, foto: foto)
             } catch {
-                gasto.syncError = error.localizedDescription
-                marcarFalha(gasto)
+                let erro = error.localizedDescription
+                gravarGasto(gastoUUID, etapa: "syncComprovantes-catch") { atual in
+                    atual.syncError = erro
+                    marcarFalha(atual)
+                }
             }
         }
-
-        salvarContexto("syncComprovantes")
     }
 
-    private func sincronizarComprovante(_ gasto: GastosDia, backendId: Int) async throws {
-        if gasto.comprovanteData != nil && gasto.comprovanteParaRemover {
-            gasto.comprovanteParaRemover = false
-        }
-
-        guard gasto.comprovanteData != nil || gasto.comprovanteParaRemover else { return }
+    /// Envia (ou apaga) o comprovante e grava o resultado relendo o gasto.
+    ///
+    /// Só limpa o comprovante local se ele ainda é o que foi enviado: uma foto
+    /// nova anexada durante o upload fica para a próxima passada.
+    private func sincronizarComprovante(_ gasto: GastosDia, backendId: Int, foto: FotoGasto) async throws {
+        let gastoUUID = gasto.id
 
         if let comprovanteData = gasto.comprovanteData {
             let atualizado = try await api.uploadComprovante(
@@ -495,8 +612,16 @@ actor SyncActor: ModelActor {
                 imageData: comprovanteData,
                 mime: gasto.comprovanteMime
             )
-            gasto.comprovanteUrl = atualizado.comprovanteUrl
-            gasto.comprovanteData = nil
+            gravarGasto(gastoUUID, etapa: "syncComprovantes-upload") { atual in
+                let mudou = FotoGasto(atual) != foto
+                atual.comprovanteUrl = atualizado.comprovanteUrl
+                if atual.comprovanteDataCriptografado == foto.comprovanteDataCriptografado {
+                    // O arquivo enviado substituiu o anterior no servidor.
+                    atual.comprovanteDataCriptografado = nil
+                    atual.comprovanteParaRemover = false
+                }
+                concluirGasto(atual, mudou: mudou)
+            }
         } else if gasto.comprovanteParaRemover {
             do {
                 _ = try await api.deleteComprovante(gastoId: backendId)
@@ -505,9 +630,19 @@ actor SyncActor: ModelActor {
                     throw error
                 }
             }
-            gasto.comprovanteUrl = nil
-            gasto.comprovanteData = nil
-            gasto.comprovanteParaRemover = false
+            gravarGasto(gastoUUID, etapa: "syncComprovantes-delete") { atual in
+                let mudou = FotoGasto(atual) != foto
+                // O servidor ficou sem comprovante. Um anexo novo feito durante o
+                // delete continua em comprovanteDataCriptografado e sobe depois.
+                atual.comprovanteUrl = nil
+                atual.comprovanteParaRemover = false
+                concluirGasto(atual, mudou: mudou)
+            }
+        } else {
+            // Bytes que não descriptografam: nada a enviar.
+            gravarGasto(gastoUUID, etapa: "syncComprovantes") { atual in
+                concluirGasto(atual, mudou: FotoGasto(atual) != foto)
+            }
         }
     }
 
@@ -525,6 +660,7 @@ actor SyncActor: ModelActor {
     }
 
     private func syncDeletions(agora: Date, userId: String, forcar: Bool = false) async {
+        let modelContext = contextoNovo()
         let synced = SyncStatus.synced.rawValue
 
         let gastoDescriptor = FetchDescriptor<GastosDia>(
@@ -551,7 +687,7 @@ actor SyncActor: ModelActor {
                     gasto.syncError = error.localizedDescription
                     continue
                 }
-          }
+            }
             marcarSucesso(gasto)
         }
 
@@ -609,7 +745,61 @@ actor SyncActor: ModelActor {
             marcarSucesso(ciclo)
         }
 
-        salvarContexto("syncDeletions")
+        salvar(modelContext, etapa: "syncDeletions")
+    }
+}
+
+// MARK: - Foto dos campos enviados (T2)
+
+/// O que o servidor recebeu de um ciclo. Comparada com a releitura depois do `await`.
+nonisolated struct FotoCiclo: Equatable {
+    let titulo: String
+    let valorTotal: Decimal
+    let diaria: Decimal
+    let periodo: String
+    let deletadoEm: Date?
+
+    init(_ ciclo: CicloSoftex) {
+        titulo = ciclo.titulo
+        valorTotal = ciclo.valor_total
+        diaria = ciclo.diaria
+        periodo = ciclo.periodo
+        deletadoEm = ciclo.deletadoEm
+    }
+}
+
+/// O que o servidor recebeu de um dia.
+nonisolated struct FotoDia: Equatable {
+    let data: Date
+    let cicloId: UUID?
+    let deletadoEm: Date?
+
+    init(_ dia: DiaSoftex) {
+        data = dia.data
+        cicloId = dia.ciclo?.id
+        deletadoEm = dia.deletadoEm
+    }
+}
+
+/// O que o servidor recebeu de um gasto, inclusive o comprovante (bytes cifrados:
+/// um anexo novo, mesmo da mesma imagem, sai com outro nonce e conta como mudança).
+nonisolated struct FotoGasto: Equatable {
+    let titulo: String
+    let valor: Decimal
+    let categoria: Categoria
+    let diaId: UUID?
+    let deletadoEm: Date?
+    let comprovanteDataCriptografado: Data?
+    let comprovanteParaRemover: Bool
+
+    init(_ gasto: GastosDia) {
+        titulo = gasto.titulo
+        valor = gasto.valor
+        categoria = gasto.categoria
+        diaId = gasto.dia?.id
+        deletadoEm = gasto.deletadoEm
+        comprovanteDataCriptografado = gasto.comprovanteDataCriptografado
+        comprovanteParaRemover = gasto.comprovanteParaRemover
     }
 }
 
