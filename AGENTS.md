@@ -135,6 +135,14 @@ passadas destrava cada etapa na mesma invocação de `sync()`:
 3. `syncGastos` vê `gasto.dia?.backendId` → sobe os gastos → gastos recebem `backendId`.
 4. `syncComprovantes` vê `gasto.backendId` → sobe os comprovantes.
 
+**Rede injetável (testes)**: o `SyncActor` não chama `NetworkManager.shared`
+direto; usa o protocolo `SyncAPI` (`Network/SyncAPI.swift`, `nonisolated`),
+recebido no `init(modelContainer:api:)` com padrão `NetworkManager.shared`. Por
+isso a conformidade com `ModelActor` é escrita à mão (o `@ModelActor` não
+deixa acrescentar parâmetro ao `init`). Nos testes, `SoftSpendTests/FakeSyncAPI.swift`
+é um servidor em memória que pode segurar a resposta (`segurar` → `Portao`) e
+falhar sob comando (`falhar`); ver `SyncActorTests.swift`.
+
 Cada stage só processa itens cujo pai já tem `backendId`. Itens órfãos aguardam
 na fila (`continue`) para a próxima passada.
 

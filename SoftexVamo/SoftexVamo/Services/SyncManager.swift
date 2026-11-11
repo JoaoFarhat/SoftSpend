@@ -118,8 +118,22 @@ final class SyncManager: ObservableObject {
 
 }
 
-@ModelActor
-actor SyncActor {
+/// Sincronização em background, com o próprio `ModelContext`.
+///
+/// Conformidade com `ModelActor` escrita à mão (é o mesmo que o macro
+/// `@ModelActor` gera) para o `init` poder receber a API: em produção o
+/// `NetworkManager.shared`, nos testes uma API falsa.
+actor SyncActor: ModelActor {
+    nonisolated let modelExecutor: any ModelExecutor
+    nonisolated let modelContainer: ModelContainer
+    private let api: any SyncAPI
+
+    init(modelContainer: ModelContainer, api: any SyncAPI = NetworkManager.shared) {
+        let modelContext = ModelContext(modelContainer)
+        self.modelExecutor = DefaultSerialModelExecutor(modelContext: modelContext)
+        self.modelContainer = modelContainer
+        self.api = api
+    }
 
     private let logger = Logger(subsystem: "br.com.softspend", category: "SyncActor")
 
@@ -211,11 +225,11 @@ actor SyncActor {
 
             var diasRemotos: [DiaSoftex]?
             if let diasRequest {
-                diasRemotos = try await NetworkManager.shared.syncDiasLote(cicloId: backendId, dias: diasRequest)
+                diasRemotos = try await api.syncDiasLote(cicloId: backendId, dias: diasRequest)
                 logger.info("sincronizarEdicaoCiclo: dias/lote ok backendId=\(backendId, privacy: .public)")
             }
 
-            let cicloEditado = try await NetworkManager.shared.putCiclo(cicloId: backendId, request: updateRequest)
+            let cicloEditado = try await api.putCiclo(cicloId: backendId, request: updateRequest)
             logger.info("sincronizarEdicaoCiclo: PUT ok backendId=\(backendId, privacy: .public)")
 
             let houveReedicao = ciclo.titulo != tituloAntes
@@ -328,7 +342,7 @@ actor SyncActor {
                         diaria: ciclo.diaria,
                         periodo: ciclo.periodo
                     )
-                    let response = try await NetworkManager.shared.postCiclo(request: createRequest)
+                    let response = try await api.postCiclo(request: createRequest)
                     ciclo.backendId = response.backendId
                     ciclo.gasto_total = response.gasto_total
                     marcarSucesso(ciclo)
@@ -361,7 +375,7 @@ actor SyncActor {
 
             let request = DiaLoteRequest(clientId: dia.clientId, data: dia.data)
             do {
-                let response = try await NetworkManager.shared.postDiasLote(cicloId: cicloId, dias: [request])
+                let response = try await api.postDiasLote(cicloId: cicloId, dias: [request])
                 if let primeiro = response.first {
                     dia.backendId = primeiro.backendId
                     // Reconcilia saldo com servidor (backend pode ajustar inicial)
@@ -403,7 +417,7 @@ actor SyncActor {
                         categoria: gasto.categoria,
                         dia_id: diaIdReal
                     )
-                    let response = try await NetworkManager.shared.putGasto(gastoId: backendId, request: updateRequest)
+                    let response = try await api.putGasto(gastoId: backendId, request: updateRequest)
                     gasto.comprovanteUrl = response.comprovanteUrl
                     gasto.copiarOpenFinance(de: response)
                     // Só marca sucesso se não há comprovante pendente; syncComprovantes resolve o resto
@@ -418,7 +432,7 @@ actor SyncActor {
                         categoria: gasto.categoria,
                         dia_id: diaIdReal
                     )
-                    let response = try await NetworkManager.shared.postGasto(request: createRequest)
+                    let response = try await api.postGasto(request: createRequest)
                     guard let novoGastoId = response.backendId else {
                         throw URLError(.cannotParseResponse)
                     }
@@ -476,7 +490,7 @@ actor SyncActor {
         guard gasto.comprovanteData != nil || gasto.comprovanteParaRemover else { return }
 
         if let comprovanteData = gasto.comprovanteData {
-            let atualizado = try await NetworkManager.shared.uploadComprovante(
+            let atualizado = try await api.uploadComprovante(
                 gastoId: backendId,
                 imageData: comprovanteData,
                 mime: gasto.comprovanteMime
@@ -485,7 +499,7 @@ actor SyncActor {
             gasto.comprovanteData = nil
         } else if gasto.comprovanteParaRemover {
             do {
-                _ = try await NetworkManager.shared.deleteComprovante(gastoId: backendId)
+                _ = try await api.deleteComprovante(gastoId: backendId)
             } catch {
                 if !isNotFoundError(error) {
                     throw error
@@ -530,7 +544,7 @@ actor SyncActor {
             }
 
             do {
-                try await NetworkManager.shared.deleteGasto(gastoId: backendId)
+                try await api.deleteGasto(gastoId: backendId)
             } catch {
                 if !isNotFoundError(error) {
                     marcarFalha(gasto)
@@ -558,7 +572,7 @@ actor SyncActor {
             }
 
             do {
-                try await NetworkManager.shared.deleteDia(diaId: backendId)
+                try await api.deleteDia(diaId: backendId)
             } catch {
                 if !isNotFoundError(error) {
                     marcarFalha(dia)
@@ -584,7 +598,7 @@ actor SyncActor {
             }
 
             do {
-                try await NetworkManager.shared.deleteCiclo(cicloId: backendId)
+                try await api.deleteCiclo(cicloId: backendId)
             } catch {
                 if !isNotFoundError(error) {
                     marcarFalha(ciclo)
