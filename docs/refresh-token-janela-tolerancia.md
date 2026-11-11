@@ -92,6 +92,18 @@ perdida, e uma nova tentativa depois da janela viraria reuso e derrubaria todas
 as sessões (pior que o logout local de hoje). Só vale fazer isso depois da
 tolerância no ar, e com atenção ao tempo da janela. Não está nesta tarefa.
 
+**Atualização (app iOS, 11/11/2026):** com a tolerância no ar, o
+`TokenRefresher.refresh()` passou a repetir o refresh em falha transitória
+(`URLError` ou `APIError.serverError` com status >= 500), até 2 vezes, com
+esperas de 1 s e 3 s (`repetindoSeTransitorio` em `NetworkManager.swift`).
+
+- Todas as tentativas reenviam o mesmo token, lido do Keychain uma vez no início.
+- Pior caso: 3 × 8 s de timeout + 4 s de espera = 28 s, dentro dos 60 s.
+- 401/403, outro erro ou 3 falhas: logout local como antes; o token antigo
+  não é guardado para tentar depois (fora da janela seria reuso).
+- O `currentTask` continua compartilhado: chamadas simultâneas esperam a mesma
+  sequência de tentativas.
+
 ## 4. Testes (em `Python/tests/test_auth_sessao.py`)
 
 Controlar o tempo ajustando `revoked_at` do token antigo no banco (ou

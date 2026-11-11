@@ -9,6 +9,48 @@ import Foundation
 import Combine
 import os
 
+/// Esperas entre as tentativas de `/auth/refresh` quando a falha é transitória:
+/// 1 s antes da 2ª tentativa e 3 s antes da 3ª (3 tentativas no total).
+/// Tudo cabe com folga na janela de 60 s em que o servidor aceita a réplica
+/// do mesmo refresh token (ver `docs/refresh-token-janela-tolerancia.md`).
+nonisolated let esperasRefreshTransitorio: [Duration] = [.seconds(1), .seconds(3)]
+
+/// Falha que vale repetir o refresh: rede (timeout, sem conexão) ou 5xx.
+/// 401/403 e qualquer outro erro significam que o token não vale mais.
+nonisolated func ehFalhaTransitoriaDeRefresh(_ error: Error) -> Bool {
+    if error is URLError { return true }
+    if case APIError.serverError(_, _, let statusCode) = error {
+        return statusCode >= 500
+    }
+    return false
+}
+
+/// Executa `operacao` e, se falhar de forma transitória, repete após cada
+/// espera de `esperas` (no máximo `esperas.count` repetições). Erro não
+/// transitório ou o erro da última tentativa é propagado.
+///
+/// A operação deve reenviar sempre o MESMO refresh token: guardar o token
+/// para tentar mais tarde não é seguro, porque depois de 60 s a réplica vira
+/// reuso e o servidor derruba todas as sessões do usuário.
+nonisolated func repetindoSeTransitorio<T: Sendable>(
+    esperas: [Duration],
+    ehTransitorio: @Sendable (Error) -> Bool = ehFalhaTransitoriaDeRefresh,
+    dormir: @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+    operacao: @Sendable () async throws -> T
+) async throws -> T {
+    var esperasRestantes = esperas[...]
+    while true {
+        do {
+            return try await operacao()
+        } catch {
+            guard ehTransitorio(error), let espera = esperasRestantes.popFirst() else {
+                throw error
+            }
+            try await dormir(espera)
+        }
+    }
+}
+
 private actor TokenRefresher {
     private var currentTask: Task<AuthResponse, Error>?
 
@@ -17,12 +59,15 @@ private actor TokenRefresher {
             return try await task.value
         }
 
+        // Lido uma vez só: todas as tentativas reenviam este mesmo token.
         guard let refreshToken = KeychainManager.getRefreshToken() else {
             throw APIError.authentication
         }
 
         let task = Task {
-            let response = try await NetworkManager.shared.refreshAccessToken(refreshToken: refreshToken)
+            let response = try await repetindoSeTransitorio(esperas: esperasRefreshTransitorio) {
+                try await NetworkManager.shared.refreshAccessToken(refreshToken: refreshToken)
+            }
             KeychainManager.saveAccessToken(response.accessToken)
             KeychainManager.saveRefreshToken(response.refreshToken)
             return response
@@ -189,9 +234,10 @@ final class NetworkManager: Sendable {
                         allowRefresh: false
                     )
                 } catch {
-                    // O refresh token tambem nao vale mais: o backend ja o
-                    // revogou (ou nunca existiu), entao nao adianta chamar
-                    // /auth/logout.
+                    // O refresh token tambem nao vale mais (401/403) ou a
+                    // rede/servidor falhou nas 3 tentativas do refresher.
+                    // Nao adianta chamar /auth/logout, e o token antigo nao
+                    // e guardado: passados 60 s, reenvia-lo seria reuso.
                     Task { @MainActor in AuthService.shared.logout(revogandoNoServidor: false) }
                     throw APIError.authentication
                 }
