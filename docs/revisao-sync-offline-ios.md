@@ -194,6 +194,11 @@ já faz para dias removidos) **ou** fazer `syncDias`, `syncGastos`, `syncComprov
 ciclo com `deletadoEm != nil`. Preferir a segunda (não gera DELETEs inúteis, o servidor apaga em cascata). Teste: ciclo com dia
 e gasto pendentes, apagar, sincronizar: `contarPendentes == 0`, nenhum POST dos filhos depois do delete.
 
+**Feito (11/11, falta rodar no Mac):** segunda opção — `syncDias`, `syncGastos`, `syncComprovantes` e `contarPendentes`
+ignoram, em memória depois do fetch, dia cujo `ciclo?.deletadoEm != nil` e gasto cujo `dia?.deletadoEm != nil` ou
+`dia?.ciclo?.deletadoEm != nil`. O `syncDeletions` não mudou: como o `deleteCiclo` não marca os filhos, só sai o
+`DELETE` do ciclo e o servidor apaga o resto em cascata. Testes em `SoftSpendTests/CicloApagadoSyncTests.swift`.
+
 ### T6 — Casar gasto também por `clientId` e deduplicar (R6) — Simples
 
 Em `salvarOuAtualizarGastoLocal`, se não achar por `backendId`, procurar por `clientId` (nos gastos do mesmo dia) e preencher
@@ -225,6 +230,11 @@ Teste com API falsa: POST processado com resposta perdida, usuário apaga, o ser
 
 Em `SyncManager.sync`, se chegar um pedido com `isSyncing == true`, guardar `pedidoPendente = true` (e o `forcar`) e rodar
 mais uma vez no fim. Teste: duas chamadas seguidas executam duas passadas.
+
+**Feito (11/11, falta rodar no Mac):** `pedidoPendente`/`forcarPendente` (OU) num `repeat` dentro do `sync(forcar:)`;
+a rodada lembrada roda dentro da mesma chamada que estava no ar. Para o teste, `SyncManager.injetarSyncActor` liga um
+`SyncActor` com a `FakeSyncAPI` sem disparar o sync automático do `configure`. Teste em
+`SoftSpendTests/SyncManagerPedidoTests.swift` (gasto em backoff só sobe na rodada lembrada e forçada).
 
 ## Decisões para o usuário (não são técnicas)
 
