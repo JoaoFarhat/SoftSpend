@@ -127,18 +127,20 @@ final class SyncManager: ObservableObject {
         }
         isSyncing = true
         defer { isSyncing = false }
-        var forcarRodada = forcar
+        var forcarAtual = forcar
         repeat {
             pedidoPendente = false
-            let forcarAtual = forcarRodada
-            forcarRodada = forcarPendente
-            forcarPendente = false
             lastSyncError = nil
             let agora = Date()
             logger.info("SyncManager: iniciando sync para userId \(userId, privacy: .private), forcar=\(forcarAtual, privacy: .public)")
             let restantes = await syncActor.sync(agora: agora, userId: userId, forcar: forcarAtual)
             pendentesRestantes = restantes
             logger.info("SyncManager: sync finalizado, pendentes restantes=\(restantes, privacy: .public)")
+            // O forcar da próxima rodada vem dos pedidos guardados durante
+            // ESTA rodada (OU) — não pode ser lido no início da volta, senão
+            // um pedido forçado chegado no meio se perde.
+            forcarAtual = forcarPendente
+            forcarPendente = false
         } while pedidoPendente
     }
 
