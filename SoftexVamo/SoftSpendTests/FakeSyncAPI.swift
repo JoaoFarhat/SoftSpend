@@ -88,6 +88,12 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
         lock.withLock { _ = falhas.removeValue(forKey: endpoint) }
     }
 
+    /// Esquece as chamadas registradas, para o teste conferir só o que o sync
+    /// sob avaliação fez (e não o que a montagem do cenário enviou).
+    func limparChamadas() {
+        lock.withLock { _chamadas.removeAll() }
+    }
+
     // MARK: Infra
 
     /// Registra a chamada, espera o portão (se houver) e lança a falha (se houver).

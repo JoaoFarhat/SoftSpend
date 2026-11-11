@@ -193,23 +193,6 @@ actor SyncActor: ModelActor {
 
         logger.info("sincronizarEdicaoCiclo: iniciando backendId=\(backendId, privacy: .public) titulo=\(ciclo.titulo, privacy: .private)")
 
-        let cicloId = ciclo.id
-        var diasDesc = FetchDescriptor<DiaSoftex>(
-            predicate: #Predicate { _ in true },
-            sortBy: [SortDescriptor(\.data)]
-        )
-        diasDesc.relationshipKeyPathsForPrefetching = [\.ciclo]
-        let todosDias = ((try? modelContext.fetch(diasDesc)) ?? [])
-        let locais = todosDias.filter {
-            guard let diaCiclo = $0.ciclo else { return false }
-            return diaCiclo.id == cicloId
-        }
-        let diasAtivos = locais.filter { $0.deletadoEm == nil }
-
-        let diasRequest: [DiaLoteRequest]? = diasAtivos.isEmpty ? nil : diasAtivos.map {
-            DiaLoteRequest(clientId: $0.clientId, data: $0.data)
-        }
-
         let tituloAntes = ciclo.titulo
         let valorTotalAntes = ciclo.valor_total
         let diariaAntes = ciclo.diaria
@@ -223,12 +206,10 @@ actor SyncActor: ModelActor {
                 periodo: ciclo.periodo
             )
 
-            var diasRemotos: [DiaSoftex]?
-            if let diasRequest {
-                diasRemotos = try await api.syncDiasLote(cicloId: backendId, dias: diasRequest)
-                logger.info("sincronizarEdicaoCiclo: dias/lote ok backendId=\(backendId, privacy: .public)")
-            }
-
+            // A edição do ciclo não envia mais a lista de dias: o PUT /dias/lote
+            // apagava no servidor (com os gastos) os dias que este aparelho não
+            // conhecia. Dia novo sobe pelo syncDias e dia removido pelo
+            // syncDeletions. Ver T3 em docs/revisao-sync-offline-ios.md.
             let cicloEditado = try await api.putCiclo(cicloId: backendId, request: updateRequest)
             logger.info("sincronizarEdicaoCiclo: PUT ok backendId=\(backendId, privacy: .public)")
 
@@ -247,43 +228,6 @@ actor SyncActor: ModelActor {
             ciclo.gasto_total = cicloEditado.gasto_total
             ciclo.syncStatus = .synced
             ciclo.syncError = nil
-
-            if let diasRemotos {
-                let idsRemotos = Set(diasRemotos.compactMap { $0.backendId })
-                let clientIdsRemotos = Set(diasRemotos.compactMap { $0.clientId })
-
-                for local in locais where local.deletadoEm == nil {
-                    let aindaExiste = (local.backendId != nil && idsRemotos.contains(local.backendId!))
-                        || clientIdsRemotos.contains(local.clientId)
-                    // Só marcamos como deletado se o dia já tinha backendId (já foi sincronizado
-                    // alguma vez). Dias criados offline ainda não enviados não devem ser apagados
-                    // só porque o servidor ainda não os conhece.
-                    if local.backendId != nil && !aindaExiste {
-                        local.deletadoEm = Date()
-                        local.syncStatus = .pending
-                    }
-                }
-
-                for diaRemoto in diasRemotos {
-                    if let local = locais.first(where: { $0.backendId == diaRemoto.backendId })
-                        ?? locais.first(where: { $0.clientId == diaRemoto.clientId }) {
-                        local.data = diaRemoto.data
-                        local.saldo = diaRemoto.saldo
-                        local.backendId = diaRemoto.backendId
-                        local.clientId = diaRemoto.clientId ?? local.clientId
-                        local.deletadoEm = nil
-                        local.syncStatus = .synced
-                    } else if diaRemoto.backendId != nil {
-                        diaRemoto.ciclo = ciclo
-                        diaRemoto.syncStatus = .synced
-                        modelContext.insert(diaRemoto)
-                        // Não faça append manual na relação inversa: ao setar diaRemoto.ciclo,
-                        // o SwiftData atualiza ciclo.dias automaticamente.
-                    } else if diaRemoto.backendId == nil {
-                        logger.warning("Dia remoto sem backendId ignorado no ciclo \(String(describing: backendId), privacy: .public)")
-                    }
-                }
-            }
 
             try modelContext.save()
         } catch {
