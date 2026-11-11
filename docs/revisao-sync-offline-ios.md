@@ -156,6 +156,15 @@ foto. Se mudou, deixar `.pending` (sem `tentativas`/backoff, é mudança do usu�
 apagar durante POST, anexar comprovante novo durante upload; em todos o estado final tem que ser `.pending` e o servidor
 falso deve acabar com o valor novo / sem o gasto.
 
+**Feito (11/11, falta rodar no Mac):** em `SyncActor` (`Services/SyncManager.swift`); testes em
+`SoftSpendTests/MudancaDuranteEnvioTests.swift`. Escolhas:
+- O `SyncActor` não usa mais o próprio `modelContext`: cada etapa lista num contexto novo e a resposta é gravada
+  em outro contexto novo (`gravar`), aberto depois do `await`. Assim a próxima passada envia o valor novo.
+- A releitura busca pelo `id` (UUID único) em vez do `clientId`.
+- O "`.pending`" é conferido quando a próxima chamada chega; no fim do mesmo `sync()` o item já subiu e está `.synced`.
+- Também protegidos: POST do ciclo; dia apagado durante o `dias/lote` não é revivido; saldo do dia não é sobrescrito
+  se mudou durante o POST.
+
 ### T3 — Parar de usar o lote que apaga (R3) — Simples (só app, depois da T0)
 
 Confirmado no código: `NetworkManager.syncDiasLote` é `PUT /ciclos/{id}/dias/lote` (rota `sincronizar_dias_lote`, que

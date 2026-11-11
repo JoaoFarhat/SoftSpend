@@ -139,6 +139,9 @@ def login(db: Session, dados: LoginRequest) -> tuple[models.User, str, str]:
     if REVOKE_OLD_REFRESH_TOKENS_ON_LOGIN:
         auth_repository.revogar_todos_refresh_tokens_por_usuario(db, usuario.id)
 
+    auth_repository.apagar_refresh_tokens_expirados(
+        db, usuario.id, _utc_now_naive()
+    )
     access_token, refresh_token = iniciar_sessao(db, usuario.id)
     return usuario, access_token, refresh_token
 
@@ -210,6 +213,9 @@ def refresh_access_token(
                 "user_id=%s; emitindo novo par na mesma sessao",
                 rt.user_id,
             )
+            auth_repository.apagar_refresh_tokens_expirados(
+                db, rt.user_id, agora
+            )
             access_token = criar_access_token(rt.user_id, rt.session_id)
             novo_refresh_token = criar_refresh_token(
                 db, rt.user_id, rt.session_id
@@ -233,6 +239,7 @@ def refresh_access_token(
     if not usuario:
         raise ValueError("Refresh token invalido ou expirado")
 
+    auth_repository.apagar_refresh_tokens_expirados(db, rt.user_id, agora)
     rt.revoked_at = agora
     db.flush()
 
