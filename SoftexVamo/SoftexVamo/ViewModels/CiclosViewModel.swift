@@ -531,6 +531,7 @@ final class CiclosViewModel: ObservableObject {
                     salvarOuAtualizarGastoLocal(gasto, no: existente)
                 }
                 absorverDuplicatas(de: existente)
+                absorverDuplicatasDeGasto(no: existente)
                 return
             }
             existente.backendId = dia.backendId ?? existente.backendId
@@ -543,6 +544,7 @@ final class CiclosViewModel: ObservableObject {
             existente.syncStatus = .synced
             existente.syncError = nil
             absorverDuplicatas(de: existente)
+            absorverDuplicatasDeGasto(no: existente)
             return
         }
         dia.syncStatus = .synced
@@ -591,40 +593,78 @@ final class CiclosViewModel: ObservableObject {
         }
     }
 
-    private func salvarOuAtualizarGastoLocal(_ gasto: GastosDia, no dia: DiaSoftex) {
-        if let backendId = gasto.backendId {
+    /// Duplicatas de gasto que já ficaram no aparelho (mesmo `backendId` em registros
+    /// diferentes): fica o que tem comprovante local ainda não enviado, senão o mais
+    /// antigo; os outros saem do SwiftData. Roda a cada carga dos dias do servidor,
+    /// junto com a dedup de dia (T6).
+    private func absorverDuplicatasDeGasto(no dia: DiaSoftex) {
+        for backendId in Set(dia.gastos.compactMap(\.backendId)) {
             let descriptor = FetchDescriptor<GastosDia>(
                 predicate: #Predicate { $0.backendId == backendId }
             )
-            if let existente = try? modelContext?.fetch(descriptor).first {
-                // T1: edição ou exclusão pendente vence a versão do servidor (casou pelo
-                // `backendId`, então não falta nada a preencher). Nem o dia muda.
-                if Self.temAlteracaoLocal(existente.syncStatus, deletadoEm: existente.deletadoEm) {
-                    return
-                }
-                existente.titulo = gasto.titulo
-                existente.valor = gasto.valor
-                existente.categoria = gasto.categoria
-                existente.comprovanteUrl = gasto.comprovanteUrl
-                existente.openFinanceStatusRaw = gasto.openFinanceStatusRaw
-                existente.openFinanceMatchBackendId = gasto.openFinanceMatchBackendId
-                existente.openFinanceTransactionBackendId = gasto.openFinanceTransactionBackendId
-                existente.openFinanceProviderTransactionId = gasto.openFinanceProviderTransactionId
-                existente.openFinanceTransactionDescription = gasto.openFinanceTransactionDescription
-                existente.openFinanceTransactionAmount = gasto.openFinanceTransactionAmount
-                existente.openFinanceTransactionDate = gasto.openFinanceTransactionDate
-                existente.openFinanceMatchScore = gasto.openFinanceMatchScore
-                existente.openFinanceMatchConfirmed = gasto.openFinanceMatchConfirmed
-                existente.dia = dia
-                existente.syncStatus = .synced
-                existente.syncError = nil
+            guard let iguais = try? modelContext?.fetch(descriptor), iguais.count > 1 else { continue }
+            guard let fica = iguais.first(where: { $0.comprovanteDataCriptografado != nil })
+                ?? iguais.min(by: { $0.criadoEm < $1.criadoEm }) else { continue }
+            for outro in iguais where outro.id != fica.id {
+                modelContext?.delete(outro)
+            }
+        }
+    }
+
+    private func salvarOuAtualizarGastoLocal(_ gasto: GastosDia, no dia: DiaSoftex) {
+        // Casa pelo backendId e, sem ele, pelo clientId dentro do mesmo dia: um gasto criado
+        // no iPhone cujo POST o servidor já processou mas que ainda não tinha o backendId
+        // gravado (resposta perdida ou refresh com o POST em voo) entrava como segundo
+        // gasto, duplicando o lançamento na lista (T6).
+        if let existente = gastoLocal(backendId: gasto.backendId)
+            ?? gastoLocal(clientId: gasto.clientId, no: dia) {
+            // T1: edição ou exclusão pendente vence a versão do servidor; só completa
+            // o `backendId` para o próximo sync fazer PUT/DELETE em vez de POST.
+            if Self.temAlteracaoLocal(existente.syncStatus, deletadoEm: existente.deletadoEm) {
+                if existente.backendId == nil { existente.backendId = gasto.backendId }
                 return
             }
+            existente.backendId = gasto.backendId ?? existente.backendId
+            existente.titulo = gasto.titulo
+            existente.valor = gasto.valor
+            existente.categoria = gasto.categoria
+            existente.comprovanteUrl = gasto.comprovanteUrl
+            existente.openFinanceStatusRaw = gasto.openFinanceStatusRaw
+            existente.openFinanceMatchBackendId = gasto.openFinanceMatchBackendId
+            existente.openFinanceTransactionBackendId = gasto.openFinanceTransactionBackendId
+            existente.openFinanceProviderTransactionId = gasto.openFinanceProviderTransactionId
+            existente.openFinanceTransactionDescription = gasto.openFinanceTransactionDescription
+            existente.openFinanceTransactionAmount = gasto.openFinanceTransactionAmount
+            existente.openFinanceTransactionDate = gasto.openFinanceTransactionDate
+            existente.openFinanceMatchScore = gasto.openFinanceMatchScore
+            existente.openFinanceMatchConfirmed = gasto.openFinanceMatchConfirmed
+            existente.dia = dia
+            existente.syncStatus = .synced
+            existente.syncError = nil
+            return
         }
         gasto.syncStatus = .synced
         gasto.syncError = nil
         gasto.dia = dia
         modelContext?.insert(gasto)
+    }
+
+    private func gastoLocal(backendId: Int?) -> GastosDia? {
+        guard let backendId else { return nil }
+        let descriptor = FetchDescriptor<GastosDia>(
+            predicate: #Predicate { $0.backendId == backendId }
+        )
+        return try? modelContext?.fetch(descriptor).first
+    }
+
+    /// Prefere o gasto vivo; sem ele, devolve o que tem exclusão pendente (como `diaLocal(clientId:)`).
+    private func gastoLocal(clientId: String, no dia: DiaSoftex) -> GastosDia? {
+        let diaId = dia.id
+        let descriptor = FetchDescriptor<GastosDia>(
+            predicate: #Predicate { $0.clientId == clientId && $0.dia?.id == diaId }
+        )
+        let gastos = (try? modelContext?.fetch(descriptor)) ?? []
+        return gastos.first(where: { $0.deletadoEm == nil }) ?? gastos.first
     }
     
     /// Upsert de um ciclo vindo do servidor: casa pelo `backendId` e, sem ele, pelo `clientId`.

@@ -206,6 +206,12 @@ o `backendId` nele em vez de inserir outro. Adicionar `absorverDuplicatasDeGasto
 fica o que tem comprovante local pendente ou o mais antigo), chamado ao carregar os dias, como já existe para dia.
 Testes: refresh durante POST em voo não duplica; duplicata já existente é absorvida.
 
+**Feito (11/11, falta rodar no Mac):** casamento por `clientId` em `gastoLocal(clientId:no:)` (prefere o gasto vivo, como
+`diaLocal(clientId:)`); com alteração local só preenche o `backendId` (regra da T1). `absorverDuplicatasDeGasto(no:)` roda
+junto do `absorverDuplicatas(de:)` nos dois ramos de `salvarOuAtualizarDiaLocal`: para cada `backendId` dos gastos do dia,
+busca global e fica o registro com `comprovanteDataCriptografado` (upload ainda não feito), senão o de `criadoEm` menor.
+Testes em `SoftSpendTests/GastoDuplicadoTests.swift`.
+
 ### T4 — 404 ao criar/editar gasto ou dia: parar de tentar e avisar (R4) — Simples (depende de decisão do usuário)
 
 Tratar 404 em `syncGastos` (PUT e POST) e `syncDias` como terminal: sem backoff, `syncStatus = .failed`, `syncError` com
