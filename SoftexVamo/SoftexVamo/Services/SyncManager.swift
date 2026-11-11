@@ -748,6 +748,78 @@ actor SyncActor: ModelActor {
         return false
     }
 
+    // MARK: - Apagar item sem backendId (T7)
+
+    /// T7 de `docs/revisao-sync-offline-ios.md` (R7): resultado de procurar no
+    /// servidor um item apagado no aparelho que ainda não tem `backendId`.
+    private enum Recuperacao {
+        /// O servidor tem o item (o POST idempotente devolveu o existente, ou
+        /// criou agora): este é o id para o `DELETE`.
+        case encontrado(Int)
+        /// O item não pode estar no servidor: nunca foi enviado, ou o pai dele
+        /// não existe lá (404). Basta apagar no aparelho.
+        case naoExiste
+        /// Não deu para saber agora: fica para a próxima, com backoff.
+        case falhou(String)
+    }
+
+    private func classificar(_ error: Error) -> Recuperacao {
+        isNotFoundError(error) ? .naoExiste : .falhou(error.localizedDescription)
+    }
+
+    /// Repete o POST do gasto com o mesmo `client_id` só para descobrir o
+    /// `backendId` (o servidor devolve o existente). Se o primeiro POST nunca
+    /// chegou, este cria o gasto e o `DELETE` logo em seguida o remove.
+    private func recuperarBackendId(_ gasto: GastosDia) async -> Recuperacao {
+        // Sem dia no servidor o gasto nunca pôde subir (o syncGastos espera o dia).
+        guard gasto.podeTerSidoCriadoNoServidor, let diaId = gasto.dia?.backendId else { return .naoExiste }
+        let request = GastoCreateRequest(
+            client_id: gasto.clientId,
+            titulo: gasto.titulo,
+            valor: gasto.valor,
+            categoria: gasto.categoria,
+            dia_id: diaId
+        )
+        do {
+            let resposta = try await api.postGasto(request: request)
+            guard let id = resposta.backendId else { return .falhou("Resposta do servidor sem id do gasto") }
+            return .encontrado(id)
+        } catch {
+            return classificar(error)
+        }
+    }
+
+    private func recuperarBackendId(_ dia: DiaSoftex) async -> Recuperacao {
+        guard dia.podeTerSidoCriadoNoServidor, let cicloId = dia.ciclo?.backendId else { return .naoExiste }
+        let request = DiaLoteRequest(clientId: dia.clientId, data: dia.data)
+        do {
+            // POST /dias/lote deduplica por client_id (o PUT, por data, não é usado aqui).
+            let resposta = try await api.postDiasLote(cicloId: cicloId, dias: [request])
+            guard let id = resposta.first?.backendId else { return .falhou("Resposta do servidor sem id do dia") }
+            return .encontrado(id)
+        } catch {
+            return classificar(error)
+        }
+    }
+
+    private func recuperarBackendId(_ ciclo: CicloSoftex) async -> Recuperacao {
+        guard ciclo.podeTerSidoCriadoNoServidor else { return .naoExiste }
+        let request = CicloCreateRequest(
+            client_id: ciclo.clientId,
+            titulo: ciclo.titulo,
+            valor_total: ciclo.valor_total,
+            diaria: ciclo.diaria,
+            periodo: ciclo.periodo
+        )
+        do {
+            let resposta = try await api.postCiclo(request: request)
+            guard let id = resposta.backendId else { return .falhou("Resposta do servidor sem id da viagem") }
+            return .encontrado(id)
+        } catch {
+            return classificar(error)
+        }
+    }
+
     private func syncDeletions(agora: Date, userId: String, forcar: Bool = false) async {
         let modelContext = contextoNovo()
         let synced = SyncStatus.synced.rawValue
@@ -763,9 +835,24 @@ actor SyncActor: ModelActor {
         logger.info("syncDeletions: \(gastos.count, privacy: .public) gasto(s) para deletar")
 
         for gasto in gastos {
-            guard let backendId = gasto.backendId else {
-                marcarSucesso(gasto)
-                continue
+            let backendId: Int
+            if let id = gasto.backendId {
+                backendId = id
+            } else {
+                // T7: sem backendId, mas o POST pode ter sido processado com a
+                // resposta perdida. Nunca enviado: só no aparelho, sem requisição.
+                switch await recuperarBackendId(gasto) {
+                case .encontrado(let id):
+                    gasto.backendId = id
+                    backendId = id
+                case .naoExiste:
+                    marcarSucesso(gasto)
+                    continue
+                case .falhou(let erro):
+                    marcarFalha(gasto)
+                    gasto.syncError = erro
+                    continue
+                }
             }
 
             do {
@@ -790,10 +877,23 @@ actor SyncActor: ModelActor {
         logger.info("syncDeletions: \(dias.count, privacy: .public) dia(s) para deletar")
 
         for dia in dias {
-
-            guard let backendId = dia.backendId else {
-                marcarSucesso(dia)
-                continue
+            let backendId: Int
+            if let id = dia.backendId {
+                backendId = id
+            } else {
+                // T7: ver o mesmo caso nos gastos acima.
+                switch await recuperarBackendId(dia) {
+                case .encontrado(let id):
+                    dia.backendId = id
+                    backendId = id
+                case .naoExiste:
+                    marcarSucesso(dia)
+                    continue
+                case .falhou(let erro):
+                    marcarFalha(dia)
+                    dia.syncError = erro
+                    continue
+                }
             }
 
             do {
@@ -817,9 +917,23 @@ actor SyncActor: ModelActor {
         logger.info("syncDeletions: \(ciclos.count, privacy: .public) ciclo(s) para deletar")
 
         for ciclo in ciclos {
-            guard let backendId = ciclo.backendId else {
-                marcarSucesso(ciclo)
-                continue
+            let backendId: Int
+            if let id = ciclo.backendId {
+                backendId = id
+            } else {
+                // T7: ver o mesmo caso nos gastos acima.
+                switch await recuperarBackendId(ciclo) {
+                case .encontrado(let id):
+                    ciclo.backendId = id
+                    backendId = id
+                case .naoExiste:
+                    marcarSucesso(ciclo)
+                    continue
+                case .falhou(let erro):
+                    marcarFalha(ciclo)
+                    ciclo.syncError = erro
+                    continue
+                }
             }
 
             do {
@@ -897,6 +1011,20 @@ nonisolated protocol Syncavel: AnyObject {
     var proximaTentativaEm: Date? { get set }
     var syncStatus: SyncStatus { get set }
     var syncError: String? { get set }
+}
+
+nonisolated extension Syncavel {
+    /// T7: um item **sem `backendId`** pode já existir no servidor — o POST foi
+    /// processado e a resposta se perdeu (timeout, app fechado). Sinal disso: já
+    /// houve tentativa (`tentativas > 0`), falha ou erro registrado. Item que
+    /// nunca foi enviado (`tentativas == 0` e sem `syncError`) não pode estar lá.
+    ///
+    /// A falha final por 404 do T4 não conta: o pai não existe no servidor, e o
+    /// item (se chegou a ser criado) foi apagado junto, em cascata.
+    var podeTerSidoCriadoNoServidor: Bool {
+        if syncError == SyncActor.erroApagadoEmOutroAparelho { return false }
+        return tentativas > 0 || syncStatus == .failed || syncError != nil
+    }
 }
 
 nonisolated extension CicloSoftex: Syncavel {}

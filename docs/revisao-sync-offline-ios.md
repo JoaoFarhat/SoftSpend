@@ -254,6 +254,18 @@ criado no servidor. Mantê-lo com `deletadoEm` e, no sync, repetir o POST idempo
 `backendId` e então apagar. Item que nunca foi enviado (`tentativas == 0` e sem `syncError`) continua apagando só local.
 Teste com API falsa: POST processado com resposta perdida, usuário apaga, o servidor falso termina sem o item.
 
+**Feito (11/11, na branch, sem merge). Pendência: validação no Mac** — build + `ApagarSemBackendIdTests` + suíte
+completa no simulador (feito no Windows, sem Xcode).
+- Regra única `Syncavel.podeTerSidoCriadoNoServidor` (`SyncManager.swift`): `tentativas > 0`, `.failed` ou `syncError`;
+  a falha final por 404 do T4 não conta (o pai não existe no servidor).
+- `syncDeletions`: item sem `backendId` que pode existir repete o POST com o mesmo `client_id` (gasto, `dias/lote`,
+  ciclo), grava o id e manda o `DELETE`. 404 no POST = não existe; outra falha = backoff, tenta de novo.
+- `deleteCiclo`: viagem sem `backendId` mas com envio tentado é marcada (não sai só do aparelho).
+  `deleteGasto` e os dias removidos no `editCiclo` já marcavam sempre; o `syncDeletions` decide.
+- Nunca enviado: nenhuma requisição (viagem sai do aparelho na hora; gasto/dia ficam marcados como feitos).
+- Limite conhecido: viagem/gasto apagado **enquanto** o primeiro POST está no ar (`tentativas == 0`) sai só do
+  aparelho e pode ficar no servidor; a resposta do POST é descartada ("item não existe mais").
+
 ### T9 — Repetir o sync pedido durante outro sync (R9) — Simples
 
 Em `SyncManager.sync`, se chegar um pedido com `isSyncing == true`, guardar `pedidoPendente = true` (e o `forcar`) e rodar

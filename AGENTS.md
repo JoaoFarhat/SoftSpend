@@ -178,6 +178,14 @@ de envio e o `contarPendentes` ignoram esses itens; `syncDeletions` não (DELETE
 de item apagado pelo usuário continua saindo). O item fica no aparelho.
 Testes em `SoftSpendTests/FalhaFinal404Tests.swift`.
 
+**Apagar sem `backendId` (T7)**: item apagado sem `backendId`, mas com
+`podeTerSidoCriadoNoServidor` (`tentativas > 0`, `.failed` ou `syncError`, exceto
+a falha final do T4), pode existir no servidor (resposta do POST perdida). O
+`deleteCiclo` o marca com `deletadoEm` em vez de apagar só no aparelho, e o
+`syncDeletions` repete o POST com o mesmo `client_id` só para obter o id e mandar
+o `DELETE`. Nunca enviado: nenhuma requisição. Testes em
+`SoftSpendTests/ApagarSemBackendIdTests.swift` (`FakeSyncAPI.perderResposta`).
+
 **Comprovantes**: `syncComprovantes` filtra por `syncStatusRaw != synced` no
 predicado. Chama `marcarFalha` em falha (backoff) e `marcarSucesso` apenas se
 `comprovanteData == nil && !comprovanteParaRemover`. `syncGastos` também só

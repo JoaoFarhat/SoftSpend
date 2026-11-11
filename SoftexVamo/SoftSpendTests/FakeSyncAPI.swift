@@ -62,6 +62,10 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
     private var proximoId = 1
     private var portoes: [Endpoint: Portao] = [:]
     private var falhas: [Endpoint: any Error] = [:]
+    private var respostasPerdidas: Set<Endpoint> = []
+
+    /// Erro devolvido quando a resposta "se perde" (ver `perderResposta`).
+    static let respostaPerdida = URLError(.timedOut)
 
     init() {}
 
@@ -90,6 +94,13 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
         lock.withLock { _ = falhas.removeValue(forKey: endpoint) }
     }
 
+    /// A próxima chamada a `endpoint` é **processada** (o item fica no servidor)
+    /// e depois lança `respostaPerdida`, como um timeout com a requisição já
+    /// atendida. Só vale uma vez. Suportado em `postCiclo`, `postDiasLote` e `postGasto`.
+    func perderResposta(_ endpoint: Endpoint) {
+        lock.withLock { _ = respostasPerdidas.insert(endpoint) }
+    }
+
     /// Esquece as chamadas registradas, para o teste conferir só o que o sync
     /// sob avaliação fez (e não o que a montagem do cenário enviou).
     func limparChamadas() {
@@ -106,6 +117,13 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
         }
         if let portao { await portao.esperar() }
         if let erro = lock.withLock({ falhas[endpoint] }) { throw erro }
+    }
+
+    /// Depois de processar: lança se a resposta desta chamada deve se perder.
+    private func entregar<T>(_ resposta: T, _ endpoint: Endpoint) throws -> T {
+        let perdeu = lock.withLock { respostasPerdidas.remove(endpoint) != nil }
+        if perdeu { throw Self.respostaPerdida }
+        return resposta
     }
 
     private func novoId() -> Int {
@@ -153,7 +171,7 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
 
     func postCiclo(request: CicloCreateRequest) async throws -> CicloSoftex {
         try await entrar(.postCiclo)
-        return lock.withLock {
+        let resposta: CicloSoftex = lock.withLock {
             if let clientId = request.client_id, let existente = _ciclos.first(where: { $0.clientId == clientId }) {
                 return respostaCiclo(existente)
             }
@@ -164,6 +182,7 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
             _ciclos.append(ciclo)
             return respostaCiclo(ciclo)
         }
+        return try entregar(resposta, .postCiclo)
     }
 
     func putCiclo(cicloId: Int, request: CicloUpdateRequest) async throws -> CicloSoftex {
@@ -191,10 +210,11 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
 
     func postDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex] {
         try await entrar(.postDiasLote)
-        return try lock.withLock {
+        let resposta: [DiaSoftex] = try lock.withLock {
             guard let ciclo = _ciclos.first(where: { $0.id == cicloId }) else { throw Self.naoEncontrado }
             return dias.map { respostaDia(criarOuAcharDia($0, ciclo: ciclo)) }
         }
+        return try entregar(resposta, .postDiasLote)
     }
 
     func syncDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex] {
@@ -220,7 +240,7 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
 
     func postGasto(request: GastoCreateRequest) async throws -> GastosDia {
         try await entrar(.postGasto)
-        return try lock.withLock {
+        let resposta: GastosDia = try lock.withLock {
             guard _dias.contains(where: { $0.id == request.dia_id }) else { throw Self.naoEncontrado }
             if let clientId = request.client_id,
                let existente = _gastos.first(where: { $0.diaId == request.dia_id && $0.clientId == clientId }) {
@@ -233,6 +253,7 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
             _gastos.append(gasto)
             return respostaGasto(gasto)
         }
+        return try entregar(resposta, .postGasto)
     }
 
     func putGasto(gastoId: Int, request: GastoUpdateRequest) async throws -> GastosDia {

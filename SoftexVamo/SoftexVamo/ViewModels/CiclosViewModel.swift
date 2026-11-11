@@ -885,6 +885,9 @@ final class CiclosViewModel: ObservableObject {
             if let diasExistentes = cicloLocal.dias {
                 for dia in diasExistentes where dia.deletadoEm == nil {
                     if !datasNovas.contains(where: { cal.isDate($0, inSameDayAs: dia.data) }) {
+                        // Marca mesmo sem backendId: o syncDeletions recupera o id
+                        // de um dia cujo POST se perdeu (T7) e não envia nada
+                        // para o que nunca subiu.
                         dia.deletadoEm = Date()
                         dia.syncStatus = .pending
                         for gasto in dia.gastos where gasto.deletadoEm == nil {
@@ -948,7 +951,11 @@ final class CiclosViewModel: ObservableObject {
             }
         }
 
-        if let _ = ciclo.backendId {
+        // T7: sem backendId, mas com envio já tentado, a viagem pode existir no
+        // servidor (resposta do POST perdida): marca e o syncDeletions descobre
+        // o id repetindo o POST com o mesmo client_id e manda o DELETE. Viagem
+        // nunca enviada sai só do aparelho.
+        if ciclo.backendId != nil || ciclo.podeTerSidoCriadoNoServidor {
             ciclo.deletadoEm = Date()
             ciclo.syncStatus = .pending
             salvarLocal()
@@ -1131,6 +1138,9 @@ final class CiclosViewModel: ObservableObject {
             self.allCiclos[self.index] = self.atualCiclo
         }
 
+        // Sempre marca (com ou sem backendId): o syncDeletions decide. Com envio
+        // já tentado e sem backendId, ele recupera o id e manda o DELETE (T7);
+        // nunca enviado, só marca como feito, sem requisição.
         gasto.deletadoEm = Date()
         gasto.syncStatus = .pending
         try modelContext.save()
