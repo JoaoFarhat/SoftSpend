@@ -27,7 +27,7 @@ nonisolated enum EstadoEnvio: Equatable, Sendable {
     }
 }
 
-extension EstadoEnvio {
+nonisolated extension EstadoEnvio {
     /// SF Symbol do indicador nas listas; `nil` quando enviado (nada a mostrar).
     var simbolo: String? {
         switch self {
