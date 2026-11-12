@@ -103,6 +103,8 @@ private struct EscolherComprovante: ViewModifier {
     @State private var arquivos = false
     @State private var fotoTirada: UIImage?
     @State private var itemFotos: PhotosPickerItem?
+    /// Foto da galeria que não abriu (ex.: arquivo no iCloud sem internet).
+    @State private var erroFoto = false
 
     func body(content: Content) -> some View {
         content
@@ -124,12 +126,23 @@ private struct EscolherComprovante: ViewModifier {
             .onChange(of: itemFotos) { _, item in
                 guard let item else { return }
                 Task {
-                    if let dados = try? await item.loadTransferable(type: Data.self),
-                       let imagem = UIImage(data: dados) {
-                        aoEscolher(.foto(imagem))
+                    do {
+                        if let dados = try await item.loadTransferable(type: Data.self),
+                           let imagem = UIImage(data: dados) {
+                            aoEscolher(.foto(imagem))
+                        } else {
+                            erroFoto = true
+                        }
+                    } catch {
+                        erroFoto = true
                     }
                     itemFotos = nil
                 }
+            }
+            .alert("Não deu para abrir a foto", isPresented: $erroFoto) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Não deu para abrir essa foto. Se ela estiver no iCloud, conecte-se à internet ou tire a foto com a câmera.")
             }
             .fileImporter(isPresented: $arquivos, allowedContentTypes: [.image, .pdf]) { resultado in
                 if case .success(let url) = resultado {
