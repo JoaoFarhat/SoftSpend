@@ -288,6 +288,7 @@ private struct LinhaGastoCompacta: View {
 
     var body: some View {
         let faltaFoto = !temComprovanteValido(gasto)
+        let estado = EstadoEnvio.de(gasto)
         HStack(spacing: Espaco.m) {
             IconeCategoria(gasto.categoria, tamanho: tamanhoIcone)
             HStack(spacing: 6) {
@@ -298,6 +299,7 @@ private struct LinhaGastoCompacta: View {
                 if faltaFoto {
                     Circle().fill(Tema.alertaTexto).frame(width: 5, height: 5)
                 }
+                IconeEstadoEnvio(estado: estado)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             ValorMonetario(gasto.valor, simbolo: false)
@@ -310,7 +312,7 @@ private struct LinhaGastoCompacta: View {
         .contentShape(Rectangle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
-            "\(gasto.titulo), \(gasto.categoria.localizedName), \(formatarBRL(gasto.valor))\(faltaFoto ? ", falta a foto" : "")"
+            "\(gasto.titulo), \(gasto.categoria.localizedName), \(formatarBRL(gasto.valor))\(faltaFoto ? ", falta a foto" : "")\(estado.rotuloAcessivel.map { ", \($0)" } ?? "")"
         )
         .accessibilityAddTraits(.isButton)
     }

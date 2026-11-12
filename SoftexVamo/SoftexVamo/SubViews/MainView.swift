@@ -93,6 +93,10 @@ struct MainView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if mostrarBarra {
+                if syncManager.pendentesRestantes > 0 {
+                    avisoPendentes
+                }
+
                 Divider()
 
                 HStack(spacing: 0) {
@@ -137,6 +141,21 @@ struct MainView: View {
                 viewModel.fetchCiclosResumo()
             }
         }
+    }
+
+    /// "N alterações aguardando envio": faixa discreta sobre a barra de abas,
+    /// enquanto o sync ainda tem itens na fila.
+    private var avisoPendentes: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "icloud.slash")
+                .accessibilityHidden(true)
+            Text(textoAlteracoesAguardando(syncManager.pendentesRestantes))
+        }
+        .font(.caption)
+        .foregroundStyle(Tema.textoFraco)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+        .background(Tema.superficie)
     }
 
     @ViewBuilder

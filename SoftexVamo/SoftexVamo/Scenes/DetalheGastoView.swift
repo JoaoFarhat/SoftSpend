@@ -209,9 +209,38 @@ struct DetalheGastoView: View {
                         .foregroundStyle(Tema.marcaTexto)
                 }
             }
+            divisoria
+            linha("Envio") { envio(gasto) }
         }
         .background(Tema.superficie, in: RoundedRectangle(cornerRadius: Raio.lista, style: .continuous))
         .padding(.horizontal, Espaco.g + 2)
+    }
+
+    /// Estado de envio ao servidor; na falha, o texto do `syncError` embaixo.
+    @ViewBuilder
+    private func envio(_ gasto: GastosDia) -> some View {
+        let estado = EstadoEnvio.de(gasto)
+        let cor: Color = switch estado {
+        case .enviado: Tema.texto
+        case .aguardando: Tema.textoFraco
+        case .falhou, .apagadoEmOutroAparelho: Tema.estouro
+        }
+        VStack(alignment: .trailing, spacing: 2) {
+            if let simbolo = estado.simbolo {
+                Label(estado.rotulo, systemImage: simbolo)
+                    .labelStyle(RotuloCompacto())
+                    .foregroundStyle(cor)
+            } else {
+                Text(estado.rotulo)
+                    .foregroundStyle(cor)
+            }
+            if let detalhe = estado.detalhe {
+                Text(detalhe)
+                    .font(.caption)
+                    .foregroundStyle(Tema.textoFraco)
+                    .multilineTextAlignment(.trailing)
+            }
+        }
     }
 
     private var divisoria: some View {
