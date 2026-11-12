@@ -33,7 +33,8 @@ struct LinhaGasto: View {
         let apoio = faltaFoto
             ? "\(gasto.categoria.localizedName), \(hora), falta a foto"
             : "\(gasto.categoria.localizedName), \(hora)"
-        return "\(gasto.titulo), \(apoio), \(formatarBRL(gasto.valor))"
+        let envio = EstadoEnvio.de(gasto).rotuloAcessivel.map { ", \($0)" } ?? ""
+        return "\(gasto.titulo), \(apoio), \(formatarBRL(gasto.valor))\(envio)"
     }
 
     var body: some View {
@@ -41,10 +42,13 @@ struct LinhaGasto: View {
             IconeCategoria(gasto.categoria, tamanho: tamanhoIcone)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(gasto.titulo)
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(Tema.texto)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(gasto.titulo)
+                        .font(.body.weight(.semibold))
+                        .foregroundStyle(Tema.texto)
+                        .lineLimit(1)
+                    IconeEstadoEnvio(estado: EstadoEnvio.de(gasto))
+                }
 
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 6) {
