@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Tela 9: câmera do comprovante, com "Galeria" (fotos ou PDF em Arquivos) e
 /// "Sem foto". Sem câmera (simulador) ou sem permissão, as duas saídas continuam.

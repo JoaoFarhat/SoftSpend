@@ -6,6 +6,7 @@ import SwiftUI
 import UIKit
 import AVFoundation
 import Combine
+import UniformTypeIdentifiers
 
 /// View que apresenta o `UIImagePickerController` nativo para captura de fotos.
 ///
