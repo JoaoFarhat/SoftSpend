@@ -119,6 +119,9 @@ Não perde gasto que o usuário quer manter, mas gera lixo no servidor e estado 
 
 ## Tarefas para o Devin
 
+**Status: todas as tarefas abaixo já estão mergeadas na `main`; falta só a validação no Mac** (build + testes no
+simulador).
+
 Ordem sugerida: T0, T1, T2, T3, T8, T6, T4, T5, T7, T9. Cada uma vira um PR pequeno. Todas dependem do Mac para rodar
 `xcodebuild` e os testes; descrever o resultado no PR. Todas são só do app (nenhuma mexe no backend).
 
@@ -194,7 +197,7 @@ já faz para dias removidos) **ou** fazer `syncDias`, `syncGastos`, `syncComprov
 ciclo com `deletadoEm != nil`. Preferir a segunda (não gera DELETEs inúteis, o servidor apaga em cascata). Teste: ciclo com dia
 e gasto pendentes, apagar, sincronizar: `contarPendentes == 0`, nenhum POST dos filhos depois do delete.
 
-**Feito (11/11, falta rodar no Mac):** segunda opção — `syncDias`, `syncGastos`, `syncComprovantes` e `contarPendentes`
+**Feito e mergeado (11/11, PR #20). Pendência: validação no Mac:** segunda opção — `syncDias`, `syncGastos`, `syncComprovantes` e `contarPendentes`
 ignoram, em memória depois do fetch, dia cujo `ciclo?.deletadoEm != nil` e gasto cujo `dia?.deletadoEm != nil` ou
 `dia?.ciclo?.deletadoEm != nil`. O `syncDeletions` não mudou: como o `deleteCiclo` não marca os filhos, só sai o
 `DELETE` do ciclo e o servidor apaga o resto em cascata. Testes em `SoftSpendTests/CicloApagadoSyncTests.swift`.
@@ -206,7 +209,7 @@ o `backendId` nele em vez de inserir outro. Adicionar `absorverDuplicatasDeGasto
 fica o que tem comprovante local pendente ou o mais antigo), chamado ao carregar os dias, como já existe para dia.
 Testes: refresh durante POST em voo não duplica; duplicata já existente é absorvida.
 
-**Feito (11/11, falta rodar no Mac):** casamento por `clientId` em `gastoLocal(clientId:no:)` (prefere o gasto vivo, como
+**Feito e mergeado (11/11, PR #21). Pendência: validação no Mac:** casamento por `clientId` em `gastoLocal(clientId:no:)` (prefere o gasto vivo, como
 `diaLocal(clientId:)`); com alteração local só preenche o `backendId` (regra da T1). `absorverDuplicatasDeGasto(no:)` roda
 junto do `absorverDuplicatas(de:)` nos dois ramos de `salvarOuAtualizarDiaLocal`: para cada `backendId` dos gastos do dia,
 busca global e fica o registro com `comprovanteDataCriptografado` (upload ainda não feito), senão o de `criadoEm` menor.
@@ -236,7 +239,7 @@ veio na lista do dia, sai do aparelho. Para ciclos, com a lista completa de `fet
 ausente sai. Nunca remover item `pending`/`failed` nem com `deletadoEm`. Depende de T1. Testes dos dois casos mais o
 "item pendente é preservado".
 
-**Feito (11/11, na branch, sem merge). Pendência: validação no Mac** — build + `ExclusaoNoServidorTests` + suíte
+**Feito e mergeado (PR #24). Pendência: validação no Mac** — build + `ExclusaoNoServidorTests` + suíte
 completa no simulador (feito no Windows, sem Xcode). Implementação em `CiclosViewModel`:
 - Gastos (`removerSumidos`, que substitui `removerDiasSumidos`): candidatos são os gastos `synced`, com `backendId` e sem
   `deletadoEm` antes da busca; comparados com os gastos de **todos** os dias da lista (gasto movido de dia não sai).
@@ -254,7 +257,7 @@ criado no servidor. Mantê-lo com `deletadoEm` e, no sync, repetir o POST idempo
 `backendId` e então apagar. Item que nunca foi enviado (`tentativas == 0` e sem `syncError`) continua apagando só local.
 Teste com API falsa: POST processado com resposta perdida, usuário apaga, o servidor falso termina sem o item.
 
-**Feito (11/11, na branch, sem merge). Pendência: validação no Mac** — build + `ApagarSemBackendIdTests` + suíte
+**Feito e mergeado (PR #25). Pendência: validação no Mac** — build + `ApagarSemBackendIdTests` + suíte
 completa no simulador (feito no Windows, sem Xcode).
 - Regra única `Syncavel.podeTerSidoCriadoNoServidor` (`SyncManager.swift`): `tentativas > 0`, `.failed` ou `syncError`;
   a falha final por 404 do T4 não conta (o pai não existe no servidor).
@@ -271,7 +274,7 @@ completa no simulador (feito no Windows, sem Xcode).
 Em `SyncManager.sync`, se chegar um pedido com `isSyncing == true`, guardar `pedidoPendente = true` (e o `forcar`) e rodar
 mais uma vez no fim. Teste: duas chamadas seguidas executam duas passadas.
 
-**Feito (11/11, falta rodar no Mac):** `pedidoPendente`/`forcarPendente` (OU) num `repeat` dentro do `sync(forcar:)`;
+**Feito e mergeado (11/11, PR #22). Pendência: validação no Mac:** `pedidoPendente`/`forcarPendente` (OU) num `repeat` dentro do `sync(forcar:)`;
 a rodada lembrada roda dentro da mesma chamada que estava no ar. Para o teste, `SyncManager.injetarSyncActor` liga um
 `SyncActor` com a `FakeSyncAPI` sem disparar o sync automático do `configure`. Teste em
 `SoftSpendTests/SyncManagerPedidoTests.swift` (gasto em backoff só sobe na rodada lembrada e forçada).
