@@ -107,7 +107,9 @@ struct NewCicloView: View {
             Button("Salvar e excluir", role: .destructive) { confirmarEncurtar() }
             Button("Cancelar", role: .cancel) {}
         } message: {
-            Text("\(gastosEmRisco) gastos de dias fora das novas datas serão excluídos.")
+            Text(gastosEmRisco == 1
+                ? "1 gasto de dia fora das novas datas será excluído."
+                : "\(gastosEmRisco) gastos de dias fora das novas datas serão excluídos.")
         }
     }
 

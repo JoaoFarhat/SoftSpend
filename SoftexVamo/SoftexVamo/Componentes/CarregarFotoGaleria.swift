@@ -23,6 +23,9 @@ private struct CarregarFotoGaleria: ViewModifier {
     @State private var erroFoto = false
     /// `loadTransferable` em andamento (a espera do iCloud pode ser longa).
     @State private var carregando = false
+    /// Carregamento da escolha atual; uma escolha nova enquanto a anterior
+    /// carrega (o iCloud pode demorar) a cancela — só a última foto entrega.
+    @State private var tarefa: Task<Void, Never>?
 
     func body(content: Content) -> some View {
         content
@@ -30,21 +33,22 @@ private struct CarregarFotoGaleria: ViewModifier {
             .onChange(of: item) { _, novo in
                 guard let novo else { return }
                 carregando = true
-                Task {
-                    defer {
-                        item = nil
-                        carregando = false
-                    }
+                tarefa?.cancel()
+                tarefa = Task {
                     do {
-                        if let dados = try await novo.loadTransferable(type: Data.self),
-                           let imagem = UIImage(data: dados) {
+                        let dados = try await novo.loadTransferable(type: Data.self)
+                        guard !Task.isCancelled else { return }
+                        if let dados, let imagem = UIImage(data: dados) {
                             aoEscolher(imagem)
                         } else {
                             erroFoto = true
                         }
                     } catch {
+                        if Task.isCancelled { return }
                         erroFoto = true
                     }
+                    item = nil
+                    carregando = false
                 }
             }
             .alert("Não deu para abrir a foto", isPresented: $erroFoto) {

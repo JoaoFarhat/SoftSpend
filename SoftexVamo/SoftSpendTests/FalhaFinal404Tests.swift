@@ -57,6 +57,13 @@ struct FalhaFinal404Tests {
         return await syncActor.sync(agora: .now, userId: userId, forcar: true)
     }
 
+    /// Sync em background, para mexer no item com a requisição parada no `Portao`.
+    func iniciarSync() -> Task<Int, Never> {
+        let syncActor = SyncActor(modelContainer: container, api: api)
+        let usuario = userId
+        return Task { await syncActor.sync(agora: .now, userId: usuario, forcar: true) }
+    }
+
     func cicloLocal(_ ctx: ModelContext) throws -> CicloSoftex {
         try #require(try ctx.fetch(FetchDescriptor<CicloSoftex>()).first)
     }
@@ -145,6 +152,52 @@ struct FalhaFinal404Tests {
         #expect(try gastosLocais(leitura).isEmpty)
         #expect(try diasLocais(leitura).count == 1)
         #expect(try cicloLocal(leitura).gasto_total == 0)
+    }
+
+    /// Editar o gasto com o PUT em voo e o PUT responder 404 (o gasto foi
+    /// apagado em outro aparelho): o gasto é descartado com a última edição, e
+    /// o valor dela sai do `gasto_total` uma vez só — nada é reenviado.
+    @Test func editarDuranteOEnvio404DescartaUmaVezSo() async throws {
+        try await subirViagem()
+
+        // Outro aparelho apagou o gasto; aqui o usuário o edita e ele volta
+        // para pending, como o editGasto faz (valor e total já novos).
+        let gastoRemoto = try #require(api.gastos.first)
+        try await api.deleteGasto(gastoId: gastoRemoto.id)
+        api.limparChamadas()
+
+        let put = api.segurar(.putGasto)
+        let ctx = ModelContext(container)
+        let gasto = try #require(gastosLocais(ctx).first)
+        gasto.valor = 40
+        gasto.syncStatus = .pending
+        try cicloLocal(ctx).gasto_total = 40
+        try ctx.save()
+
+        let tarefa = iniciarSync()
+        await put.aguardarChegada()
+
+        // Outra edição com o PUT em voo (também ajusta o total local uma vez).
+        let durante = ModelContext(container)
+        let emVoo = try #require(gastosLocais(durante).first)
+        emVoo.titulo = "Almoço caro"
+        emVoo.valor = 50
+        try cicloLocal(durante).gasto_total += 10
+        try durante.save()
+
+        await put.liberar()
+        #expect(await tarefa.value == 0)
+        #expect(api.chamadas == [.putGasto])
+
+        // Descartado com o valor da última edição: o total volta a zero, sem
+        // descontar duas vezes, e o item não é reenviado.
+        let leitura = ModelContext(container)
+        #expect(try gastosLocais(leitura).isEmpty)
+        #expect(try cicloLocal(leitura).gasto_total == 0)
+
+        api.limparChamadas()
+        #expect(await sync() == 0)
+        #expect(api.chamadas.isEmpty)
     }
 
     /// POST de dia cuja viagem foi apagada em outro aparelho: o dia é
