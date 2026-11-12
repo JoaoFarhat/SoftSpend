@@ -274,7 +274,7 @@ completa no simulador (feito no Windows, sem Xcode).
 Em `SyncManager.sync`, se chegar um pedido com `isSyncing == true`, guardar `pedidoPendente = true` (e o `forcar`) e rodar
 mais uma vez no fim. Teste: duas chamadas seguidas executam duas passadas.
 
-**Feito e mergeado (11/11, PR #22). Pendência: validação no Mac:** `pedidoPendente`/`forcarPendente` (OU) num `repeat` dentro do `sync(forcar:)`;
+**Feito e mergeado (11/11, PR #20). Pendência: validação no Mac:** `pedidoPendente`/`forcarPendente` (OU) num `repeat` dentro do `sync(forcar:)`;
 a rodada lembrada roda dentro da mesma chamada que estava no ar. Para o teste, `SyncManager.injetarSyncActor` liga um
 `SyncActor` com a `FakeSyncAPI` sem disparar o sync automático do `configure`. Teste em
 `SoftSpendTests/SyncManagerPedidoTests.swift` (gasto em backoff só sobe na rodada lembrada e forçada).
