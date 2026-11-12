@@ -1,5 +1,5 @@
 import SwiftUI
-import PhotosUI
+import UniformTypeIdentifiers
 
 /// Tela 9: câmera do comprovante, com "Galeria" (fotos ou PDF em Arquivos) e
 /// "Sem foto". Sem câmera (simulador) ou sem permissão, as duas saídas continuam.
@@ -12,12 +12,9 @@ struct CameraComprovanteView: View {
     @StateObject private var camera = CameraComprovante()
     @State private var fotos = false
     @State private var arquivos = false
-    @State private var itemFotos: PhotosPickerItem?
     /// Câmera do sistema (`CameraPicker`), quando a câmera própria não abre mas o aparelho tem câmera.
     @State private var cameraDoSistema = false
     @State private var fotoDoSistema: UIImage?
-    /// Foto da galeria que não abriu (ex.: arquivo no iCloud sem internet).
-    @State private var erroFoto = false
     @ScaledMetric(relativeTo: .body) private var ladoObturador: CGFloat = 72
 
     private var podeFotografar: Bool { previewFixo == nil && camera.estado == .pronta && !camera.fotografando }
@@ -46,27 +43,8 @@ struct CameraComprovanteView: View {
             await camera.preparar()
         }
         .onDisappear { camera.parar() }
-        .photosPicker(isPresented: $fotos, selection: $itemFotos, matching: .images)
-        .onChange(of: itemFotos) { _, item in
-            guard let item else { return }
-            Task {
-                do {
-                    if let dados = try await item.loadTransferable(type: Data.self),
-                       let imagem = UIImage(data: dados) {
-                        aoEscolher(.foto(imagem))
-                    } else {
-                        erroFoto = true
-                    }
-                } catch {
-                    erroFoto = true
-                }
-                itemFotos = nil
-            }
-        }
-        .alert("Não deu para abrir a foto", isPresented: $erroFoto) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Não deu para abrir essa foto. Se ela estiver no iCloud, conecte-se à internet ou tire a foto com a câmera.")
+        .carregarFotoDaGaleria(isPresented: $fotos) { imagem in
+            aoEscolher(.foto(imagem))
         }
         .fullScreenCover(isPresented: $cameraDoSistema) {
             CameraPicker(image: $fotoDoSistema).ignoresSafeArea()
