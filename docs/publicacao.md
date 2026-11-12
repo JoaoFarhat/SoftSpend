@@ -59,6 +59,42 @@ O `Safeel.App.Backend/docs/assinatura.md` é o modelo; o princípio é o mesmo: 
 - Aviso na exclusão de conta: "excluir a conta não cancela a assinatura da App Store" + botão "Gerenciar assinatura".
 - Teste real de compra só no Mac (arquivo `.storekit` no esquema de Debug) e no TestFlight (Sandbox), com a conta paga.
 
+### 1.6 Depois: empresas (não é para agora)
+
+**Só o caminho.** Nada aqui entra na v1 nem muda o plano das seções anteriores. Serve para o usuário decidir, mais adiante, se vale o esforço.
+
+**Por que faz sentido.** O que o app faz melhor (viagem com diária por dia, comprovante lido pela IA, relatório do ciclo em PDF) é, na prática, **prestação de contas de viagem a trabalho**: a empresa dá uma diária ou adiantamento, o funcionário gasta, junta as notas e presta contas. É a dor que o HackaTruck já tem, e vender para empresa paga mais por usuário do que o consumidor final.
+
+**Modelo de cobrança (hipótese).** Por **funcionário ativo por mês**, na faixa de **R$ 15 a R$ 25**, com mínimo de assentos e plano anual. A faixa é um palpite: **a conferir** com os preços públicos de concorrentes de reembolso de despesas (por exemplo, Expensify, Pleo e os nacionais, como o Onfly; nomes só como ponto de partida da pesquisa) antes de qualquer proposta. Não cobrar pelo StoreKit: é venda entre empresas, e a Apple permite cobrança fora da loja para contas corporativas se o app não vender o plano dentro dele (conferir a regra vigente das diretrizes antes de desenhar, tema da pergunta E4).
+
+**O que falta no app e no servidor.**
+
+| Item | Hoje | O que falta |
+|---|---|---|
+| **Conta da empresa** | Só existe usuário individual (`User`, isolamento por `userId`) | Entidade "organização", com gestor(es) e funcionários, convite por e-mail e remoção de quem sai da empresa (os dados do funcionário não podem ficar presos na empresa nem vazar para ela além do que ele enviou) |
+| **Painel do gestor** | Não existe | Tela web (não precisa ser no app) com viagens, gastos e comprovantes de todos; filtros por pessoa, período e categoria |
+| **Aprovação** | Não existe | Fluxo "enviar prestação de contas" → gestor aprova ou devolve com comentário; estados do ciclo (rascunho, enviado, aprovado, reprovado); o `SyncActor` precisa respeitar ciclo travado após o envio |
+| **Políticas** | Não existe | Teto por categoria e por dia, diária diferente por cargo ou destino, regra de "comprovante obrigatório" |
+| **Exportação para a contabilidade** | Só PDF e CSV de um ciclo | CSV/planilha consolidada por empresa e período, com centro de custo e categoria contábil; depois, integração (a combinar com o contador do cliente) |
+| **Cobrança fora da App Store** | Não existe | Fatura ou boleto por empresa (Pix, boleto ou cartão por provedor de pagamento), nota fiscal de serviço, contrato e termos para empresas, e o acesso do funcionário liberado pela organização, sem passar pelo `BILLING_ENFORCEMENT` por assinatura individual |
+| **LGPD** | Política para o consumidor | A empresa é a controladora dos dados dos funcionários; precisa de contrato de tratamento (DPA) e retenção definida pela empresa |
+
+**Primeiro cliente natural: o [[HackaTruck MakerSpace]].** O app nasceu das viagens dele, e as pessoas que viajam já usam o ciclo por cidade. Serve de piloto gratuito ou com desconto, para aprender o que o gestor realmente pede antes de construir o painel. Oferecer o app a ele como serviço é decisão e conversa do usuário (E2).
+
+**Ordem sugerida, quando chegar a hora.**
+
+1. Lançar e estabilizar o app individual (§4); só depois olhar para empresas.
+2. Piloto com o HackaTruck usando o app como está, com exportação manual: ver o que falta.
+3. Se o piloto mostrar demanda: organização + painel do gestor + exportação consolidada (o menor conjunto que o gestor consegue usar). Aprovação e políticas vêm depois.
+4. Só então preço, contrato e cobrança por fatura.
+
+**Perguntas ao usuário** (viram tarefas [Você] na nota):
+
+- **E1:** vale tentar empresas depois da loja, ou o foco é só o consumidor?
+- **E2:** o HackaTruck (ou quem decide nele) toparia ser piloto? Quem conversa com ele?
+- **E3:** a faixa de R$ 15 a R$ 25 por funcionário parece razoável para você? (O Claude confere concorrentes quando for a hora.)
+- **E4:** a conta de desenvolvedor Apple (U4) será de pessoa física ou CNPJ? Para vender a empresas, um CNPJ ajuda na nota fiscal e no contrato.
+
 ## 2. O que a Apple exige e o app ainda não tem
 
 Conferido no código em 12/11.
@@ -79,6 +115,22 @@ Conferido no código em 12/11.
 | **Sign in with Apple** | Não é exigido: o login é próprio (e-mail e senha), sem Google/Facebook | Nada |
 | **Ficha da loja** | Não existe | Nome, subtítulo, descrição, palavras-chave, categoria (Finanças), classificação etária, URL de suporte (obrigatória) e de privacidade, e-mail de contato, capturas de iPhone e de iPad 13" (o app declara iPad, `TARGETED_DEVICE_FAMILY = 1,2`), texto de renovação da assinatura, notas para a revisão. As capturas saem do modo demonstração (`-demo`) no simulador |
 | **Disponibilidade** | — | Só Brasil na v1 (Termos e LGPD em português). Decisão U6 |
+
+### 2.1 Gemini no plano pago (comprovantes de clientes)
+
+**O risco.** A `GEMINI_API_KEY` do servidor (`Python/services/ocr_service.py`) é uma chave comum da API do Gemini. Se o projeto do Google dessa chave **não tem faturamento ligado**, ela está no **plano gratuito**, e nele os termos do Google permitem usar o que é enviado (as fotos das notas e o texto lido) para **melhorar os modelos** e permitem revisão humana. Isso é aceitável para teste, **não** para um app pago com comprovantes de clientes. Do **lado de fora** não dá para saber qual é o plano da chave; o código só lê a variável.
+
+**O que fazer.**
+
+- **Conferir (você):** em https://aistudio.google.com/apikey, ver o projeto da chave em uso na EC2 e se ele aparece como **plano pago** ou com **faturamento** ligado.
+- **Ligar o faturamento (você):** vincular uma conta de faturamento do Google Cloud ao projeto da chave (cartão de crédito). Não precisa trocar de modelo nem mexer no código.
+- **Configuração:** nada muda no código nem nas variáveis (`GEMINI_API_KEY`, `GEMINI_MODEL_NAME`). Só garantir que a chave em produção é a do **projeto com faturamento**; se for preciso criar outra, gerar a chave nesse projeto e trocá-la no `.env` da EC2 (`systemctl restart softspend`). A chave de teste e a de produção devem ser de projetos diferentes.
+- **Custo:** o §1.1 já usa o **preço do plano pago** (US$ 0,30 por milhão de tokens de entrada e US$ 2,50 por milhão de saída), ou seja, menos de 1 centavo de real por leitura; o plano gratuito não cobra, então o número não muda. Em vez disso, **o faturamento passa a ser real**: definir um orçamento e alerta de gasto no Google Cloud (por exemplo, R$ 50 por mês) para não ser surpreendido por abuso.
+- **Limite do plano gratuito:** além do uso dos dados, ele tem cota baixa de requisições por dia e por minuto; com usuários reais a leitura falharia. O plano pago também resolve isso.
+
+**A Política de Privacidade precisa citar isso?** Sim, com o que for verdade nos termos vigentes do Google (o Claude confere no momento de escrever o rascunho): a imagem e o texto da nota são enviados à API do Gemini (Google), **no plano pago, sem uso para treinar os modelos do Google**, com a retenção que os termos do Google descreverem (por exemplo, para detecção de abuso), com envio ao exterior. Não prometer mais do que os termos do Google dizem. O texto da tela de consentimento (`ConsentimentoLeituraView`) deve dizer o mesmo.
+
+**Tarefa:** **[Você]** G1, abaixo e na nota. Antes da loja (fase 0).
 
 ## 3. Servidor em produção: a AWS de hoje serve?
 
@@ -105,6 +157,7 @@ Legenda: **[Você]** = decisão ou ação do usuário; **[Devin]** = código; **
 1. **[Você]** U1 (preço e plano), U2 (o que fica bloqueado), U5 (identificador do app), U6 (iOS mínimo e países).
 2. **[Você]** U4: criar a conta de desenvolvedor (US$ 99 por ano) e inscrever-se no Small Business Program; preencher o Acordo de Apps Pagos (banco e impostos).
 3. **[Você]** U3: ver na AWS o tipo e o custo da EC2 e do RDS (mostrar a fatura do mês), para fechar o ponto de equilíbrio.
+3b. **[Você]** G1: conferir no Google AI Studio se o projeto da `GEMINI_API_KEY` tem faturamento (plano pago); se não tiver, ligar o faturamento no Google Cloud e definir alerta de gasto (§2.1).
 
 **Fase 1: código sem conta paga (em paralelo, o Devin pode começar já)**
 4. **[Devin, backend]** B1 assinatura: tabelas, `GET /api/assinatura`, interruptor `BILLING_ENFORCEMENT`, máquina de estado com teste de tabela. B2: verificação do JWS e `POST` de transações. B3: webhook e conciliação diária. B4: bloqueio de ciclo novo e de IA com `403 subscription_required`. (B4 depende só de B1.)
@@ -129,6 +182,7 @@ Legenda: **[Você]** = decisão ou ação do usuário; **[Devin]** = código; **
 
 - Sem conta de demonstração funcionando, ou com o servidor fora do ar durante a revisão.
 - Política de Privacidade ausente ou sem citar a IA (Gemini) e o armazenamento das notas.
+- Chave do Gemini em projeto sem faturamento (plano gratuito): o Google pode usar as notas dos clientes para melhorar os modelos (§2.1).
 - Assinatura sem "restaurar compras" ou com tela de planos sem preço, duração, renovação e links.
 - `iOS 26` como mínimo: legal para a Apple, mas reduz muito quem pode instalar.
 - Mudar o identificador do app depois de criado na loja: não dá.
