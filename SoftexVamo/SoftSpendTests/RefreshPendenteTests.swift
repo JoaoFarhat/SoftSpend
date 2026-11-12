@@ -3,6 +3,9 @@ import Foundation
 import SwiftData
 @testable import SoftSpend
 
+// Em série com as outras suítes do usuário global: ver `UsuarioGlobalTests`.
+extension UsuarioGlobalTests {
+
 /// T1 de `docs/revisao-sync-offline-ios.md`: o refresh do servidor (`salvarOuAtualizar*Local`)
 /// não pode apagar uma edição ou exclusão que ainda não subiu.
 ///
@@ -314,3 +317,5 @@ struct RefreshPendenteTests {
         #expect(local.ciclo.syncStatus == .synced)
     }
 }
+
+}  // extension UsuarioGlobalTests

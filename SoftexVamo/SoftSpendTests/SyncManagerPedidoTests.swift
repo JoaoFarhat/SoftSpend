@@ -3,6 +3,9 @@ import Foundation
 import SwiftData
 @testable import SoftSpend
 
+// Em série com as outras suítes do usuário global: ver `UsuarioGlobalTests`.
+extension UsuarioGlobalTests {
+
 /// T9 de `docs/revisao-sync-offline-ios.md` (R9): um `sync()` pedido enquanto
 /// outro roda não é mais descartado — o `SyncManager` lembra (`pedidoPendente`,
 /// juntando o `forcar` com OU) e roda mais uma vez ao fim.
@@ -95,3 +98,5 @@ struct SyncManagerPedidoTests {
         #expect(local.first?.backendId == api.gastos.first?.id)
     }
 }
+
+}  // extension UsuarioGlobalTests

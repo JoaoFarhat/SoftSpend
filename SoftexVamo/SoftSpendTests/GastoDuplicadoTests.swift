@@ -3,6 +3,9 @@ import Foundation
 import SwiftData
 @testable import SoftSpend
 
+// Em série com as outras suítes do usuário global: ver `UsuarioGlobalTests`.
+extension UsuarioGlobalTests {
+
 /// T6 de `docs/revisao-sync-offline-ios.md` (R6): o refresh do servidor não pode
 /// criar um segundo gasto local para um lançamento que já está no aparelho
 /// (casa também por `clientId`), e duplicatas que já ficaram são absorvidas.
@@ -132,11 +135,19 @@ struct GastoDuplicadoTests {
         ctx.insert(novo)
         try ctx.save()
 
+        // O gasto 5 continua no servidor: sem ele na resposta, a T5 apagaria as duas cópias.
+        let servidor = [diaDoServidor(local.dia, gastos: [GastosDiaResponse(
+            id: 5, clientId: antigo.clientId, dia_id: 50, valor: 25, titulo: "Almoço",
+            categoria: .ALIMENTACAO, comprovante_url: nil,
+            openFinanceStatus: nil, openFinanceMatch: nil
+        )])]
         let vm = viewModel(local)
-        await vm.carregarDiasDoServidor(cicloId: 7) { _, _ in [self.diaDoServidor(local.dia)] }
+        await vm.carregarDiasDoServidor(cicloId: 7) { _, _ in servidor }
 
         let gastos = try gastosNoBanco()
         try #require(gastos.count == 1)
         #expect(gastos[0].id == antigo.id)
     }
 }
+
+}  // extension UsuarioGlobalTests
