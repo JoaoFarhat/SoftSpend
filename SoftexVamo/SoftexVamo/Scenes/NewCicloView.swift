@@ -25,6 +25,8 @@ struct NewCicloView: View {
     @State private var dataAberta: DataAberta?
     @State private var erroSalvar: String?
     @State private var salvando = false
+    @State private var confirmandoEncurtar = false
+    @State private var gastosEmRisco = 0
     @FocusState private var foco: Foco?
 
     var ciclo: CicloSoftex?
@@ -100,6 +102,13 @@ struct NewCicloView: View {
             }
         }
         .navigationBarHidden(true)
+        .confirmationDialog("Encurtar a viagem?", isPresented: $confirmandoEncurtar,
+                            titleVisibility: .visible) {
+            Button("Salvar e excluir", role: .destructive) { confirmarEncurtar() }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("\(gastosEmRisco) gastos de dias fora das novas datas serão excluídos.")
+        }
     }
 
     // MARK: Campos
@@ -261,11 +270,36 @@ struct NewCicloView: View {
         }
         guard let total = form.total else { return }
         erroSalvar = nil
-        salvando = true
         let titulo = form.destino.trimmingCharacters(in: .whitespacesAndNewlines)
         let ida = form.ida
         let volta = form.volta
 
+        // Encurtar a viagem apaga, sem aviso, os dias fora das novas datas e os
+        // gastos deles (editCiclo): com gastos em risco, confirma antes.
+        if let ciclo {
+            let emRisco = EncurtarViagem.gastosForaDoPeriodo(dias: ciclo.dias ?? [], ida: ida, volta: volta)
+            if emRisco > 0 {
+                gastosEmRisco = emRisco
+                confirmandoEncurtar = true
+                return
+            }
+        }
+
+        gravar(titulo: titulo, ida: ida, volta: volta, total: total)
+    }
+
+    /// "Salvar e excluir" do aviso: o formulário não muda com o diálogo aberto,
+    /// então os mesmos valores validados em `salvar` seguem valendo.
+    private func confirmarEncurtar() {
+        guard let total = form.total else { return }
+        gravar(titulo: form.destino.trimmingCharacters(in: .whitespacesAndNewlines),
+               ida: form.ida, volta: form.volta, total: total)
+    }
+
+    /// Salva de fato — direto, ou depois do "Salvar e excluir" do aviso de
+    /// encurtar a viagem.
+    private func gravar(titulo: String, ida: Date, volta: Date, total: Decimal) {
+        salvando = true
         Task {
             if let ciclo {
                 guard let cicloId = ciclo.backendId else {
