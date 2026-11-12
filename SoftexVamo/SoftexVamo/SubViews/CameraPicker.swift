@@ -4,9 +4,9 @@
 
 import SwiftUI
 import UIKit
-import PhotosUI
 import AVFoundation
 import Combine
+import UniformTypeIdentifiers
 
 /// View que apresenta o `UIImagePickerController` nativo para captura de fotos.
 ///
@@ -102,12 +102,6 @@ private struct EscolherComprovante: ViewModifier {
     @State private var fotos = false
     @State private var arquivos = false
     @State private var fotoTirada: UIImage?
-    @State private var itemFotos: PhotosPickerItem?
-    /// `loadTransferable` da escolha atual; uma escolha nova enquanto a anterior
-    /// carrega (o iCloud pode demorar) a cancela — só a última foto entrega.
-    @State private var tarefaFoto: Task<Void, Never>?
-    /// Foto da galeria que não abriu (ex.: arquivo no iCloud sem internet).
-    @State private var erroFoto = false
 
     func body(content: Content) -> some View {
         content
@@ -125,29 +119,8 @@ private struct EscolherComprovante: ViewModifier {
                 fotoTirada = nil
                 aoEscolher(.foto(nova))
             }
-            .photosPicker(isPresented: $fotos, selection: $itemFotos, matching: .images)
-            .onChange(of: itemFotos) { _, item in
-                guard let item else { return }
-                tarefaFoto?.cancel()
-                tarefaFoto = Task {
-                    defer { itemFotos = nil }
-                    do {
-                        let dados = try await item.loadTransferable(type: Data.self)
-                        guard !Task.isCancelled else { return }
-                        if let dados, let imagem = UIImage(data: dados) {
-                            aoEscolher(.foto(imagem))
-                        } else {
-                            erroFoto = true
-                        }
-                    } catch {
-                        if !Task.isCancelled { erroFoto = true }
-                    }
-                }
-            }
-            .alert("Não deu para abrir a foto", isPresented: $erroFoto) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("Não deu para abrir essa foto. Se ela estiver no iCloud, conecte-se à internet ou tire a foto com a câmera.")
+            .carregarFotoDaGaleria(isPresented: $fotos) { imagem in
+                aoEscolher(.foto(imagem))
             }
             .fileImporter(isPresented: $arquivos, allowedContentTypes: [.image, .pdf]) { resultado in
                 if case .success(let url) = resultado {

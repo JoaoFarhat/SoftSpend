@@ -3,12 +3,13 @@ import Foundation
 import SwiftData
 @testable import SoftSpend
 
-/// T4 de `docs/revisao-sync-offline-ios.md` (R4): 404 no POST/PUT de gasto ou
-/// no POST de dia é falha final — o pai (dia ou viagem) ou o próprio item foi
-/// apagado em outro aparelho. O item fica `.failed` com o texto fixo
-/// `SyncActor.erroApagadoEmOutroAparelho`, sem mexer em `tentativas`/
-/// `proximaTentativaEm`: continua no aparelho, sai do `contarPendentes` e não
-/// é reenviado. Erro 500 segue o backoff normal.
+/// T4 de `docs/revisao-sync-offline-ios.md` (R4), com a decisão do usuário de
+/// 12/11: 404 no POST/PUT de gasto ou no POST de dia quer dizer que o pai (dia
+/// ou viagem) ou o próprio item foi apagado em outro aparelho. O item é
+/// descartado no aparelho — some do banco e o valor sai do `gasto_total` da
+/// viagem —, sem nenhuma requisição a mais. Itens guardados por versões
+/// anteriores com `SyncActor.erroApagadoEmOutroAparelho` são descartados do
+/// mesmo jeito no começo do `sync`. Erro 500 segue o backoff normal.
 @MainActor
 struct FalhaFinal404Tests {
     let container: ModelContainer
@@ -24,8 +25,8 @@ struct FalhaFinal404Tests {
 
     // MARK: Apoio
 
-    /// Ciclo → dia → gasto criados e já sincronizados com o servidor falso.
-    /// O log de chamadas é zerado ao final.
+    /// Ciclo → dia → gasto (R$ 25) criados e já sincronizados com o servidor
+    /// falso, com `gasto_total` local de 25. O log de chamadas é zerado ao final.
     func subirViagem() async throws {
         let ctx = ModelContext(container)
         let ciclo = CicloSoftex(
@@ -42,11 +43,15 @@ struct FalhaFinal404Tests {
 
         #expect(await sync() == 0)
         try #require(api.gastos.count == 1)
+
+        let ajuste = ModelContext(container)
+        try cicloLocal(ajuste).gasto_total = 25
+        try ajuste.save()
         api.limparChamadas()
     }
 
     /// `forcar: true` de propósito: nem o sync forçado pode reenviar um item
-    /// com falha final por 404.
+    /// descartado.
     func sync() async -> Int {
         let syncActor = SyncActor(modelContainer: container, api: api)
         return await syncActor.sync(agora: .now, userId: userId, forcar: true)
@@ -67,24 +72,28 @@ struct FalhaFinal404Tests {
         try #require(try ctx.fetch(FetchDescriptor<DiaSoftex>()).first)
     }
 
+    func diasLocais(_ ctx: ModelContext) throws -> [DiaSoftex] {
+        try ctx.fetch(FetchDescriptor<DiaSoftex>())
+    }
+
     func gastosLocais(_ ctx: ModelContext) throws -> [GastosDia] {
         try ctx.fetch(FetchDescriptor<GastosDia>())
     }
 
-    /// As quatro garantias da falha final por 404.
-    func esperarFalhaFinal(_ item: any Syncavel) {
-        #expect(item.syncStatus == .failed)
-        #expect(item.syncError == SyncActor.erroApagadoEmOutroAparelho)
-        #expect(item.tentativas == 0)
-        #expect(item.proximaTentativaEm == nil)
+    /// Como o `addGasto` faz: o gasto entra pendente e o valor soma no total.
+    func novoGasto(_ titulo: String, valor: Decimal, no dia: DiaSoftex, ctx: ModelContext) throws -> GastosDia {
+        let gasto = GastosDia(valor: valor, titulo: titulo, categoria: .ALIMENTACAO, dia: dia)
+        ctx.insert(gasto)
+        try cicloLocal(ctx).gasto_total += valor
+        return gasto
     }
 
     // MARK: Testes
 
     /// POST de gasto cujo dia foi apagado em outro aparelho: o servidor
-    /// responde 404 e o gasto vira falha final — fica no aparelho, fora da
-    /// contagem e nunca mais é enviado.
-    @Test func postGasto404ViraFalhaFinal() async throws {
+    /// responde 404 e o gasto é descartado — some do aparelho e o valor sai do
+    /// total, com uma única chamada (o próprio POST).
+    @Test func postGasto404DescartaGasto() async throws {
         try await subirViagem()
 
         // Outro aparelho apagou o dia (leva o gasto "Almoço" junto, em cascata).
@@ -94,11 +103,10 @@ struct FalhaFinal404Tests {
 
         // Gasto novo, pendente, no dia local que ainda tem backendId.
         let ctx = ModelContext(container)
-        let gastoNovo = GastosDia(valor: 30, titulo: "Táxi", categoria: .ALIMENTACAO, dia: try diaLocal(ctx))
-        ctx.insert(gastoNovo)
+        _ = try novoGasto("Táxi", valor: 30, no: try diaLocal(ctx), ctx: ctx)
         try ctx.save()
+        #expect(try cicloLocal(ModelContext(container)).gasto_total == 55)
 
-        // 404 → falha final: não conta como pendente.
         #expect(await sync() == 0)
         #expect(api.chamadas == [.postGasto])
 
@@ -107,16 +115,15 @@ struct FalhaFinal404Tests {
         #expect(await sync() == 0)
         #expect(api.chamadas.isEmpty)
 
-        // Continua no aparelho, com o estado de falha final.
         let leitura = ModelContext(container)
         let gastos = try gastosLocais(leitura)
-        #expect(gastos.count == 2)
-        esperarFalhaFinal(try #require(gastos.first { $0.titulo == "Táxi" }))
+        #expect(gastos.map(\.titulo) == ["Almoço"])
+        #expect(try cicloLocal(leitura).gasto_total == 25)
     }
 
     /// PUT de gasto que já não existe no servidor (apagado em outro
-    /// aparelho): mesmo tratamento do POST — falha final, sem reenvio.
-    @Test func putGasto404ViraFalhaFinal() async throws {
+    /// aparelho): mesmo tratamento do POST — descartado, sem reenvio.
+    @Test func putGasto404DescartaGasto() async throws {
         try await subirViagem()
 
         // Outro aparelho apagou o gasto; aqui o usuário o edita offline.
@@ -124,13 +131,14 @@ struct FalhaFinal404Tests {
         try await api.deleteGasto(gastoId: gastoRemoto.id)
         api.limparChamadas()
 
-        // Como o editGasto faz: volta para pending com o valor novo.
+        // Como o editGasto faz: volta para pending com o valor novo e ajusta o total.
         let ctx = ModelContext(container)
         let gasto = try #require(gastosLocais(ctx).first)
         gasto.titulo = "Almoço caro"
         gasto.valor = 50
         gasto.syncStatus = .pending
         gasto.syncError = nil
+        try cicloLocal(ctx).gasto_total += 25
         try ctx.save()
 
         #expect(await sync() == 0)
@@ -141,16 +149,15 @@ struct FalhaFinal404Tests {
         #expect(api.chamadas.isEmpty)
 
         let leitura = ModelContext(container)
-        let gastos = try gastosLocais(leitura)
-        #expect(gastos.count == 1)
-        esperarFalhaFinal(try #require(gastos.first))
+        #expect(try gastosLocais(leitura).isEmpty)
+        #expect(try diasLocais(leitura).count == 1)
+        #expect(try cicloLocal(leitura).gasto_total == 0)
     }
 
     /// Editar o gasto com o PUT em voo e o PUT responder 404 (o gasto foi
-    /// apagado em outro aparelho): a edição durante o envio não evita a falha
-    /// final — o valor novo fica no aparelho, o `gasto_total` (que a própria
-    /// edição já ajustou) não muda de novo e nada é reenviado.
-    @Test func editarDuranteOEnvio404ViraFalhaFinal() async throws {
+    /// apagado em outro aparelho): o gasto é descartado com a última edição, e
+    /// o valor dela sai do `gasto_total` uma vez só — nada é reenviado.
+    @Test func editarDuranteOEnvio404DescartaUmaVezSo() async throws {
         try await subirViagem()
 
         // Outro aparelho apagou o gasto; aqui o usuário o edita e ele volta
@@ -182,23 +189,21 @@ struct FalhaFinal404Tests {
         #expect(await tarefa.value == 0)
         #expect(api.chamadas == [.putGasto])
 
-        // Falha final com a última edição preservada: o valor novo conta uma
-        // vez só no total e o item não é reenviado.
+        // Descartado com o valor da última edição: o total volta a zero, sem
+        // descontar duas vezes, e o item não é reenviado.
         let leitura = ModelContext(container)
-        let gastos = try gastosLocais(leitura)
-        #expect(gastos.count == 1)
-        let atual = try #require(gastos.first)
-        esperarFalhaFinal(atual)
-        #expect(atual.valor == 50)
-        #expect(try cicloLocal(leitura).gasto_total == 50)
+        #expect(try gastosLocais(leitura).isEmpty)
+        #expect(try cicloLocal(leitura).gasto_total == 0)
 
         api.limparChamadas()
         #expect(await sync() == 0)
         #expect(api.chamadas.isEmpty)
     }
 
-    /// POST de dia cuja viagem foi apagada em outro aparelho: falha final.
-    @Test func postDia404ViraFalhaFinal() async throws {
+    /// POST de dia cuja viagem foi apagada em outro aparelho: o dia é
+    /// descartado com os gastos dele, e os gastos vivos saem do total. O gasto
+    /// do dia novo nem chega a ser enviado (o dia nunca ganhou `backendId`).
+    @Test func postDia404DescartaDiaEGastos() async throws {
         try await subirViagem()
 
         // Outro aparelho apagou a viagem inteira.
@@ -206,12 +211,18 @@ struct FalhaFinal404Tests {
         try await api.deleteCiclo(cicloId: cicloRemoto.id)
         api.limparChamadas()
 
-        // Dia novo, pendente, no ciclo local que ainda tem backendId.
+        // Dia novo, pendente, no ciclo local que ainda tem backendId, com um
+        // gasto vivo (R$ 40) e um já apagado pelo usuário (R$ 10, fora do total).
         let ctx = ModelContext(container)
         let diaNovo = DiaSoftex(data: .now.addingTimeInterval(86400), saldo: 100)
         ctx.insert(diaNovo)
         diaNovo.ciclo = try cicloLocal(ctx)
+        _ = try novoGasto("Hotel", valor: 40, no: diaNovo, ctx: ctx)
+        let apagado = try novoGasto("Café", valor: 10, no: diaNovo, ctx: ctx)
+        apagado.deletadoEm = .now
+        try cicloLocal(ctx).gasto_total -= 10
         try ctx.save()
+        #expect(try cicloLocal(ModelContext(container)).gasto_total == 65)
 
         #expect(await sync() == 0)
         #expect(api.chamadas == [.postDiasLote])
@@ -221,9 +232,46 @@ struct FalhaFinal404Tests {
         #expect(api.chamadas.isEmpty)
 
         let leitura = ModelContext(container)
-        let dias = try leitura.fetch(FetchDescriptor<DiaSoftex>())
-        #expect(dias.count == 2)
-        esperarFalhaFinal(try #require(dias.first { $0.backendId == nil }))
+        let dias = try diasLocais(leitura)
+        #expect(dias.count == 1)
+        #expect(dias.first?.backendId != nil)
+        #expect(try gastosLocais(leitura).map(\.titulo) == ["Almoço"])
+        #expect(try cicloLocal(leitura).gasto_total == 25)
+    }
+
+    /// Dia e gastos guardados por versões anteriores com a falha final por 404
+    /// (`syncError == erroApagadoEmOutroAparelho`) são descartados no começo do
+    /// `sync`, sem requisição. Um gasto antigo dentro de um dia antigo sai do
+    /// total uma vez só.
+    @Test func itensAntigosComFalhaFinalSaoDescartados() async throws {
+        try await subirViagem()
+
+        let ctx = ModelContext(container)
+        // Gasto antigo num dia que continua valendo.
+        let taxi = try novoGasto("Táxi", valor: 30, no: try diaLocal(ctx), ctx: ctx)
+        taxi.syncStatus = .failed
+        taxi.syncError = SyncActor.erroApagadoEmOutroAparelho
+
+        // Dia antigo com um gasto comum (R$ 40) e um gasto também antigo (R$ 15).
+        let diaAntigo = DiaSoftex(data: .now.addingTimeInterval(86400), saldo: 100)
+        ctx.insert(diaAntigo)
+        diaAntigo.ciclo = try cicloLocal(ctx)
+        diaAntigo.syncStatus = .failed
+        diaAntigo.syncError = SyncActor.erroApagadoEmOutroAparelho
+        _ = try novoGasto("Hotel", valor: 40, no: diaAntigo, ctx: ctx)
+        let cafe = try novoGasto("Café", valor: 15, no: diaAntigo, ctx: ctx)
+        cafe.syncStatus = .failed
+        cafe.syncError = SyncActor.erroApagadoEmOutroAparelho
+        try ctx.save()
+        #expect(try cicloLocal(ModelContext(container)).gasto_total == 110)
+
+        #expect(await sync() == 0)
+        #expect(api.chamadas.isEmpty)
+
+        let leitura = ModelContext(container)
+        #expect(try diasLocais(leitura).count == 1)
+        #expect(try gastosLocais(leitura).map(\.titulo) == ["Almoço"])
+        #expect(try cicloLocal(leitura).gasto_total == 25)
     }
 
     /// Erro 500 não é terminal: segue o backoff (tentativas/proximaTentativaEm),

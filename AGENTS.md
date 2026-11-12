@@ -169,14 +169,18 @@ mais uma passada. Uma nota anexada durante o upload não é apagada. Testes em
 uma única vez após o try/catch. Em sucesso ou 404, o item é deletado localmente.
 Em falha real, `marcarFalha` + `continue` (sem delete).
 
-**Falha final por 404 (T4)**: 404 no POST/PUT de `syncGastos` ou no POST de
-`syncDias` (o pai ou o item foi apagado em outro aparelho) é terminal:
-`marcarFalhaFinal` põe `.failed` + `syncError = SyncActor.erroApagadoEmOutroAparelho`
-sem mexer em `tentativas`/`proximaTentativaEm`. O texto fixo é o identificador
-(`falhouDefinitivo`) — criar um campo no `@Model` exigiria schema V2. As etapas
-de envio e o `contarPendentes` ignoram esses itens; `syncDeletions` não (DELETE
-de item apagado pelo usuário continua saindo). O item fica no aparelho.
-Testes em `SoftSpendTests/FalhaFinal404Tests.swift`.
+**Descarte por 404 (T4, decisão de 12/11)**: 404 no POST/PUT de `syncGastos`
+ou no POST de `syncDias` (o pai ou o item foi apagado em outro aparelho)
+descarta o item no aparelho, sem nenhuma requisição a mais. `descartarGasto`/
+`descartarDia` releem por `id` num contexto novo (via `gravar`): o gasto sai
+do `dia.ciclo.gasto_total` e é apagado; o dia tira do total os gastos vivos
+dele (`deletadoEm == nil`) e é apagado (a cascata leva os gastos). Versões
+anteriores guardavam esses itens com `syncError = SyncActor.erroApagadoEmOutroAparelho`;
+o começo de `sync(agora:)` os descarta do mesmo jeito
+(`descartarAntigosApagadosEmOutroAparelho`, gastos antes dos dias). A
+constante existe só para isso (e para `EstadoEnvio`/`podeTerSidoCriadoNoServidor`
+tratarem esses itens antigos até o descarte). Testes em
+`SoftSpendTests/FalhaFinal404Tests.swift`.
 
 **Apagar sem `backendId` (T7)**: item apagado sem `backendId`, mas com
 `podeTerSidoCriadoNoServidor` (`tentativas > 0`, `.failed` ou `syncError`, exceto

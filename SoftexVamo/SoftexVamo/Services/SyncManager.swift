@@ -223,8 +223,78 @@ actor SyncActor: ModelActor {
         gravar(FetchDescriptor<GastosDia>(predicate: #Predicate { $0.id == uuid }), etapa: etapa) { gasto, _ in alterar(gasto) }
     }
 
+    // MARK: - Descarte do que foi apagado em outro aparelho (decisão de 12/11)
+
+    /// Apaga o gasto no aparelho e tira o valor dele do `gasto_total` da viagem.
+    /// Gasto já marcado como apagado (`deletadoEm`) já saiu do total na hora em
+    /// que o usuário o apagou: só some do banco.
+    private func descartar(_ gasto: GastosDia, em contexto: ModelContext) {
+        if gasto.deletadoEm == nil, let ciclo = gasto.dia?.ciclo {
+            ciclo.gasto_total -= gasto.valor
+        }
+        contexto.delete(gasto)
+    }
+
+    /// Apaga o dia no aparelho (a cascata leva os gastos) e tira do
+    /// `gasto_total` da viagem os gastos vivos dele. Os já apagados saíram do
+    /// total quando foram apagados.
+    private func descartar(_ dia: DiaSoftex, em contexto: ModelContext) {
+        if let ciclo = dia.ciclo {
+            let vivos = dia.gastos.filter { $0.deletadoEm == nil }
+            ciclo.gasto_total -= vivos.reduce(Decimal(0)) { $0 + $1.valor }
+        }
+        contexto.delete(dia)
+    }
+
+    /// 404 no POST do dia: a viagem foi apagada em outro aparelho.
+    private func descartarDia(_ uuid: UUID, etapa: String) {
+        gravar(FetchDescriptor<DiaSoftex>(predicate: #Predicate { $0.id == uuid }), etapa: etapa) { dia, contexto in
+            descartar(dia, em: contexto)
+        }
+    }
+
+    /// 404 no POST/PUT do gasto: o dia (ou o próprio gasto) foi apagado em outro aparelho.
+    private func descartarGasto(_ uuid: UUID, etapa: String) {
+        gravar(FetchDescriptor<GastosDia>(predicate: #Predicate { $0.id == uuid }), etapa: etapa) { gasto, contexto in
+            descartar(gasto, em: contexto)
+        }
+    }
+
+    /// Versões anteriores guardavam o dia ou gasto com falha final por 404
+    /// (`syncError == erroApagadoEmOutroAparelho`). Agora eles são descartados
+    /// do mesmo jeito, sem nenhuma requisição. Os gastos saem (e são salvos)
+    /// antes de os dias serem lidos, num contexto novo: assim um gasto antigo
+    /// dentro de um dia antigo não é descontado duas vezes do total.
+    private func descartarAntigosApagadosEmOutroAparelho(userId: String) {
+        let erro: String? = SyncActor.erroApagadoEmOutroAparelho
+
+        let contextoGastos = contextoNovo()
+        let gastos = ((try? contextoGastos.fetch(FetchDescriptor<GastosDia>(
+            predicate: #Predicate { $0.syncError == erro }
+        ))) ?? []).filter { $0.dia?.ciclo?.userId == userId }
+        if !gastos.isEmpty {
+            for gasto in gastos { descartar(gasto, em: contextoGastos) }
+            salvar(contextoGastos, etapa: "descartarAntigos-gastos")
+        }
+
+        let contextoDias = contextoNovo()
+        let dias = ((try? contextoDias.fetch(FetchDescriptor<DiaSoftex>(
+            predicate: #Predicate { $0.syncError == erro }
+        ))) ?? []).filter { $0.ciclo?.userId == userId }
+        if !dias.isEmpty {
+            for dia in dias { descartar(dia, em: contextoDias) }
+            salvar(contextoDias, etapa: "descartarAntigos-dias")
+        }
+
+        if !gastos.isEmpty || !dias.isEmpty {
+            logger.info("Descartados \(gastos.count, privacy: .public) gasto(s) e \(dias.count, privacy: .public) dia(s) apagados em outro aparelho")
+        }
+    }
+
     func sync(agora: Date, userId: String, forcar: Bool = false) async -> Int {
         let maxPassadas = 5
+
+        descartarAntigosApagadosEmOutroAparelho(userId: userId)
 
         var pendentesDepois = 0
         for passada in 0..<maxPassadas {
@@ -265,16 +335,13 @@ actor SyncActor: ModelActor {
         // nem é enviado — o DELETE do pai (syncDeletions) apaga tudo em
         // cascata no servidor. Filtro em memória: #Predicate não atravessa
         // relacionamentos opcionais.
-        // T4: item com falha final por 404 (texto fixo no syncError) também
-        // não conta — ele não é mais enviado.
         let dias = todosDias.filter {
-            $0.ciclo?.userId == userId && $0.ciclo?.deletadoEm == nil && !falhouDefinitivo($0)
+            $0.ciclo?.userId == userId && $0.ciclo?.deletadoEm == nil
         }.count
         let gastos = todosGastos.filter {
             $0.dia?.ciclo?.userId == userId
                 && $0.dia?.deletadoEm == nil
                 && $0.dia?.ciclo?.deletadoEm == nil
-                && !falhouDefinitivo($0)
         }.count
         return ciclos + dias + gastos
     }
@@ -410,28 +477,12 @@ actor SyncActor: ModelActor {
         item.syncStatus = .failed
     }
 
-    /// T4: `syncError` com este texto marca a falha final por 404 — o pai (dia
-    /// ou ciclo/"viagem") ou o próprio item foi apagado em outro aparelho. O
-    /// item fica no aparelho, não volta para a fila e não conta em
-    /// `contarPendentes`. O texto fixo é o identificador: um campo novo no
-    /// `@Model` exigiria um schema V2.
+    /// Versões anteriores marcavam com este `syncError` o dia ou gasto que
+    /// recebia 404 (pai ou o próprio item apagado em outro aparelho) e o
+    /// guardavam no aparelho. Hoje o item é descartado na hora; o texto só
+    /// serve para achar e descartar os que ficaram de antes
+    /// (`descartarAntigosApagadosEmOutroAparelho`, no começo do `sync`).
     nonisolated static let erroApagadoEmOutroAparelho = "O dia ou a viagem foi apagado em outro aparelho"
-
-    /// 404 ao enviar dia ou gasto: falha final. Só muda `syncStatus` e
-    /// `syncError` — `tentativas` e `proximaTentativaEm` ficam como estão
-    /// (não é falha transitória, retry não resolve).
-    private func marcarFalhaFinal(_ item: any Syncavel) {
-        item.syncStatus = .failed
-        item.syncError = SyncActor.erroApagadoEmOutroAparelho
-    }
-
-    /// Falha final por 404, reconhecida pelo texto fixo do `syncError`.
-    /// `syncDias`, `syncGastos`, `syncComprovantes` e `contarPendentes`
-    /// ignoram esses itens — o `syncDeletions` não, porque o DELETE de um
-    /// item que o usuário apagou continua saindo (404 lá é sucesso).
-    private func falhouDefinitivo(_ item: any Syncavel) -> Bool {
-        item.syncError == SyncActor.erroApagadoEmOutroAparelho
-    }
 
     private func marcarSucesso(_ item: any Syncavel) {
         item.tentativas = 0
@@ -509,10 +560,9 @@ actor SyncActor: ModelActor {
         )
         let todos = (try? contexto.fetch(descriptor)) ?? []
         // T8: dia de ciclo apagado não sobe — o DELETE do ciclo o remove em cascata.
-        // T4: dia com falha final por 404 também não sobe.
         let dias = todos.filter {
             $0.ciclo?.userId == userId && $0.ciclo?.deletadoEm == nil
-                && !falhouDefinitivo($0) && deveTentar($0, agora: agora, forcar: forcar)
+                && deveTentar($0, agora: agora, forcar: forcar)
         }
 
         for dia in dias {
@@ -548,11 +598,9 @@ actor SyncActor: ModelActor {
                 }
             } catch {
                 if isNotFoundError(error) {
-                    // T4: o ciclo foi apagado em outro aparelho — falha final,
-                    // o dia fica no aparelho mas sai da fila.
-                    gravarDia(diaUUID, etapa: "syncDias-404") { atual in
-                        marcarFalhaFinal(atual)
-                    }
+                    // T4: a viagem foi apagada em outro aparelho — o dia (com
+                    // os gastos) é descartado no aparelho, sem requisição.
+                    descartarDia(diaUUID, etapa: "syncDias-404")
                 } else {
                     let erro = error.localizedDescription
                     gravarDia(diaUUID, etapa: "syncDias-catch") { atual in
@@ -583,12 +631,10 @@ actor SyncActor: ModelActor {
         )
         let todos = (try? contexto.fetch(descriptor)) ?? []
         // T8: gasto de dia ou ciclo apagado não sobe — o DELETE do pai o remove em cascata.
-        // T4: gasto com falha final por 404 também não sobe.
         let gastos = todos.filter {
             $0.dia?.ciclo?.userId == userId
                 && $0.dia?.deletadoEm == nil
                 && $0.dia?.ciclo?.deletadoEm == nil
-                && !falhouDefinitivo($0)
                 && deveTentar($0, agora: agora, forcar: forcar)
         }
 
@@ -632,11 +678,8 @@ actor SyncActor: ModelActor {
             } catch {
                 if isNotFoundError(error) {
                     // T4: o dia (POST) ou o gasto (PUT) foi apagado em outro
-                    // aparelho — falha final, o gasto fica no aparelho mas sai
-                    // da fila.
-                    gravarGasto(gastoUUID, etapa: "syncGastos-404") { atual in
-                        marcarFalhaFinal(atual)
-                    }
+                    // aparelho — o gasto é descartado no aparelho, sem requisição.
+                    descartarGasto(gastoUUID, etapa: "syncGastos-404")
                 } else {
                     let erro = error.localizedDescription
                     gravarGasto(gastoUUID, etapa: "syncGastos-catch") { atual in
@@ -662,13 +705,11 @@ actor SyncActor: ModelActor {
         let todos = (try? contexto.fetch(descriptor)) ?? []
         // T8: comprovante de gasto de dia ou ciclo apagado não sobe — o DELETE
         // do pai remove tudo em cascata.
-        // T4: comprovante de gasto com falha final por 404 também não sobe.
         let gastos = todos.filter {
             $0.dia?.ciclo?.userId == userId
                 && $0.dia?.deletadoEm == nil
                 && $0.dia?.ciclo?.deletadoEm == nil
                 && $0.backendId != nil
-                && !falhouDefinitivo($0)
                 && deveTentar($0, agora: agora, forcar: forcar)
         }
 
@@ -1019,8 +1060,9 @@ nonisolated extension Syncavel {
     /// houve tentativa (`tentativas > 0`), falha ou erro registrado. Item que
     /// nunca foi enviado (`tentativas == 0` e sem `syncError`) não pode estar lá.
     ///
-    /// A falha final por 404 do T4 não conta: o pai não existe no servidor, e o
-    /// item (se chegou a ser criado) foi apagado junto, em cascata.
+    /// A falha final por 404 do T4 (de versões anteriores, ainda não
+    /// descartada) não conta: o pai não existe no servidor, e o item (se chegou
+    /// a ser criado) foi apagado junto, em cascata.
     var podeTerSidoCriadoNoServidor: Bool {
         if syncError == SyncActor.erroApagadoEmOutroAparelho { return false }
         return tentativas > 0 || syncStatus == .failed || syncError != nil
