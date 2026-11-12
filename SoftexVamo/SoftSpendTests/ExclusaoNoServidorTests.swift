@@ -3,6 +3,9 @@ import Foundation
 import SwiftData
 @testable import SoftSpend
 
+// Em série com as outras suítes do usuário global: ver `UsuarioGlobalTests`.
+extension UsuarioGlobalTests {
+
 /// T5 de `docs/revisao-sync-offline-ios.md` (R5): o que foi apagado em outro
 /// aparelho some deste quando a lista do servidor vem completa. Nunca sai item
 /// com alteração local (`pending`/`failed`/`deletadoEm`) nem com lista incompleta.
@@ -314,3 +317,5 @@ struct ExclusaoNoServidorTests {
         #expect(try idsDeCiclos().contains(novo.id))
     }
 }
+
+}  // extension UsuarioGlobalTests
