@@ -70,6 +70,9 @@ final class DadosExemplo {
                               dia: dias[n], comprovanteUrl: foto ? "https://exemplo.invalid/\(n)-\(hora).jpg" : nil)
             ctx.insert(g)
             g.criadoEm = dia(n, hora, minuto)
+            // Gasto novo nasce `.pending`; na vitrine/previews não há sync e o
+            // ícone "aguardando envio" apareceria em toda linha.
+            g.syncStatus = .synced
         }
         ciclo.gasto_total = lancamentos.reduce(0) { $0 + Decimal(string: $1.4)! }
 
