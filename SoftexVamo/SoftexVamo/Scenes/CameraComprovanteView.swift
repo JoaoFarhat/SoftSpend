@@ -16,6 +16,8 @@ struct CameraComprovanteView: View {
     /// Câmera do sistema (`CameraPicker`), quando a câmera própria não abre mas o aparelho tem câmera.
     @State private var cameraDoSistema = false
     @State private var fotoDoSistema: UIImage?
+    /// Falha ao abrir a foto da galeria (ex.: foto só no iCloud sem internet).
+    @State private var falhouFotoGaleria = false
     @ScaledMetric(relativeTo: .body) private var ladoObturador: CGFloat = 72
 
     private var podeFotografar: Bool { previewFixo == nil && camera.estado == .pronta && !camera.fotografando }
@@ -48,12 +50,23 @@ struct CameraComprovanteView: View {
         .onChange(of: itemFotos) { _, item in
             guard let item else { return }
             Task {
-                if let dados = try? await item.loadTransferable(type: Data.self),
-                   let imagem = UIImage(data: dados) {
-                    aoEscolher(.foto(imagem))
+                do {
+                    if let dados = try await item.loadTransferable(type: Data.self),
+                       let imagem = UIImage(data: dados) {
+                        aoEscolher(.foto(imagem))
+                    } else {
+                        falhouFotoGaleria = true
+                    }
+                } catch {
+                    falhouFotoGaleria = true
                 }
                 itemFotos = nil
             }
+        }
+        .alert("Não deu para abrir essa foto", isPresented: $falhouFotoGaleria) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Se ela estiver no iCloud, conecte-se à internet ou tire a foto com a câmera.")
         }
         .fullScreenCover(isPresented: $cameraDoSistema) {
             CameraPicker(image: $fotoDoSistema).ignoresSafeArea()

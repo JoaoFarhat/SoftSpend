@@ -103,6 +103,8 @@ private struct EscolherComprovante: ViewModifier {
     @State private var arquivos = false
     @State private var fotoTirada: UIImage?
     @State private var itemFotos: PhotosPickerItem?
+    /// Falha ao abrir a foto da galeria (ex.: foto só no iCloud sem internet).
+    @State private var falhouFotoGaleria = false
 
     func body(content: Content) -> some View {
         content
@@ -124,12 +126,23 @@ private struct EscolherComprovante: ViewModifier {
             .onChange(of: itemFotos) { _, item in
                 guard let item else { return }
                 Task {
-                    if let dados = try? await item.loadTransferable(type: Data.self),
-                       let imagem = UIImage(data: dados) {
-                        aoEscolher(.foto(imagem))
+                    do {
+                        if let dados = try await item.loadTransferable(type: Data.self),
+                           let imagem = UIImage(data: dados) {
+                            aoEscolher(.foto(imagem))
+                        } else {
+                            falhouFotoGaleria = true
+                        }
+                    } catch {
+                        falhouFotoGaleria = true
                     }
                     itemFotos = nil
                 }
+            }
+            .alert("Não deu para abrir essa foto", isPresented: $falhouFotoGaleria) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Se ela estiver no iCloud, conecte-se à internet ou tire a foto com a câmera.")
             }
             .fileImporter(isPresented: $arquivos, allowedContentTypes: [.image, .pdf]) { resultado in
                 if case .success(let url) = resultado {
