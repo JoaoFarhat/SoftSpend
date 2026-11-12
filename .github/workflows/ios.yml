@@ -49,9 +49,11 @@ jobs:
           print(ids[0])')
           echo "SIMULADOR=$ID" >> "$GITHUB_ENV"
 
+      # Assinatura local ("-"), sem conta da Apple: sem nenhuma assinatura o simulador
+      # não dá o Keychain ao app, e os testes do comprovante cifrado falham.
       - name: Compilar e testar
         run: |
           xcodebuild test \
             -project SoftSpend.xcodeproj -scheme SoftSpend \
             -destination "id=$SIMULADOR" \
-            -configuration Debug CODE_SIGNING_ALLOWED=NO
+            -configuration Debug             CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER=
