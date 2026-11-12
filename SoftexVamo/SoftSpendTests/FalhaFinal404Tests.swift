@@ -52,6 +52,13 @@ struct FalhaFinal404Tests {
         return await syncActor.sync(agora: .now, userId: userId, forcar: true)
     }
 
+    /// Sync em background, para mexer no item com a requisição parada no `Portao`.
+    func iniciarSync() -> Task<Int, Never> {
+        let syncActor = SyncActor(modelContainer: container, api: api)
+        let usuario = userId
+        return Task { await syncActor.sync(agora: .now, userId: usuario, forcar: true) }
+    }
+
     func cicloLocal(_ ctx: ModelContext) throws -> CicloSoftex {
         try #require(try ctx.fetch(FetchDescriptor<CicloSoftex>()).first)
     }
@@ -137,6 +144,57 @@ struct FalhaFinal404Tests {
         let gastos = try gastosLocais(leitura)
         #expect(gastos.count == 1)
         esperarFalhaFinal(try #require(gastos.first))
+    }
+
+    /// Editar o gasto com o PUT em voo e o PUT responder 404 (o gasto foi
+    /// apagado em outro aparelho): a edição durante o envio não evita a falha
+    /// final — o valor novo fica no aparelho, o `gasto_total` (que a própria
+    /// edição já ajustou) não muda de novo e nada é reenviado.
+    @Test func editarDuranteOEnvio404ViraFalhaFinal() async throws {
+        try await subirViagem()
+
+        // Outro aparelho apagou o gasto; aqui o usuário o edita e ele volta
+        // para pending, como o editGasto faz (valor e total já novos).
+        let gastoRemoto = try #require(api.gastos.first)
+        try await api.deleteGasto(gastoId: gastoRemoto.id)
+        api.limparChamadas()
+
+        let put = api.segurar(.putGasto)
+        let ctx = ModelContext(container)
+        let gasto = try #require(gastosLocais(ctx).first)
+        gasto.valor = 40
+        gasto.syncStatus = .pending
+        try cicloLocal(ctx).gasto_total = 40
+        try ctx.save()
+
+        let tarefa = iniciarSync()
+        await put.aguardarChegada()
+
+        // Outra edição com o PUT em voo (também ajusta o total local uma vez).
+        let durante = ModelContext(container)
+        let emVoo = try #require(gastosLocais(durante).first)
+        emVoo.titulo = "Almoço caro"
+        emVoo.valor = 50
+        try cicloLocal(durante).gasto_total += 10
+        try durante.save()
+
+        await put.liberar()
+        #expect(await tarefa.value == 0)
+        #expect(api.chamadas == [.putGasto])
+
+        // Falha final com a última edição preservada: o valor novo conta uma
+        // vez só no total e o item não é reenviado.
+        let leitura = ModelContext(container)
+        let gastos = try gastosLocais(leitura)
+        #expect(gastos.count == 1)
+        let atual = try #require(gastos.first)
+        esperarFalhaFinal(atual)
+        #expect(atual.valor == 50)
+        #expect(try cicloLocal(leitura).gasto_total == 50)
+
+        api.limparChamadas()
+        #expect(await sync() == 0)
+        #expect(api.chamadas.isEmpty)
     }
 
     /// POST de dia cuja viagem foi apagada em outro aparelho: falha final.

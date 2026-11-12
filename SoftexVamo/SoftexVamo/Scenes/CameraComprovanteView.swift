@@ -13,6 +13,9 @@ struct CameraComprovanteView: View {
     @State private var fotos = false
     @State private var arquivos = false
     @State private var itemFotos: PhotosPickerItem?
+    /// `loadTransferable` da escolha atual; uma escolha nova enquanto a anterior
+    /// carrega (o iCloud pode demorar) a cancela — só a última foto entrega.
+    @State private var tarefaFoto: Task<Void, Never>?
     /// Câmera do sistema (`CameraPicker`), quando a câmera própria não abre mas o aparelho tem câmera.
     @State private var cameraDoSistema = false
     @State private var fotoDoSistema: UIImage?
@@ -49,18 +52,20 @@ struct CameraComprovanteView: View {
         .photosPicker(isPresented: $fotos, selection: $itemFotos, matching: .images)
         .onChange(of: itemFotos) { _, item in
             guard let item else { return }
-            Task {
+            tarefaFoto?.cancel()
+            tarefaFoto = Task {
+                defer { itemFotos = nil }
                 do {
-                    if let dados = try await item.loadTransferable(type: Data.self),
-                       let imagem = UIImage(data: dados) {
+                    let dados = try await item.loadTransferable(type: Data.self)
+                    guard !Task.isCancelled else { return }
+                    if let dados, let imagem = UIImage(data: dados) {
                         aoEscolher(.foto(imagem))
                     } else {
                         erroFoto = true
                     }
                 } catch {
-                    erroFoto = true
+                    if !Task.isCancelled { erroFoto = true }
                 }
-                itemFotos = nil
             }
         }
         .alert("Não deu para abrir a foto", isPresented: $erroFoto) {
