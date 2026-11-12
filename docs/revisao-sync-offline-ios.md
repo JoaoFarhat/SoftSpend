@@ -232,6 +232,13 @@ Uma edição do usuário limpa o `syncError` (`editGasto` já faz isso) e o item
 pai seguir apagado. Testes em `SoftSpendTests/FalhaFinal404Tests.swift`: POST e PUT de gasto, POST de dia e o
 contraste do 500 com backoff.
 
+**Mudança de 12/11 (decisão do usuário: descartar, sem mover para outro dia).** O 404 deixou de marcar falha final:
+`descartarGasto`/`descartarDia` apagam o item no aparelho (relido por `id` num contexto novo) e tiram do
+`ciclo.gasto_total` o valor do gasto, ou os gastos vivos do dia; nenhuma requisição a mais. `marcarFalhaFinal` e
+`falhouDefinitivo` saíram. Itens antigos com `erroApagadoEmOutroAparelho` são descartados no começo de `sync(agora:)`
+(`descartarAntigosApagadosEmOutroAparelho`). `FalhaFinal404Tests` agora espera o item apagado, o total ajustado e só
+a chamada que tomou 404, mais um teste da limpeza dos itens antigos.
+
 ### T5 — Propagar exclusões do servidor (R5) — Complexa
 
 Com a lista de dias completa (`listaCompleta`, como em `removerDiasSumidos`): gasto local `synced`, com `backendId`, que não

@@ -10,8 +10,9 @@ nonisolated enum EstadoEnvio: Equatable, Sendable {
     case aguardando
     /// A última tentativa falhou (o texto é o `syncError`); a fila ainda tenta de novo.
     case falhou(String)
-    /// Falha final por 404 (T4): o dia/a viagem (ou o próprio gasto) foi
-    /// apagado em outro aparelho. O gasto fica no aparelho, fora da fila.
+    /// Falha final por 404 (T4) gravada por versões anteriores: o dia/a viagem
+    /// (ou o próprio gasto) foi apagado em outro aparelho. Hoje esse gasto é
+    /// descartado no começo do próximo `sync`; o caso só cobre o intervalo até lá.
     case apagadoEmOutroAparelho
 
     static func de(_ gasto: GastosDia) -> EstadoEnvio {
