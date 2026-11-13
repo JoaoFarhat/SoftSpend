@@ -49,6 +49,12 @@ struct PerfilView: View {
                         set: { leituraAutomatica = $0 }
                     ))
                     divisoria
+                    NavigationLink {
+                        ComoLigarApplePayView()
+                    } label: {
+                        linhaLink("Apple Pay (atalho)")
+                    }
+                    divisoria
                     linhaTema
                 }
                 Text("Ligada, a foto do comprovante é enviada para um serviço de leitura (Google Gemini) que preenche valor, local, data e categoria.")
@@ -164,6 +170,21 @@ struct PerfilView: View {
         .tint(Tema.marcaBotao)
         .padding(.horizontal, Espaco.g)
         .padding(.vertical, Espaco.p)
+        .frame(minHeight: 50)
+    }
+
+    private func linhaLink(_ titulo: String) -> some View {
+        HStack(spacing: Espaco.m) {
+            Text(titulo)
+                .font(.body)
+                .foregroundStyle(Tema.texto)
+            Spacer(minLength: Espaco.p)
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Tema.textoFraco)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, Espaco.g)
         .frame(minHeight: 50)
     }
 
