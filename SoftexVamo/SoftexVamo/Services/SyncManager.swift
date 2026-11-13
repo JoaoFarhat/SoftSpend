@@ -173,6 +173,10 @@ actor SyncActor: ModelActor {
     /// Algum item mudou durante o envio nesta passada: vale rodar outra.
     private var mudouDuranteEnvio = false
 
+    /// Viagens recusadas com `403 subscription_required` neste `sync`: não são
+    /// reenviadas nas passadas seguintes (um POST por viagem bloqueada por `sync`).
+    private var aguardandoAssinaturaNesteSync: Set<UUID> = []
+
     init(modelContainer: ModelContainer, api: any SyncAPI = NetworkManager.shared) {
         let modelContext = ModelContext(modelContainer)
         self.modelExecutor = DefaultSerialModelExecutor(modelContext: modelContext)
@@ -295,6 +299,7 @@ actor SyncActor: ModelActor {
         let maxPassadas = 5
 
         descartarAntigosApagadosEmOutroAparelho(userId: userId)
+        aguardandoAssinaturaNesteSync = []
 
         var pendentesDepois = 0
         for passada in 0..<maxPassadas {
@@ -484,6 +489,20 @@ actor SyncActor: ModelActor {
     /// (`descartarAntigosApagadosEmOutroAparelho`, no começo do `sync`).
     nonisolated static let erroApagadoEmOutroAparelho = "O dia ou a viagem foi apagado em outro aparelho"
 
+    /// `syncError` da viagem nova recusada com `403 subscription_required`
+    /// (§3.4 de `docs/assinatura.md`). Não é falha: a viagem fica `.pending`
+    /// e sobe sozinha depois da compra.
+    nonisolated static let erroAssinaturaNecessaria = "Assinatura necessária para enviar esta viagem"
+
+    /// Viagem nova recusada por falta de assinatura: fica `.pending`, sem
+    /// contar tentativa nem backoff (o `sync(forcar: true)` depois da compra a
+    /// sobe) e **sem** `mudouDuranteEnvio` (outra passada só repetiria o 403).
+    private func marcarAguardandoAssinatura(_ item: any Syncavel) {
+        item.proximaTentativaEm = nil
+        item.syncStatus = .pending
+        item.syncError = SyncActor.erroAssinaturaNecessaria
+    }
+
     private func marcarSucesso(_ item: any Syncavel) {
         item.tentativas = 0
         item.proximaTentativaEm = nil
@@ -517,6 +536,7 @@ actor SyncActor: ModelActor {
                 await sincronizarEdicaoCiclo(ciclo, contexto: contexto, agora: agora, forcar: forcar)
                 continue
             }
+            if aguardandoAssinaturaNesteSync.contains(ciclo.id) { continue }
 
             logger.info("syncCiclos: POST ciclo clientId=\(ciclo.clientId, privacy: .private) titulo=\(ciclo.titulo, privacy: .private)")
             let cicloUUID = ciclo.id
@@ -541,6 +561,18 @@ actor SyncActor: ModelActor {
                 }
                 logger.info("syncCiclos: POST ok, backendId=\(response.backendId.map(String.init) ?? "nil", privacy: .public)")
             } catch {
+                if isAssinaturaNecessaria(error) {
+                    // §3.4 de docs/assinatura.md: sem assinatura, a viagem nova
+                    // espera na fila (sem backoff, sem descarte, sem logout).
+                    // Os dias e gastos dela também esperam: só sobem com o
+                    // backendId do ciclo.
+                    aguardandoAssinaturaNesteSync.insert(cicloUUID)
+                    gravarCiclo(cicloUUID, etapa: "syncCiclos-assinatura") { atual, _ in
+                        marcarAguardandoAssinatura(atual)
+                    }
+                    logger.info("syncCiclos: POST recusado, assinatura necessária")
+                    continue
+                }
                 let erro = error.localizedDescription
                 gravarCiclo(cicloUUID, etapa: "syncCiclos-catch") { atual, _ in
                     atual.syncError = erro
@@ -789,6 +821,11 @@ actor SyncActor: ModelActor {
         return false
     }
 
+    /// `403 subscription_required` no erro tipado, antes de virar texto (§3.1).
+    private func isAssinaturaNecessaria(_ error: Error) -> Bool {
+        (error as? APIError)?.assinaturaNecessaria == true
+    }
+
     // MARK: - Apagar item sem backendId (T7)
 
     /// T7 de `docs/revisao-sync-offline-ios.md` (R7): resultado de procurar no
@@ -804,8 +841,12 @@ actor SyncActor: ModelActor {
         case falhou(String)
     }
 
+    /// 404: o pai não existe no servidor. `403 subscription_required`: com o
+    /// servidor corrigido (AS2, §3.3 de `docs/assinatura.md`), um `client_id`
+    /// que já existe devolveria o item; o 403 garante que ele não está lá.
     private func classificar(_ error: Error) -> Recuperacao {
-        isNotFoundError(error) ? .naoExiste : .falhou(error.localizedDescription)
+        if isNotFoundError(error) || isAssinaturaNecessaria(error) { return .naoExiste }
+        return .falhou(error.localizedDescription)
     }
 
     /// Repete o POST do gasto com o mesmo `client_id` só para descobrir o
@@ -1063,8 +1104,13 @@ nonisolated extension Syncavel {
     /// A falha final por 404 do T4 (de versões anteriores, ainda não
     /// descartada) não conta: o pai não existe no servidor, e o item (se chegou
     /// a ser criado) foi apagado junto, em cascata.
+    ///
+    /// A viagem recusada por falta de assinatura (§3.3 de `docs/assinatura.md`)
+    /// também não: o 403 só vem quando o `client_id` não existe no servidor,
+    /// mesmo que uma tentativa anterior tenha contado em `tentativas`.
     var podeTerSidoCriadoNoServidor: Bool {
         if syncError == SyncActor.erroApagadoEmOutroAparelho { return false }
+        if syncError == SyncActor.erroAssinaturaNecessaria { return false }
         return tentativas > 0 || syncStatus == .failed || syncError != nil
     }
 }

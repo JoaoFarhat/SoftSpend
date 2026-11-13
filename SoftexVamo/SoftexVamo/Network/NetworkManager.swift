@@ -86,6 +86,14 @@ private actor TokenRefresher {
     }
 }
 
+/// Só o `401` (sessão vencida) renova o token e, se não der, desloga. Qualquer
+/// outro status, inclusive o `403 subscription_required` da assinatura
+/// (`docs/assinatura.md` §3.1), volta como `APIError.serverError` sem mexer
+/// na sessão.
+nonisolated func deveRenovarToken(statusCode: Int, logout401: Bool) -> Bool {
+    statusCode == 401 && logout401
+}
+
 final class NetworkManager: Sendable {
 
     nonisolated static let shared = NetworkManager()
@@ -217,7 +225,7 @@ final class NetworkManager: Sendable {
 
         logger.info("execute: status \(http.statusCode, privacy: .public) for \(request.url?.absoluteString ?? "?", privacy: .private)")
 
-        if http.statusCode == 401, logout401 {
+        if deveRenovarToken(statusCode: http.statusCode, logout401: logout401) {
             if allowRefresh {
                 do {
                     let authResponse = try await refresher.refresh()
