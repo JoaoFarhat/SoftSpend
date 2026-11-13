@@ -373,6 +373,10 @@ Cadeia de migrations:
 9. `e8a2b5c7d9f1` — adiciona `refresh_tokens.session_id` (indexada, NOT NULL).
    Linhas antigas recebem o próprio `id`. Sem ela, login e qualquer rota
    autenticada falham com `Unknown column 'refresh_tokens.session_id'`.
+10. `f2c4e6a8b0d2` — fatura importada por arquivo (§2.6): `credit_card_accounts`
+    ganha `origem` (`PLUGGY`/`FATURA`, default `PLUGGY`) e `conexao_id` passa a
+    aceitar NULL (cartão importado não tem conexão Pluggy). O downgrade apaga
+    as linhas `FATURA` com as filhas e devolve `conexao_id` a NOT NULL.
 
 ## Isolamento por usuário (UUID)
 
@@ -453,23 +457,52 @@ navegação do visual novo: volta quando o Open Finance estiver ligado, sem "em 
 lista cartões, faturas e todas as transações do cartão; `FaturaDetalheView` e
 `CartaoTransacoesView` permitem confirmar ou remover um vínculo em revisão.
 
-Importar fatura por arquivo (`docs/cartao-sem-open-finance.md` §2, tarefa S1):
-`POST /api/faturas/ler` (`controllers/fatura_controller.py`, sempre
-registrada — não depende de `OPEN_FINANCE_ENABLED` nem de `PLUGGY_*`) lê o
-arquivo e devolve a prévia **sem gravar nada** (nem banco, nem S3). Multipart:
-`arquivo` (PDF até 10 MB e 20 páginas, OFX ou CSV até 2 MB) e `senha?` para
-PDF protegido (regravado sem proteção em memória pelo `pypdfium2`; a senha
-nunca é guardada nem logada). `services/fatura_arquivo_service.py` detecta o
-tipo pelos bytes/cabeçalho, faz o parse de OFX e CSV por regex/`csv` (sem IA)
-e aplica a validação e o `soma_confere` compartilhados.
-`services/fatura_ia_service.py` manda o PDF nativo ao Gemini (mesmas
-`GEMINI_API_KEY`/`GEMINI_MODEL_NAME` do OCR, mas cliente próprio com timeout
-de 60 s e `MAX_OUTPUT_TOKENS` 16.384; sem a chave só o PDF dá `503` — OFX e
-CSV funcionam). O log leva só tamanho, tempo, nº de compras e
-`usage_metadata` — nunca descrição, valor ou senha. `dentro_da_viagem`,
-`dia_id` e `match` do `CompraLida` saem vazios na S1; a conciliação e a
-gravação (`POST /api/faturas`, `ciclo_id` em `ler`) são a tarefa S2, com a
-migration `f2c4e6a8b0d2` (cabeça `e8a2b5c7d9f1`).
+Importar fatura por arquivo (`docs/cartao-sem-open-finance.md` §2, tarefas S1
+e S2). Todas as rotas ficam em `controllers/fatura_controller.py` sob
+`/api/faturas`, sempre registradas — não dependem de `OPEN_FINANCE_ENABLED`
+nem de `PLUGGY_*`:
+
+- `POST /api/faturas/ler` (multipart `arquivo`, `senha?`, `ciclo_id?`) lê o
+  arquivo e devolve a prévia **sem gravar nada** (nem banco, nem S3).
+  `arquivo`: PDF até 10 MB e 20 páginas, OFX ou CSV até 2 MB; `senha?` para
+  PDF protegido (regravado sem proteção em memória pelo `pypdfium2`; a senha
+  nunca é guardada nem logada). `services/fatura_arquivo_service.py` detecta
+  o tipo pelos bytes/cabeçalho, faz o parse de OFX e CSV por regex/`csv`
+  (sem IA) e aplica a validação e o `soma_confere` compartilhados.
+  `services/fatura_ia_service.py` manda o PDF nativo ao Gemini (mesmas
+  `GEMINI_API_KEY`/`GEMINI_MODEL_NAME` do OCR, mas cliente próprio com
+  timeout de 60 s e `MAX_OUTPUT_TOKENS` 16.384; sem a chave só o PDF dá
+  `503` — OFX e CSV funcionam). O log leva só tamanho, tempo, nº de compras
+  e `usage_metadata` — nunca descrição, valor ou senha. Com `ciclo_id`
+  (ciclo de outro usuário: `404`), `services/fatura_service.marcar_previa`
+  preenche `dentro_da_viagem` (data entre o primeiro e o último dia do
+  ciclo), `dia_id` e `match` — a mesma `_pontuacao` da conciliação real,
+  com atribuição gulosa pela maior pontuação (um gasto casa com uma compra
+  só e vice-versa; `>= 80` sem empate `AUTO_MATCHED`, `65+` ou empate
+  `REVIEW`) sobre os gastos do ciclo ainda sem vínculo. Estorno e encargo
+  nunca casam.
+- `POST /api/faturas` recebe a `FaturaLida` da prévia já sem as compras
+  descartadas, grava tudo de forma idempotente e roda `conciliar_usuario`.
+  `services/fatura_service.py` acha ou cria o cartão por (usuário, emissor,
+  final) — `origem = 'FATURA'`, `conexao_id = NULL` — e a fatura por
+  (cartão, vencimento), atualizando o total se mudou. O `transaction_id` é
+  `fatura:` + sha256 de usuário, cartão, data, valor, descrição
+  normalizada, parcela, tipo e ordem entre iguais (duas compras idênticas
+  no mesmo dia continuam duas; reimportar não duplica).
+- `POST /api/faturas/{id}/conciliar` roda a conciliação de novo (o app
+  chama depois de sincronizar os gastos criados na conferência).
+- `GET /api/faturas` e `GET /api/faturas/{id}` — histórico e detalhe, só do
+  usuário e só `origem = FATURA`.
+- `DELETE /api/faturas/{id}` — apaga a fatura, suas compras e os vínculos;
+  os gastos ficam (voltam a `PENDENTE`).
+- `POST /api/faturas/matches/{id}/confirm` e
+  `DELETE /api/faturas/matches/{id}` — mesmo efeito das rotas do
+  Open Finance, chamando as mesmas funções do `open_finance_repository`.
+
+O `_pontuacao`/`_pontuacao_texto` de `open_finance_reconciliation_service.py`
+aceitam qualquer objeto com `amount`, `date` (`date` ou `datetime`) e
+`merchant_name`/`description`, sem mudar regra nenhuma — a prévia pontua
+compras ainda não gravadas por um adaptador (`_CompraComoTransacao`).
 
 | Variável | Default | Descrição |
 | --- | --- | --- |

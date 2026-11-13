@@ -55,7 +55,10 @@ class CreditCardAccount(Base):
     conexao_id = Column(
         Integer,
         ForeignKey("open_finance_connections.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+    )
+    origem = Column(
+        String(20), nullable=False, default="PLUGGY", server_default="PLUGGY"
     )
     user_id = Column(
         String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
