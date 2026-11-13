@@ -57,3 +57,13 @@ jobs:
             -project SoftSpend.xcodeproj -scheme SoftSpend \
             -destination "id=$SIMULADOR" \
             -configuration Debug CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER=
+
+      # O build de Debug não enxerga o que fica dentro de `#if DEBUG`
+      # (seletor de ambiente do `APIConfig`, `VitrineView`, `DemoInicio`):
+      # um erro ali só apareceria no archive da loja. Só compila, sem testes.
+      - name: Compilar em Release
+        run: |
+          xcodebuild build \
+            -project SoftSpend.xcodeproj -scheme SoftSpend \
+            -destination 'generic/platform=iOS Simulator' \
+            -configuration Release CODE_SIGNING_ALLOWED=NO
