@@ -636,6 +636,10 @@ Arquivos para rodar a API como serviço systemd e rotacionar logs:
 - `deploy/ec2/softspend.service` — serviço systemd
 - `deploy/ec2/logrotate-softspend` — rotação diária de logs
 - `deploy/ec2/setup.sh` — instala tudo no servidor
+- `deploy/ec2/backup-mysql.sh`, `backup_mysql.py`, `softspend-backup.service`/`.timer`
+  e `backup.env.example` — backup diário do MySQL para o S3 (`docs/backup-mysql.md`;
+  roteiro de instalação no §12). O `setup.sh` instala o timer desligado até existirem
+  `/etc/softspend/backup.env` com o bucket e `/etc/softspend/backup.cnf`.
 
 Configure uma única vez no EC2:
 

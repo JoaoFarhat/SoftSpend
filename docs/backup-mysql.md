@@ -1,6 +1,7 @@
 # Backup diário do MySQL da EC2
 
-Especificação, sem código. Vale para o banco de produção, que é um MySQL
+Especificação. O código da tarefa B1 está em `deploy/ec2/` e o roteiro de
+instalação no §12. Vale para o banco de produção, que é um MySQL
 **dentro da própria EC2** (sem RDS; ver `AGENTS.md`, "Bancos de dados"). Hoje
 não existe nenhum backup: perder o disco da EC2 é perder cadastros, viagens,
 gastos e assinaturas. O banco local de testes não entra.
@@ -269,3 +270,69 @@ rodar é o usuário.
    (§3, linha "Banco", e §4, item 9) pelo MySQL na EC2 com este backup; em
    `docs/religar-servidor.md`, trocar "snapshot do RDS" por "dump antes de
    migration"; frase sobre cópias de segurança na Política de Privacidade.
+
+## 12. Instalação na EC2 (B1)
+
+Arquivos em `deploy/ec2/`:
+
+- `backup-mysql.sh` — o script do §3 (`--dry-run` faz dump e validação sem
+  enviar; `--destino pre-migration` é o que a B3 vai usar).
+- `backup_mysql.py` — ajudante em Python (nome do arquivo, espaço livre,
+  validação, `.meta.json`, envio com `boto3`, limpeza local). Testes em
+  `Python/tests/test_backup_mysql.py`.
+- `softspend-backup.service` e `softspend-backup.timer` — systemd.
+- `backup.env.example` — modelo do `/etc/softspend/backup.env`.
+
+Detalhes que valem saber:
+
+- As contagens do `.meta.json` e o `alembic_version` são lidos **do próprio
+  dump**, não de um `SELECT` à parte; assim batem com o que foi copiado mesmo
+  com a API gravando durante o dump.
+- O envio recusa rodar com `BACKUP_S3_BUCKET` vazio ou com
+  `AWS_ACCESS_KEY_ID` no ambiente (o backup usa só a função IAM).
+- Um dump que não passa na validação é apagado, para não contar como "um dos
+  2 últimos" na limpeza.
+- O log vai para o journal e para `/var/log/softspend/backup.log` (o
+  logrotate existente já pega todos os `*.log` da pasta).
+
+Roteiro, por SSH, depois do merge e do §4.1 feito (o deploy já trouxe os
+arquivos para `~/SoftSpend`):
+
+1. Conferir que a EC2 enxerga a função IAM (deve mostrar
+   `softspend-ec2-backup` no ARN):
+   `~/SoftSpend/Python/.venv/bin/python -c "import boto3; print(boto3.client('sts', region_name='sa-east-1').get_caller_identity()['Arn'])"`
+2. `cd ~/SoftSpend/deploy/ec2 && ./setup.sh`. Cria `/etc/softspend/`,
+   `/var/backups/softspend/` (modo `700`), o `backup.env` a partir do modelo e
+   instala o timer **desligado**. (Ele também reinicia a API e o nginx.)
+3. `mysql --version` e criar o usuário só de backup:
+
+   ```sql
+   -- sudo mysql
+   CREATE USER 'softspend_backup'@'localhost' IDENTIFIED BY '<senha forte>';
+   GRANT SELECT, SHOW VIEW, TRIGGER, LOCK TABLES ON softspend.* TO 'softspend_backup'@'localhost';
+   ```
+
+   O `PROCESS` não é necessário porque o dump usa `--no-tablespaces`.
+4. Criar `/etc/softspend/backup.cnf` (root, modo `600`):
+
+   ```bash
+   sudo install -m 600 -o root -g root /dev/null /etc/softspend/backup.cnf
+   sudo nano /etc/softspend/backup.cnf
+   ```
+
+   ```ini
+   [client]
+   user=softspend_backup
+   password=<senha forte>
+   ```
+
+5. `sudo nano /etc/softspend/backup.env` e preencher `BACKUP_S3_BUCKET`.
+6. Teste sem envio: `sudo bash ~/SoftSpend/deploy/ec2/backup-mysql.sh --dry-run`
+   e conferir o `.meta.json` em `/var/backups/softspend/`.
+7. Primeiro envio de verdade: `sudo systemctl start softspend-backup` e
+   `journalctl -u softspend-backup -n 50`. No console do S3, o dump e o
+   `.meta.json` aparecem em `diario/AAAA/MM/`.
+8. Ligar o timer: `sudo systemctl enable --now softspend-backup.timer` e
+   conferir o próximo horário em `systemctl list-timers softspend-backup.timer`.
+9. Fazer o teste de restauração do §8.1. Só depois dele o backup conta como
+   existente.

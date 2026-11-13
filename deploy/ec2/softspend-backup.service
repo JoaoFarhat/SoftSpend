@@ -1,0 +1,27 @@
+[Unit]
+Description=SoftSpend - backup do MySQL para o S3 (docs/backup-mysql.md)
+Wants=network-online.target
+After=network-online.target mysql.service
+
+[Service]
+Type=oneshot
+# root: precisa ler /etc/softspend/backup.cnf (root, modo 600).
+User=root
+# Ambiente próprio do backup. Nunca o .env da API (as chaves S3_* de lá
+# são do bucket dos comprovantes); o envio usa a função IAM da EC2.
+EnvironmentFile=/etc/softspend/backup.env
+Environment=SOFTSPEND_BACKUP_ENV_CARREGADO=1
+ExecStart=/bin/bash /home/ubuntu/SoftSpend/deploy/ec2/backup-mysql.sh
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=1h
+# A t3.small também serve a API: prioridade baixa de CPU e disco.
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/var/backups/softspend /var/log/softspend

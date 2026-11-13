@@ -1,0 +1,12 @@
+[Unit]
+Description=SoftSpend - backup diário do MySQL às 03:30 de Brasília (06:30 UTC)
+
+[Timer]
+OnCalendar=*-*-* 06:30:00 UTC
+# Se a EC2 estava desligada no horário, roda assim que ligar.
+Persistent=true
+RandomizedDelaySec=300
+Unit=softspend-backup.service
+
+[Install]
+WantedBy=timers.target
