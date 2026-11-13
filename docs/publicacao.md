@@ -46,6 +46,7 @@ O `Safeel.App.Backend/docs/assinatura.md` é o modelo; o princípio é o mesmo: 
 - Verificação: biblioteca oficial da Apple para Python (`app-store-server-library-python`; o Devin confere se está mantida antes de usar) e consulta à App Store Server API (`Get All Subscription Statuses`). **Um único caminho de cálculo do estado ("reconciliar")**, função pura com teste de tabela.
 - Estados: `none`, `trial`, `active`, `grace`, `billing_retry`, `expired`, `revoked`. Conciliação diária em segundo plano. O servidor aceita comprovantes do **Sandbox** em produção (a revisão da Apple compra no Sandbox).
 - Bloqueio no servidor: `POST /api/ciclos` (ciclo novo) e `POST /api/gastos/extrair` (IA) respondem `403 subscription_required` sem acesso. Os outros caminhos não bloqueiam (§1.3).
+  - Feito na AS1 (13/11), já com as decisões do usuário: o bloqueio vale para `POST /ciclos`, `POST /gastos/extrair`, `POST /api/faturas/ler` e `GET /ciclos/{ciclo_id}/export` (exportar entrou no bloqueio). Detalhes no `AGENTS.md`.
 - **Interruptor** `BILLING_ENFORCEMENT` (`off` por padrão): com `off`, todo mundo tem acesso. Sem isso, o teste e a revisão travam antes da conta paga existir.
 - **Exclusão de conta:** a linha da assinatura guarda só ids da Apple e datas; o que reter por obrigação fiscal vai para a pergunta U9 (não decidir no código).
 - Segredos novos no `.env` da EC2 (nunca no repositório): `APPLE_BUNDLE_ID`, `APPLE_ISSUER_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY`.

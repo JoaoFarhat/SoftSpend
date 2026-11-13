@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from database import get_db
-from dependencies import get_current_user_id
+from dependencies import exigir_assinatura, get_current_user_id
 from dtos.ciclo import CicloResponse, CicloRequest
 from services import ciclo_service, export_service
 from limiter import limiter
@@ -12,7 +12,11 @@ from limiter import limiter
 router = APIRouter()
 
 
-@router.post("/ciclos", response_model=CicloResponse)
+@router.post(
+    "/ciclos",
+    response_model=CicloResponse,
+    dependencies=[Depends(exigir_assinatura)],
+)
 @limiter.limit("20/minute")
 def criar_ciclo(request: Request, ciclo: CicloRequest, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
     return ciclo_service.criar_ciclo(db, ciclo, user_id)
@@ -51,7 +55,7 @@ def get_ciclo(request: Request, ciclo_id: int, db: Session = Depends(get_db), us
     return ciclo
 
 
-@router.get("/ciclos/{ciclo_id}/export")
+@router.get("/ciclos/{ciclo_id}/export", dependencies=[Depends(exigir_assinatura)])
 # Gerar PDF com comprovantes envolve varios downloads do bucket; limite mais
 # apertado que as leituras normais.
 @limiter.limit("10/minute")

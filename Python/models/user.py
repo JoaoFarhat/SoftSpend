@@ -16,3 +16,10 @@ class User(Base):
     refresh_tokens = relationship(
         "RefreshToken", back_populates="user", cascade="all, delete-orphan"
     )
+    # Excluir a conta apaga a linha da assinatura (só ids da Apple e datas).
+    assinatura = relationship(
+        "Assinatura",
+        back_populates="usuario",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )

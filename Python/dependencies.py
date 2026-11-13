@@ -2,7 +2,7 @@ from fastapi import Header, HTTPException, Depends
 from sqlalchemy.orm import Session
 from database import get_db
 from repositories import auth_repository
-from services import auth_service
+from services import assinatura_service, auth_service
 
 
 def get_current_user(
@@ -36,3 +36,16 @@ def get_current_user(
 
 def get_current_user_id(usuario = Depends(get_current_user)) -> str:
     return usuario.id
+
+
+def exigir_assinatura(
+    db: Session = Depends(get_db),
+    user_id: str = Depends(get_current_user_id),
+) -> None:
+    """Bloqueia a rota sem assinatura (`docs/publicacao.md` §1.4).
+
+    Só vai em criar ciclo, ler comprovante com IA, ler fatura e exportar.
+    Com `BILLING_ENFORCEMENT` desligado (padrão), nunca bloqueia.
+    """
+    if not assinatura_service.tem_acesso(db, user_id):
+        raise assinatura_service.AssinaturaNecessaria()
