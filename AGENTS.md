@@ -241,14 +241,20 @@ Spec: `docs/cartao-sem-open-finance.md` §1 (partes A e B implementadas).
 - `Services/ComprasAguardandoViagem.swift` — fila "sem viagem" em JSON
   (`Application Support/compras-apple-pay.json`, escrita atômica, teto de 50
   por usuário, fora do SwiftData de propósito: nenhum `@Model` novo, sem V2).
+  Ler+regravar é serializado por `NSLock`; arquivo corrompido vai para
+  `.corrompido` em vez de ser sobrescrito; `adicionar` **lança** quando a
+  gravação falha (o `registrar` propaga e a ação responde "lance no app"),
+  enquanto `remover` só loga e deixa o item.
 - Aviso da fila no `InicioView` (`AlertaPendencia` com `textoComprasApplePay`,
   lido por `recarregarFila` no `task(id: hoje)`) e folha
   `Scenes/ComprasSemViagemView.swift`: cada item mostra estabelecimento,
   valor, cartão e data, com "Lançar em …" (destino por
-  `RegistroApplePay.viagemEDia(para:userId:ciclos:)`, no `DiaSoftex` da data
-  da compra) e "Descartar". Sem viagem para a data, só "Descartar" e o texto
-  "Crie a viagem desta data para lançar". `lancar` só tira o item da fila
-  depois do `save` e grava `criadoEm = recebidaEm`.
+  `RegistroApplePay.viagemEDia(para:userId:em:)`, que lê os ciclos do
+  `contexto` — `allCiclos` pode ainda não ter carregado) e "Descartar" (pede
+  `.confirmationDialog` — a compra some para sempre). Sem viagem para a data,
+  só "Descartar" e o texto "Crie a viagem desta data para lançar". `lancar`
+  só grava se o `id` ainda estiver na fila (toque duplo vira no-op), tira o
+  item da fila depois do `save` e grava `criadoEm = recebidaEm`.
 - `Scenes/ComoLigarApplePayView.swift` — tela de ajuda na seção Preferências
   de `PerfilView` (linha "Apple Pay (atalho)"); a automação é criada pelo
   usuário no app Atalhos (a Apple não permite criar pelo app).

@@ -36,7 +36,7 @@ struct ComprasAguardandoViagemTests {
 
         let item = compra(valor: Decimal(string: "12.34")!,
                           recebidaEm: Date(timeIntervalSince1970: 1_780_000_000))
-        fila.adicionar(item)
+        try fila.adicionar(item)
 
         // Sobrevive a uma instância nova no mesmo arquivo (leu o JSON).
         let relida = ComprasAguardandoViagem(arquivo: arquivo)
@@ -45,10 +45,10 @@ struct ComprasAguardandoViagemTests {
         #expect(itens[0] == item)
     }
 
-    @Test func tetoDe50PorUsuario() {
+    @Test func tetoDe50PorUsuario() throws {
         for i in 0..<51 {
-            fila.adicionar(compra(valor: Decimal(i),
-                                  recebidaEm: Date(timeIntervalSince1970: TimeInterval(i))))
+            try fila.adicionar(compra(valor: Decimal(i),
+                                      recebidaEm: Date(timeIntervalSince1970: TimeInterval(i))))
         }
 
         let itens = fila.ler(userId: userId)
@@ -58,38 +58,76 @@ struct ComprasAguardandoViagemTests {
         #expect(itens.contains { $0.valor == 50 })
     }
 
-    @Test func isolamentoPorUsuario() {
-        fila.adicionar(compra(userId: "u1", valor: 10))
-        fila.adicionar(compra(userId: "u2", valor: 20))
+    @Test func isolamentoPorUsuario() throws {
+        try fila.adicionar(compra(userId: "u1", valor: 10))
+        try fila.adicionar(compra(userId: "u2", valor: 20))
 
         #expect(fila.ler(userId: "u1").map(\.valor) == [10])
         #expect(fila.ler(userId: "u2").map(\.valor) == [20])
         #expect(fila.todas().count == 2)
     }
 
-    @Test func tetoEhPorUsuario() {
-        for _ in 0..<50 { fila.adicionar(compra(userId: "u1")) }
-        for _ in 0..<10 { fila.adicionar(compra(userId: "u2")) }
+    @Test func tetoEhPorUsuario() throws {
+        for _ in 0..<50 { try fila.adicionar(compra(userId: "u1")) }
+        for _ in 0..<10 { try fila.adicionar(compra(userId: "u2")) }
 
         #expect(fila.ler(userId: "u1").count == 50)
         #expect(fila.ler(userId: "u2").count == 10)
     }
 
-    @Test func arquivoCorrompidoViraListaVazia() throws {
+    /// Arquivo corrompido lê como lista vazia e vai para quarentena
+    /// (`<nome>.corrompido`) em vez de ser sobrescrito — os itens dos outros
+    /// usuários não se perdem num arquivo que dá para recuperar.
+    @Test func arquivoCorrompidoVaiParaQuarentenaELeComoVazia() throws {
         try Data("lixo não-json".utf8).write(to: arquivo)
         #expect(fila.todas().isEmpty)
         #expect(fila.ler(userId: userId).isEmpty)
 
-        // E continua funcionando: gravar por cima do arquivo corrompido.
-        fila.adicionar(compra())
+        let copia = arquivo.appendingPathExtension("corrompido")
+        #expect(try String(contentsOf: copia, encoding: .utf8) == "lixo não-json")
+        #expect(!FileManager.default.fileExists(atPath: arquivo.path))
+
+        // E continua funcionando: a próxima gravação cria um arquivo novo.
+        try fila.adicionar(compra())
         #expect(fila.ler(userId: userId).count == 1)
+    }
+
+    /// Pasta que não existe: a escrita atômica falha e `adicionar` lança — a
+    /// ação responde erro em vez de "guardado" com a compra perdida.
+    @Test func adicionarEmPastaInexistenteLanca() {
+        let quebrada = ComprasAguardandoViagem(
+            arquivo: FileManager.default.temporaryDirectory
+                .appendingPathComponent("pasta-\(UUID().uuidString)")
+                .appendingPathComponent("fila.json"))
+        #expect(throws: (any Error).self) { try quebrada.adicionar(compra()) }
+        // Ler segue devolvendo lista vazia, sem derrubar o app.
+        #expect(quebrada.ler(userId: userId).isEmpty)
+    }
+
+    /// Toque duplo em "Lançar": a `compras` da folha é uma cópia. O segundo
+    /// toque encontra o `id` fora da fila e vira no-op — sem gasto duplicado.
+    @Test func lancarComItemForaDaFilaNaoGrava() throws {
+        let item = compra()  // nunca entrou na fila
+
+        let ciclo = CicloSoftex(userId: userId, valor_total: 700, gasto_total: 0,
+                                periodo: "13/11 - 15/11", diaria: 100, titulo: "Cuiabá, MT")
+        ctx.insert(ciclo)
+        let dia = DiaSoftex(data: .now, saldo: 100)
+        dia.ciclo = ciclo
+        ctx.insert(dia)
+        try ctx.save()
+
+        try RegistroApplePay.lancar(item, em: dia, contexto: ctx, fila: fila)
+
+        #expect(try ctx.fetch(FetchDescriptor<GastosDia>()).isEmpty)
+        #expect(ciclo.gasto_total == 0)
     }
 
     /// "Lançar" grava o gasto e tira o item da fila **depois** do save.
     @Test func lancarRemoveODepoisDoSave() throws {
         let recebida = Date(timeIntervalSince1970: 1_780_000_000)
         let item = compra(valor: 30, recebidaEm: recebida)
-        fila.adicionar(item)
+        try fila.adicionar(item)
 
         let ciclo = CicloSoftex(userId: userId, valor_total: 700, gasto_total: 0,
                                 periodo: "13/11 - 15/11", diaria: 100, titulo: "Cuiabá, MT")
@@ -115,7 +153,7 @@ struct ComprasAguardandoViagemTests {
     /// fica na fila.
     @Test func lancarQueFalhaMantemOItem() throws {
         let item = compra()
-        fila.adicionar(item)
+        try fila.adicionar(item)
 
         let diaOrfao = DiaSoftex(data: .now, saldo: 100)
         ctx.insert(diaOrfao)

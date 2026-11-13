@@ -112,7 +112,9 @@ enum RegistroApplePay {
     private static let logger = Logger(subsystem: "br.com.softspend", category: "RegistroApplePay")
 
     /// Registra a compra vinda da automação. Devolve o que aconteceu para a
-    /// ação montar o diálogo; só lança erro quando o `save` falha.
+    /// ação montar o diálogo; só lança erro quando o `save` ou a gravação da
+    /// fila falha — a ação responde "lance no app" em vez de "guardado" com a
+    /// compra perdida.
     static func registrar(
         valor valorTexto: String,
         estabelecimento: String,
@@ -155,7 +157,7 @@ enum RegistroApplePay {
         // Sem viagem aberta ou sem dia local de hoje: guarda na fila (§1.5),
         // nunca num dia errado.
         let cartaoLimpo = cartao?.trimmingCharacters(in: .whitespacesAndNewlines)
-        fila.adicionar(CompraAguardandoViagem(
+        try fila.adicionar(CompraAguardandoViagem(
             id: UUID(), userId: userId, valor: valor, estabelecimento: titulo,
             cartao: cartaoLimpo?.isEmpty == true ? nil : cartaoLimpo,
             categoria: categoria, recebidaEm: agora
@@ -166,11 +168,17 @@ enum RegistroApplePay {
 
     /// Lança um item da fila "sem viagem" no dia escolhido (§1.5, usado pela
     /// folha do aviso do Início). O item sai da fila só **depois** do `save`:
-    /// falhou o save, o item fica.
+    /// falhou o save, o item fica. E só grava se o `id` ainda estiver na fila —
+    /// a `compras` da folha é uma cópia e um toque duplo em "Lançar" não pode
+    /// criar o gasto duas vezes (o segundo toque vira no-op).
     static func lancar(_ compra: CompraAguardandoViagem, em dia: DiaSoftex,
                        contexto: ModelContext,
                        fila: ComprasAguardandoViagem = .shared) throws {
         guard dia.ciclo != nil else { throw ErroRegistro.diaSemViagem }
+        guard fila.contem(id: compra.id) else {
+            logger.info("Lançar ignorado: a compra \(compra.id, privacy: .public) já saiu da fila")
+            return
+        }
         // `criadoEm` guarda quando a compra aconteceu, não quando foi lançada.
         try gravarGasto(valor: compra.valor, titulo: compra.estabelecimento,
                         categoria: compra.categoria, dia: dia,
@@ -197,6 +205,18 @@ enum RegistroApplePay {
             $0.deletadoEm == nil && calendario.isDate($0.data, inSameDayAs: d)
         }) else { return nil }
         return (ciclo, dia)
+    }
+
+    /// Mesma busca de `viagemEDia`, mas lendo os ciclos do `contexto` (como o
+    /// registro faz): a folha "sem viagem" usa isto — `allCiclos` do ViewModel
+    /// pode ainda não ter carregado e mostraria "Crie a viagem desta data" por
+    /// engano.
+    static func viagemEDia(para data: Date, userId: String,
+                           em contexto: ModelContext,
+                           calendario: Calendar = .current) -> (ciclo: CicloSoftex, dia: DiaSoftex)? {
+        viagemEDia(para: data, userId: userId,
+                   ciclos: ciclosVivos(userId: userId, em: contexto),
+                   calendario: calendario)
     }
 
     // MARK: - Partes da regra
@@ -254,11 +274,15 @@ enum RegistroApplePay {
     private static func viagemEDiaDeHoje(userId: String, hoje: Date,
                                          calendario: Calendar,
                                          em contexto: ModelContext) -> (CicloSoftex, DiaSoftex)? {
+        viagemEDia(para: hoje, userId: userId, em: contexto, calendario: calendario)
+    }
+
+    /// Viagens vivas do usuário, lidas do banco local.
+    private static func ciclosVivos(userId: String, em contexto: ModelContext) -> [CicloSoftex] {
         let desc = FetchDescriptor<CicloSoftex>(
             predicate: #Predicate { $0.userId == userId && $0.deletadoEm == nil }
         )
-        let ciclos = (try? contexto.fetch(desc)) ?? []
-        return viagemEDia(para: hoje, userId: userId, ciclos: ciclos, calendario: calendario)
+        return (try? contexto.fetch(desc)) ?? []
     }
 
     /// Gravação igual à de `createNewGasto`, sem passar pelo ViewModel (que
