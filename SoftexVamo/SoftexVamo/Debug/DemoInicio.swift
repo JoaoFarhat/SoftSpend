@@ -4,7 +4,7 @@ import SwiftData
 
 /// Início com a viagem de exemplo, sem login nem rede, para capturas de tela.
 ///
-/// `xcrun simctl launch <udid> com.joao.softspend -demo durante`
+/// `xcrun simctl launch <udid> br.com.softspend.app -demo durante`
 /// (estados: durante, antes, encerrada, vazio, menu; telas de lançar gasto:
 /// consentimento, camera, confirmar, detalhe; todos os gastos: todos, semfoto;
 /// avisos de diária: aviso; nova viagem: novaviagem; viagens: viagens;
