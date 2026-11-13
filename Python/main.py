@@ -14,6 +14,7 @@ from controllers.dia_controller import router as dia_router
 from controllers.gasto_controller import router as gasto_router
 from controllers.auth_controller import router as auth_router
 from controllers.open_finance_controller import router as open_finance_router
+from controllers.fatura_controller import router as fatura_router
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
@@ -71,6 +72,8 @@ app.include_router(ciclo_router)
 app.include_router(dia_router)
 app.include_router(gasto_router)
 app.include_router(auth_router)
+# A leitura de fatura não depende do Open Finance: fica sempre registrada.
+app.include_router(fatura_router)
 if OPEN_FINANCE_ENABLED:
     app.include_router(open_finance_router)
 

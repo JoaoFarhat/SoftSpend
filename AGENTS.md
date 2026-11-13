@@ -453,6 +453,24 @@ navegação do visual novo: volta quando o Open Finance estiver ligado, sem "em 
 lista cartões, faturas e todas as transações do cartão; `FaturaDetalheView` e
 `CartaoTransacoesView` permitem confirmar ou remover um vínculo em revisão.
 
+Importar fatura por arquivo (`docs/cartao-sem-open-finance.md` §2, tarefa S1):
+`POST /api/faturas/ler` (`controllers/fatura_controller.py`, sempre
+registrada — não depende de `OPEN_FINANCE_ENABLED` nem de `PLUGGY_*`) lê o
+arquivo e devolve a prévia **sem gravar nada** (nem banco, nem S3). Multipart:
+`arquivo` (PDF até 10 MB e 20 páginas, OFX ou CSV até 2 MB) e `senha?` para
+PDF protegido (regravado sem proteção em memória pelo `pypdfium2`; a senha
+nunca é guardada nem logada). `services/fatura_arquivo_service.py` detecta o
+tipo pelos bytes/cabeçalho, faz o parse de OFX e CSV por regex/`csv` (sem IA)
+e aplica a validação e o `soma_confere` compartilhados.
+`services/fatura_ia_service.py` manda o PDF nativo ao Gemini (mesmas
+`GEMINI_API_KEY`/`GEMINI_MODEL_NAME` do OCR, mas cliente próprio com timeout
+de 60 s e `MAX_OUTPUT_TOKENS` 16.384; sem a chave só o PDF dá `503` — OFX e
+CSV funcionam). O log leva só tamanho, tempo, nº de compras e
+`usage_metadata` — nunca descrição, valor ou senha. `dentro_da_viagem`,
+`dia_id` e `match` do `CompraLida` saem vazios na S1; a conciliação e a
+gravação (`POST /api/faturas`, `ciclo_id` em `ler`) são a tarefa S2, com a
+migration `f2c4e6a8b0d2` (cabeça `e8a2b5c7d9f1`).
+
 | Variável | Default | Descrição |
 | --- | --- | --- |
 | `ALLOWED_ORIGINS` | `https://softspend.com.br` | Origens CORS permitidas, separadas por vírgula |
