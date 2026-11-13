@@ -277,8 +277,9 @@ enum RegistroApplePay {
         viagemEDia(para: hoje, userId: userId, em: contexto, calendario: calendario)
     }
 
-    /// Viagens vivas do usuário, lidas do banco local.
-    private static func ciclosVivos(userId: String, em contexto: ModelContext) -> [CicloSoftex] {
+    /// Viagens vivas do usuário, lidas do banco local. Interna para a folha
+    /// "sem viagem" reaproveitar a lista num fetch só por render (§1.5).
+    static func ciclosVivos(userId: String, em contexto: ModelContext) -> [CicloSoftex] {
         let desc = FetchDescriptor<CicloSoftex>(
             predicate: #Predicate { $0.userId == userId && $0.deletadoEm == nil }
         )

@@ -35,12 +35,28 @@ struct ComprasSemViagemView: View {
         userId ?? AuthService.shared.currentUser?.id ?? UsuarioSalvo.id() ?? ""
     }
 
+    /// Destino de cada compra, uma vez por `body`: um fetch de ciclos e o
+    /// resto em memória, em vez de um fetch por cartão a cada render
+    /// (`viagemEDia(em:)`). Lê o banco local como o registro faz —
+    /// `allCiclos` do ViewModel pode ainda não ter carregado e a folha
+    /// diria "Crie a viagem desta data" por engano.
+    private var destinos: [UUID: (ciclo: CicloSoftex, dia: DiaSoftex)] {
+        let ciclos = RegistroApplePay.ciclosVivos(userId: donoFila, em: contexto)
+        var mapa: [UUID: (ciclo: CicloSoftex, dia: DiaSoftex)] = [:]
+        for compra in compras {
+            mapa[compra.id] = RegistroApplePay.viagemEDia(
+                para: compra.recebidaEm, userId: donoFila, ciclos: ciclos)
+        }
+        return mapa
+    }
+
     var body: some View {
+        let destinos = self.destinos
         NavigationStack {
             ScrollView {
                 VStack(spacing: Espaco.m) {
                     ForEach(compras) { compra in
-                        cartao(compra)
+                        cartao(compra, destino: destinos[compra.id])
                     }
                 }
                 .padding(.horizontal, Espaco.g + 2)
@@ -58,18 +74,20 @@ struct ComprasSemViagemView: View {
                 // Lançou ou descartou a última: a folha fecha sozinha.
                 if vazia { dismiss() }
             }
+            // `presenting:` entrega a compra à ação — com o Binding manual,
+            // o SwiftUI podia zerar `paraDescartar` antes do botão rodar e
+            // o "Descartar" saía sem fazer nada.
             .confirmationDialog("Descartar esta compra?",
                                 isPresented: Binding(get: { paraDescartar != nil },
                                                      set: { if !$0 { paraDescartar = nil } }),
-                                titleVisibility: .visible) {
+                                titleVisibility: .visible,
+                                presenting: paraDescartar) { compra in
                 Button("Descartar", role: .destructive) {
-                    if let compra = paraDescartar { descartar(compra) }
+                    descartar(compra)
                 }
                 Button("Cancelar", role: .cancel) {}
-            } message: {
-                if let compra = paraDescartar {
-                    Text("\(compra.estabelecimento), \(formatarBRL(compra.valor)). A compra sai da fila e não tem desfazer.")
-                }
+            } message: { compra in
+                Text("\(compra.estabelecimento), \(formatarBRL(compra.valor)). A compra sai da fila e não tem desfazer.")
             }
         }
         .presentationDetents([.medium, .large])
@@ -78,12 +96,8 @@ struct ComprasSemViagemView: View {
     // MARK: Cartão de cada compra
 
     @ViewBuilder
-    private func cartao(_ compra: CompraAguardandoViagem) -> some View {
-        // Destino lido do banco local, como `viagemEDiaDeHoje` faz no registro:
-        // `allCiclos` do ViewModel pode ainda não ter carregado e a folha
-        // diria "Crie a viagem desta data" por engano.
-        let destino = RegistroApplePay.viagemEDia(para: compra.recebidaEm, userId: donoFila,
-                                                em: contexto)
+    private func cartao(_ compra: CompraAguardandoViagem,
+                        destino: (ciclo: CicloSoftex, dia: DiaSoftex)?) -> some View {
         VStack(alignment: .leading, spacing: Espaco.m) {
             HStack(spacing: Espaco.m) {
                 IconeCategoria(compra.categoria, tamanho: 36)

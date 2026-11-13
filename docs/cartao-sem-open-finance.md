@@ -273,7 +273,7 @@ Hoje as tabelas exigem Pluggy (`conexao_id NOT NULL`). Uma migration nova, `f2c4
 - Coluna nova `credit_card_accounts.origem String(20) NOT NULL DEFAULT 'PLUGGY'` (`PLUGGY` ou `FATURA`).
 - `account_id`, `bill_id` e `transaction_id` continuam únicos e obrigatórios: as importadas usam `fatura:<uuid>` e `fatura:<sha256>`, que nunca colidem com os do Pluggy.
 - O cartão é achado ou criado por `(user_id, origem = FATURA, emissor, final_cartao)`.
-- **Idempotência:** o `transaction_id` é `fatura:` + sha256 de `user_id | cartão | data | valor | descrição normalizada | parcela | ordem entre iguais` (a ordem desempata duas compras idênticas no mesmo dia). Importar o mesmo arquivo duas vezes, ou a fatura aberta e depois a fechada, **não duplica** (as repetidas são puladas). A fatura é achada por `(cartão, vencimento)`; se o total mudou, atualiza.
+- **Idempotência:** o `transaction_id` é `fatura:` + sha256 de `user_id | cartão | data | valor | descrição normalizada | parcela | tipo | ordem entre iguais` (o tipo evita que um estorno idêntico a uma compra seja confundido com ela; a ordem desempata duas compras idênticas no mesmo dia). Importar o mesmo arquivo duas vezes, ou a fatura aberta e depois a fechada, **não duplica** (as repetidas são puladas). A fatura é achada por `(cartão, vencimento)`; se o total mudou, atualiza.
 - Downgrade: apaga as linhas `origem = FATURA` e remove a coluna; `conexao_id` volta a `NOT NULL`.
 
 ### 2.7 OFX e CSV (sem IA, sem custo)
@@ -286,8 +286,12 @@ Hoje as tabelas exigem Pluggy (`conexao_id NOT NULL`). Uma migration nova, `f2c4
 
 - **Mesmo consentimento do comprovante** (decisão do usuário): a importação exige `Consentimento.leituraAutomatica == true`; sem ele, o app oferece a mesma pergunta (`ConsentimentoLeituraView`).
 - **Ajuste necessário:** o texto atual fala em "foto do comprovante". Passa a dizer "foto ou arquivo (comprovante ou fatura)". Quem já respondeu "sim" aceitou só comprovante, e a fatura tem mais dado pessoal; por isso, **além do interruptor**, a primeira importação mostra um aviso de uma tela, com **Continuar** e **Agora não**, guardado em `Consentimento.avisoFatura`:
-  - "A fatura vai para o Google Gemini para ler as compras. Pode ter seu nome e endereço. O arquivo não fica guardado no SoftSpend, só as compras que você confirmar. OFX e CSV não vão para a IA."
-  - É informativo, não um segundo interruptor.
+  - **Texto final do aviso (F2, decidido em 13/11):**
+    - Título: "Antes de importar sua fatura"
+    - Corpo: "Para ler os gastos, o SoftSpend envia o PDF da fatura a um serviço de inteligência artificial (Google Gemini), que devolve a lista de compras. A fatura pode ter seu nome, endereço e os 4 últimos números do cartão. O arquivo não fica guardado no SoftSpend: só as compras que você confirmar. Arquivos OFX e CSV são lidos pelo nosso servidor e não vão para a IA."
+    - Botões: **Continuar** (segue para escolher o arquivo) e **Agora não** (volta sem enviar nada e sem marcar o aviso como visto, então ele reaparece na próxima vez).
+  - É informativo, não um segundo interruptor. Aparece uma vez, antes do primeiro envio de PDF, depois de `Consentimento.leituraAutomatica` estar ligado; "Continuar" grava `Consentimento.avisoFatura`. Para OFX e CSV não há aviso, pois nada vai a terceiros.
+  - Se a Política de Privacidade ou o plano do Gemini (G1) mudarem o que é dito sobre retenção, este texto e a ficha da App Store mudam juntos. Não prometer "o Google não guarda" enquanto o G1 não estiver resolvido.
 - **A chave do Gemini no plano pago (G1) é pré-requisito para qualquer pessoa de fora usar isto.** A fatura é mais sensível que um comprovante; no plano gratuito o Google pode usar o conteúdo para melhorar os modelos (`docs/publicacao.md` §2.1). Pode-se desenvolver e testar antes; **não liberar ao público** sem G1.
 - **O servidor não registra** conteúdo da fatura, descrições nem valores em log (só tamanho, páginas, número de compras, tempo e tokens). Nunca loga a senha do PDF.
 - **O que muda na Política de Privacidade** (`docs/publicacao.md` §2; rascunho do Claude, revisão no U8):
