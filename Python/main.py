@@ -3,7 +3,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
@@ -18,7 +18,7 @@ from controllers.fatura_controller import router as fatura_router
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from limiter import limiter
+from limiter import limiter, get_real_ip
 from logging_config import setup_logging
 from middlewares import (
     RequestIDMiddleware,
@@ -87,8 +87,15 @@ def features():
     return {"open_finance": OPEN_FINANCE_ENABLED}
 
 
+def _healthcheck_local(request: Request) -> bool:
+    # O health check do deploy vai direto ao uvicorn (127.0.0.1:8000); levar
+    # 429 ali quebraria o retry do deploy.yml.
+    return get_real_ip(request) in ("127.0.0.1", "::1")
+
+
 @app.get("/health", include_in_schema=False)
-def health_check(db: Session = Depends(get_db)):
+@limiter.limit("30/minute", exempt_when=_healthcheck_local)
+def health_check(request: Request, db: Session = Depends(get_db)):
     try:
         db.execute(text("SELECT 1"))
         return JSONResponse(content={"status": "ok"})

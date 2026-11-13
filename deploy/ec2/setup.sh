@@ -50,6 +50,40 @@ sudo systemctl enable "$SERVICE_NAME"
 sudo systemctl restart "$SERVICE_NAME"
 
 # ---------------------------------------------------------------------------
+# Backup diario do MySQL (docs/backup-mysql.md, §3 e §12)
+#
+# Instala o timer, mas so o liga quando /etc/softspend/backup.env tem o
+# bucket e /etc/softspend/backup.cnf existe (criados pelo roteiro do §12).
+# Nunca sobrescreve esses dois arquivos.
+# ---------------------------------------------------------------------------
+echo "Instalando backup do MySQL..."
+BACKUP_ETC=/etc/softspend
+sudo install -d -m 700 -o root -g root "$BACKUP_ETC"
+sudo install -d -m 700 -o root -g root /var/backups/softspend
+if [ ! -f "$BACKUP_ETC/backup.env" ]; then
+    sudo install -m 600 -o root -g root "$(dirname "$0")/backup.env.example" "$BACKUP_ETC/backup.env"
+fi
+# Log criado como ubuntu para o logrotate (que roda como ubuntu) conseguir
+# compactar; o root so acrescenta linhas.
+sudo touch "$LOG_DIR/backup.log"
+sudo chown ubuntu:ubuntu "$LOG_DIR/backup.log"
+sudo chmod 640 "$LOG_DIR/backup.log"
+sudo cp "$(dirname "$0")/softspend-backup.service" "$(dirname "$0")/softspend-backup.timer" /etc/systemd/system/
+sudo systemctl daemon-reload
+if ! command -v mysqldump >/dev/null; then
+    echo "AVISO: mysqldump nao encontrado; o backup nao vai funcionar."
+fi
+if sudo grep -Eq '^BACKUP_S3_BUCKET=[^[:space:]]+' "$BACKUP_ETC/backup.env" \
+        && sudo test -f "$BACKUP_ETC/backup.cnf"; then
+    sudo systemctl enable --now softspend-backup.timer
+    echo "Timer do backup ligado: systemctl list-timers softspend-backup.timer"
+else
+    echo "AVISO: backup instalado mas desligado. Preencha BACKUP_S3_BUCKET em"
+    echo "      $BACKUP_ETC/backup.env e crie $BACKUP_ETC/backup.cnf"
+    echo "      (docs/backup-mysql.md §12) e rode este script de novo."
+fi
+
+# ---------------------------------------------------------------------------
 # nginx + TLS
 #
 # A config final referencia os certificados do Let's Encrypt. Numa maquina nova

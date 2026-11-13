@@ -20,15 +20,17 @@ struct ComoLigarApplePayView: View {
 
                 secao("Como ligar")
                 grupo {
-                    passo(1, "Abra o app **Atalhos** → aba **Automação** → **+** → **Transação** (em alguns iOS aparece como **Carteira**).")
+                    passo(1, "Abra o app **Atalhos** → aba **Automação** → **+** → **Transação** (no iOS 26 aparece como **Carteira**).")
                     divisoria
-                    passo(2, "Escolha os cartões que quer acompanhar e marque **Executar imediatamente**.")
+                    passo(2, "Em **Cartões**, marque só os cartões que devem gravar gasto no SoftSpend. Com **Qualquer cartão** marcado, **todas as compras entram** — inclusive as de cartões que você não quer no app.")
                     divisoria
-                    passo(3, "Toque em **Criar novo atalho**, procure **SoftSpend → Registrar gasto** e preencha: Valor = **Valor**, Estabelecimento = **Estabelecimento**, Cartão = **Cartão ou passe**.")
+                    passo(3, "Marque **Executar imediatamente**.")
                     divisoria
-                    passo(4, "Desligue **Notificar quando executar** (opcional, para não receber um aviso a cada compra).")
+                    passo(4, "Toque em **Criar novo atalho**, procure **SoftSpend → Registrar gasto** e preencha: Valor = **Valor**, Estabelecimento = **Estabelecimento**, Cartão = **Cartão ou passe**.")
                     divisoria
-                    passo(5, "Pague algo com o Apple Pay e confira no app.")
+                    passo(5, "Desligue **Notificar quando executar** (opcional, para não receber um aviso a cada compra).")
+                    divisoria
+                    passo(6, "Pague algo com o Apple Pay e confira no app.")
                 }
 
                 secao("O que esperar")
@@ -42,6 +44,8 @@ struct ComoLigarApplePayView: View {
                     item("Só reais; compra em outra moeda é recusada com aviso.")
                     divisoria
                     item("O app escolhe a categoria pelo nome do local; confira e troque se precisar.")
+                    divisoria
+                    item("Os cartões que já compraram aparecem em **Perfil → Cartões do Apple Pay**, cada um com uma chave liga/desliga. Desligado, a compra é ignorada — e os gastos já lançados ficam.")
                     divisoria
                     item("Nada sai do seu iPhone para outro serviço: o gasto é gravado no app e sobe só para o servidor do SoftSpend, como qualquer gasto.")
                 }

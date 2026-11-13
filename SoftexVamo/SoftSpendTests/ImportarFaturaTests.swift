@@ -122,14 +122,26 @@ struct ImportarFaturaTests {
     /// ViewModel pronto: leitura por IA permitida e aviso já visto — o PDF
     /// vai direto. `criarGasto` imita o `createNewGasto` (insert + save,
     /// `.pending` por padrão) e anota o passo na linha do tempo da API.
-    func viewModel(para ciclo: CicloSoftex, criandoGastos: Bool = true) -> ImportarFaturaViewModel {
+    /// `falhandoEm`: índices de compra cujo `criarGasto` lança erro.
+    func viewModel(
+        para ciclo: CicloSoftex,
+        criandoGastos: Bool = true,
+        falhandoEm: Set<Int> = [],
+        sincronizar: @escaping @MainActor () async -> Void = {},
+        tetoSync: Duration = .seconds(20)
+    ) -> ImportarFaturaViewModel {
         Consentimento.gravar(true, em: suite)
         Consentimento.gravarAvisoFatura(true, em: suite)
         let vm = ImportarFaturaViewModel(
             ciclo: ciclo, api: api,
-            sincronizar: {},
+            sincronizar: sincronizar,
             criarGasto: { compra, dia in
                 self.api.marcar("criarGasto")
+                if falhandoEm.contains(compra.indice) {
+                    throw APIError.serverError(
+                        message: "falha simulada", requestId: "-", statusCode: 500
+                    )
+                }
                 guard criandoGastos else { return }
                 let gasto = GastosDia(
                     valor: compra.valor,
@@ -140,7 +152,8 @@ struct ImportarFaturaTests {
                 ctx.insert(gasto)
                 try ctx.save()
             },
-            defaults: suite
+            defaults: suite,
+            tetoSync: tetoSync
         )
         vm.contexto = ctx
         return vm
@@ -495,5 +508,100 @@ struct ImportarFaturaTests {
         let vm = viewModel(para: ciclo)
         await conferindo(vm)
         #expect(api.cicloIds == [100])
+    }
+
+    // MARK: - Limpeza pós-revisão
+
+    /// Fatura sem vencimento (CSV/OFX sem data): a conferência pede a data
+    /// e ela vai no envio — o POST não chega a falhar com 422.
+    @Test func faturaSemVencimentoUsaDataInformada() async throws {
+        let (ciclo, _) = try viagem()
+        let vm = viewModel(para: ciclo)
+        var fatura = faturaPadrao()
+        fatura.vencimento = nil
+        await conferindo(vm, fatura: fatura)
+
+        #expect(vm.precisaVencimento)
+        // O padrão do campo é a data da última compra lida.
+        #expect(Calendar.current.isDate(vm.vencimentoInformado, inSameDayAs: dia(1, mes: 8)))
+
+        let escolhido = dia(10, mes: 8)
+        vm.vencimentoInformado = escolhido
+        api.detalhe = detalhePadrao()
+        await vm.importar()
+
+        #expect(vm.etapa == .pronto)
+        #expect(try #require(api.enviada).vencimento.map {
+            Calendar.current.isDate($0, inSameDayAs: escolhido)
+        } == true)
+    }
+
+    /// Com vencimento vindo do arquivo, vai o lido — nada é pedido.
+    @Test func faturaComVencimentoNaoPedeData() async throws {
+        let (ciclo, _) = try viagem()
+        let vm = viewModel(para: ciclo)
+        await conferindo(vm)
+
+        #expect(!vm.precisaVencimento)
+        api.detalhe = detalhePadrao()
+        await vm.importar()
+
+        #expect(api.enviada?.vencimento.map {
+            Calendar.current.isDate($0, inSameDayAs: dia(5, mes: 8))
+        } == true)
+    }
+
+    /// `criarGasto` que falha vai para o log, mas o resumo conta a falha —
+    /// o gasto não some como se tivesse sido criado.
+    @Test func gastoQueFalhaContaNoResumo() async throws {
+        let (ciclo, _) = try viagem()
+        let vm = viewModel(para: ciclo, falhandoEm: [1])
+        await conferindo(vm)
+        vm.marcarTodas() // compras 1 e 2 marcadas
+        api.detalhe = detalhePadrao()
+
+        await vm.importar()
+
+        #expect(vm.etapa == .pronto)
+        #expect(vm.resumoImportacao.contains("1 gasto criado"))
+        #expect(vm.resumoImportacao.contains("1 gasto não foi criado"))
+        #expect(try gastosLocais().filter { $0.backendId == nil }.count == 1)
+    }
+
+    /// Sync travado (rede ruim) não segura a leitura: passado o teto, o
+    /// `ler` segue — o sync continua sozinho em background.
+    @Test func syncTravadoNaoSeguraALeitura() async throws {
+        let (ciclo, _) = try viagem()
+        var syncTerminou = false
+        let vm = viewModel(
+            para: ciclo,
+            sincronizar: {
+                try? await Task.sleep(for: .seconds(60))
+                syncTerminou = true
+            },
+            tetoSync: .milliseconds(50)
+        )
+
+        await conferindo(vm)
+
+        #expect(vm.etapa == .conferindo) // não esperou os 60 s do sync
+        #expect(!syncTerminou)
+    }
+
+    /// Folha fechada no meio da leitura: `cancelarLeitura` cancela a `Task`
+    /// — a prévia nem chega a ser aplicada.
+    @Test func folhaFechadaCancelaALeituraEmVoo() async throws {
+        let (ciclo, _) = try viagem()
+        let vm = viewModel(para: ciclo)
+        api.lida = faturaPadrao()
+        api.atrasoLeitura = .seconds(60)
+
+        vm.receber(dados: Data([1, 2, 3]), tipo: .ofx, nome: "fatura.ofx")
+        try await Task.sleep(for: .milliseconds(150)) // leitura em voo
+        vm.cancelarLeitura()
+        try await Task.sleep(for: .milliseconds(150))
+
+        #expect(vm.etapa == .lendo) // nunca chegou a .conferindo
+        #expect(vm.fatura == nil)
     }
 }

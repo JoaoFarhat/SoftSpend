@@ -24,6 +24,9 @@ nonisolated final class FakeFaturaAPI: FaturaAPI, @unchecked Sendable {
     )
     var erroAoLer: Error?
     var erroAoGravar: Error?
+    /// Atraso opcional antes de responder a leitura — simula servidor
+    /// lento, para testar o cancelamento da leitura em voo.
+    var atrasoLeitura: Duration?
 
     var chamadas: [String] { lock.lock(); defer { lock.unlock() }; return _chamadas }
     var enviada: FaturaLida? { lock.lock(); defer { lock.unlock() }; return _enviada }
@@ -48,8 +51,10 @@ nonisolated final class FakeFaturaAPI: FaturaAPI, @unchecked Sendable {
         _senhas.append(senha)
         _cicloIds.append(cicloId)
         let erro = erroAoLer
+        let atraso = atrasoLeitura
         lock.unlock()
         if let erro { throw erro }
+        if let atraso { try? await Task.sleep(for: atraso) }
         return lida
     }
 

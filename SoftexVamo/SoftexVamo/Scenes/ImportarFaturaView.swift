@@ -65,6 +65,12 @@ struct ImportarFaturaView: View {
             // O `init` não lê o environment: o contexto entra aqui.
             if vm.contexto == nil { vm.contexto = contexto }
         }
+        .onDisappear {
+            // Folha fechada no meio da leitura: a `Task` não segue em
+            // background (a importação já iniciada não é cancelada — ela
+            // está gravando de verdade e termina sozinha).
+            vm.cancelarLeitura()
+        }
     }
 
     @ViewBuilder
@@ -260,6 +266,9 @@ struct ImportarFaturaView: View {
             VStack(alignment: .leading, spacing: 0) {
                 cabecalho
                 avisos
+                if vm.precisaVencimento {
+                    campoVencimento
+                }
                 if vm.compras.isEmpty {
                     cartaoVazio("Nenhuma compra foi lida deste arquivo.")
                 } else {
@@ -337,6 +346,9 @@ struct ImportarFaturaView: View {
             if let avisoPendentes = vm.avisoPendentes {
                 faixa(avisoPendentes + ".")
             }
+            if vm.precisaVencimento {
+                faixa("O arquivo não trouxe o vencimento da fatura — informe a data para importar.")
+            }
             if let fatura = vm.fatura {
                 if fatura.somaConfere == false {
                     let diferenca = fatura.diferenca.map {
@@ -347,6 +359,25 @@ struct ImportarFaturaView: View {
                 ForEach(fatura.avisos, id: \.self) { faixa($0) }
             }
         }
+        .padding(.horizontal, Espaco.g + 2)
+        .padding(.top, Espaco.m)
+    }
+
+    /// Vencimento pedido quando o arquivo não trouxe a data (CSV/OFX sem
+    /// vencimento): vai no `POST /api/faturas`, que daria 422 sem ela.
+    private var campoVencimento: some View {
+        DatePicker(
+            "Vencimento da fatura",
+            selection: $vm.vencimentoInformado,
+            displayedComponents: .date
+        )
+        .font(.body.weight(.semibold))
+        .foregroundStyle(Tema.texto)
+        .tint(Tema.marcaTexto)
+        .environment(\.locale, Locale(identifier: "pt_BR"))
+        .padding(.horizontal, Espaco.g)
+        .padding(.vertical, Espaco.m)
+        .background(Tema.superficie, in: RoundedRectangle(cornerRadius: Raio.lista, style: .continuous))
         .padding(.horizontal, Espaco.g + 2)
         .padding(.top, Espaco.m)
     }

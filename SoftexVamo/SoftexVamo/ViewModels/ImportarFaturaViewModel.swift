@@ -134,6 +134,12 @@ final class ImportarFaturaViewModel: ObservableObject {
     @Published private(set) var resumoImportacao = ""
     /// Aviso local: gastos ainda não enviados podem aparecer como "faltam" (§2.5).
     @Published private(set) var avisoPendentes: String?
+    /// Vencimento que a pessoa informa quando o arquivo não traz a data
+    /// (CSV/OFX sem vencimento): sem ele o `POST /api/faturas` dá 422.
+    @Published var vencimentoInformado = Date()
+    /// `true` quando a leitura não achou o vencimento — a conferência pede
+    /// a data antes do "Importar" em vez de falhar com 422 no fim.
+    var precisaVencimento: Bool { fatura?.vencimento == nil }
 
     let ciclo: CicloSoftex
     /// Setado pela view no `task` (o `init` não lê o environment).
@@ -147,6 +153,13 @@ final class ImportarFaturaViewModel: ObservableObject {
     private var nomeArquivo = "fatura"
     private var tipoArquivo: ArquivoFatura.Tipo = .pdf
     private var gastosCriados = 0
+    private var gastosFalharam = 0
+    /// A `Task` da leitura, guardada para a folha cancelar pelo
+    /// `onDisappear` — uma leitura em voo não segue em background.
+    private var tarefaLeitura: Task<Void, Never>?
+    /// Teto da espera do `sync(forcar:)` antes da leitura (20 s em
+    /// produção; injetável para os testes não esperarem).
+    private let tetoSync: Duration
     private let logger = Logger(subsystem: "br.com.softspend", category: "ImportarFatura")
 
     init(
@@ -156,13 +169,15 @@ final class ImportarFaturaViewModel: ObservableObject {
             await SyncManager.shared.sync(forcar: true)
         },
         criarGasto: @escaping @MainActor (CompraLida, DiaSoftex) async throws -> Void,
-        defaults: UserDefaults = .standard
+        defaults: UserDefaults = .standard,
+        tetoSync: Duration = .seconds(20)
     ) {
         self.ciclo = ciclo
         self.api = api
         self.sincronizar = sincronizar
         self.criarGasto = criarGasto
         self.defaults = defaults
+        self.tetoSync = tetoSync
     }
 
     // MARK: - Arquivo e consentimento
@@ -181,7 +196,7 @@ final class ImportarFaturaViewModel: ObservableObject {
     /// leitura. Os testes chamam `preparar` + `await ler()` direto.
     func receber(dados: Data, tipo: ArquivoFatura.Tipo, nome: String) {
         guard preparar(dados: dados, tipo: tipo, nome: nome) else { return }
-        Task { await ler() }
+        dispararLeitura()
     }
 
     /// Só a decisão, sem efeito assíncrono. `true` = pode chamar `ler()`.
@@ -210,7 +225,7 @@ final class ImportarFaturaViewModel: ObservableObject {
     /// Caminho da view: resposta da `ConsentimentoLeituraView`.
     func responderConsentimento(_ permitiu: Bool) {
         guard decidirConsentimento(permitiu) else { return }
-        Task { await ler() }
+        dispararLeitura()
     }
 
     /// Só a decisão, sem efeito assíncrono. `true` = pode chamar `ler()`.
@@ -231,7 +246,22 @@ final class ImportarFaturaViewModel: ObservableObject {
     /// "Continuar" do aviso da primeira importação (§2.8).
     func continuarAvisoFatura() {
         Consentimento.gravarAvisoFatura(true, em: defaults)
-        Task { await ler() }
+        dispararLeitura()
+    }
+
+    /// Dispara `ler()` numa `Task` guardada — o `onDisappear` da folha
+    /// cancela por `cancelarLeitura()` para a leitura não seguir em
+    /// background depois de fechar.
+    private func dispararLeitura() {
+        tarefaLeitura?.cancel()
+        tarefaLeitura = Task { await ler() }
+    }
+
+    /// `onDisappear` da folha: cancela a leitura em voo. Nada foi gravado
+    /// (a leitura é só prévia), então parar no meio não deixa pendência.
+    func cancelarLeitura() {
+        tarefaLeitura?.cancel()
+        tarefaLeitura = nil
     }
 
     /// "Agora não" do aviso (não grava: aparece de novo na próxima importação)
@@ -253,7 +283,8 @@ final class ImportarFaturaViewModel: ObservableObject {
         case .escolhendo, .consentindo, .pedindoSenha, .erro: break
         }
         etapa = .lendo
-        await sincronizar()
+        await sincronizarComTeto()
+        guard !Task.isCancelled else { return }
         do {
             let lida = try await api.lerFatura(
                 arquivo: arquivo,
@@ -264,6 +295,11 @@ final class ImportarFaturaViewModel: ObservableObject {
             )
             guard !Task.isCancelled else { return }
             fatura = lida
+            if lida.vencimento == nil {
+                // CSV/OFX podem não trazer vencimento: a pessoa informa na
+                // conferência; o padrão é a data da última compra lida.
+                vencimentoInformado = lida.compras.map(\.data).max() ?? Date()
+            }
             compras = lida.compras.map {
                 CompraConferencia(compra: $0, dia: diaPara($0.data))
             }
@@ -287,7 +323,26 @@ final class ImportarFaturaViewModel: ObservableObject {
     /// "Ler" da tela de senha do PDF.
     func enviarSenha() {
         guard !senha.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        Task { await ler() }
+        dispararLeitura()
+    }
+
+    /// O `sync(forcar:)` antes da leitura é um aquecimento: com a rede
+    /// ruim ele não pode segurar a tela — espera no máximo `tetoSync` e a
+    /// leitura segue. O sync **não é cancelado** (continua sozinho em
+    /// background): cancelar marcaria os itens em voo como `.failed` no
+    /// `SyncActor`, um backoff que não existiria sem a tela.
+    private func sincronizarComTeto() async {
+        let corrida = CorridaDoTeto()
+        await withCheckedContinuation { (continuacao: CheckedContinuation<Void, Never>) in
+            Task {
+                await self.sincronizar()
+                if await corrida.responder() { continuacao.resume() }
+            }
+            Task {
+                try? await Task.sleep(for: self.tetoSync)
+                if await corrida.responder() { continuacao.resume() }
+            }
+        }
     }
 
     // MARK: - Conferência (três grupos + estornos/encargos)
@@ -309,10 +364,7 @@ final class ImportarFaturaViewModel: ObservableObject {
     /// "Faltam na viagem": compras dentro das datas sem vínculo (ou
     /// desvinculadas), desmarcadas por padrão (§2.5).
     var faltam: [CompraConferencia] {
-        compras.filter {
-            $0.dia != nil && $0.compra.tipo == .compra
-                && ($0.compra.match == nil || $0.desvinculada)
-        }
+        compras.filter(ehFaltam)
     }
 
     /// Estornos e encargos dentro da viagem: aparecem na lista, mas nunca
@@ -384,10 +436,16 @@ final class ImportarFaturaViewModel: ObservableObject {
         guard etapa == .conferindo, let fatura else { return }
         etapa = .importando
         var envio = fatura
+        // CSV/OFX podem não trazer vencimento: a data informada na
+        // conferência vai no envio — sem ela o POST responderia 422.
+        if envio.vencimento == nil {
+            envio.vencimento = vencimentoInformado
+        }
         // "As compras mantidas": tudo o que ficou na conferência dentro da
         // viagem — já lançadas, faltam (marcadas ou não), estornos e encargos.
         envio.compras = compras.filter { $0.dia != nil }.map(\.compra)
         gastosCriados = 0
+        gastosFalharam = 0
         do {
             var detalhe = try await api.gravarFatura(envio)
             for item in compras where item.marcada && ehFaltam(item) {
@@ -396,6 +454,7 @@ final class ImportarFaturaViewModel: ObservableObject {
                     try await criarGasto(item.compra, dia)
                     gastosCriados += 1
                 } catch {
+                    gastosFalharam += 1
                     logger.error("Gasto da fatura não criado: \(error.localizedDescription, privacy: .public)")
                 }
             }
@@ -472,8 +531,11 @@ final class ImportarFaturaViewModel: ObservableObject {
         var partes: [String] = []
         if gastosCriados > 0 {
             partes.append("\(gastosCriados) \(gastosCriados == 1 ? "gasto criado" : "gastos criados")")
-        } else {
+        } else if gastosFalharam == 0 {
             partes.append("nenhum gasto novo")
+        }
+        if gastosFalharam > 0 {
+            partes.append("\(gastosFalharam) \(gastosFalharam == 1 ? "gasto não foi criado" : "gastos não foram criados")")
         }
         let vinculadas = jaLancadas.count
         if vinculadas > 0 {
@@ -503,5 +565,18 @@ final class ImportarFaturaViewModel: ObservableObject {
             titulo = "\(titulo) (\(parcela))"
         }
         return titulo
+    }
+}
+
+/// Quem vence a corrida do `sincronizarComTeto`: o primeiro `responder()`
+/// devolve `true` e retoma a continuação; o segundo é no-op (uma
+/// `CheckedContinuation` não pode ser retomada duas vezes).
+private actor CorridaDoTeto {
+    private var respondeu = false
+
+    func responder() -> Bool {
+        if respondeu { return false }
+        respondeu = true
+        return true
     }
 }

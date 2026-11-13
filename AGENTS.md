@@ -227,11 +227,14 @@ Spec: `docs/cartao-sem-open-finance.md` §1 (partes A e B implementadas).
 - `Intents/SoftSpendAtalhos.swift` — `AppShortcutsProvider` com frases em
   português contendo `\(.applicationName)` (exigência da Apple).
 - `Services/RegistroApplePay.swift` — regra pura (recebe `ModelContext`,
-  `userId`, `agora`, `calendario`, fila): parse do valor (`ValorDaCompra`),
-  categoria por `InterpretadorComprovante.inferirCategoria`, dia de hoje da
-  viagem aberta (em sobreposição, a de primeiro dia mais recente), duplicata
-  em janela deslizante de 60 s (mesmo valor + estabelecimento normalizado, em
-  gasto vivo **ou** item da fila). Sem viagem/dia de hoje, vai para a fila.
+  `userId`, `agora`, `calendario`, fila, cartoes): filtro por cartão
+  (`CartoesApplePay.registrarChegada` — todo nome que chega entra na lista,
+  desligado devolve `.ignoradoCartaoDesligado` antes de gravar ou ir para a
+  fila), parse do valor (`ValorDaCompra`), categoria por
+  `InterpretadorComprovante.inferirCategoria`, dia de hoje da viagem aberta
+  (em sobreposição, a de primeiro dia mais recente), duplicata em janela
+  deslizante de 60 s (mesmo valor + estabelecimento normalizado, em gasto
+  vivo **ou** item da fila). Sem viagem/dia de hoje, vai para a fila.
 - `Services/UsuarioSalvo.swift` — `userId` lido do `user_data` do
   `UserDefaults` **sem Keychain**: a ação pode rodar com o iPhone trancado e o
   token é `WhenUnlockedThisDeviceOnly`. Sem `user_data`, recusa
@@ -249,6 +252,16 @@ Spec: `docs/cartao-sem-open-finance.md` §1 (partes A e B implementadas).
   **lança** quando a leitura ou a gravação falha (o `registrar` propaga e
   a ação responde "lance no app"), enquanto `remover` só loga e deixa o
   item.
+- `Services/CartoesApplePay.swift` — cartões que já chegaram pela ação, em
+  JSON (`Application Support/cartoes-apple-pay.json`, por usuário, mesmas
+  regras de arquivo da fila: fora do SwiftData, escrita atômica, `NSLock`,
+  corrompido para quarentena). O nome é o `cartao` do intent aparado; sem
+  nome vira `"Cartão sem nome"` (`nomePadrao`). `registrarChegada` cria o
+  cartão **ligado**, atualiza `vistoEm` e devolve `ligado`; **lança** em
+  falha de leitura/gravação (sem a lista não dá para saber se está ligado).
+  `definirLigado` só loga em falha. No Perfil, a seção "Cartões do Apple
+  Pay" lista os cartões com uma chave cada (`recarregarCartoes` no
+  `onAppear`); desligar não apaga gastos já lançados.
 - Aviso da fila no `InicioView` (`AlertaPendencia` com `textoComprasApplePay`,
   lido por `recarregarFila` no `task(id: hoje)`) e folha
   `Scenes/ComprasSemViagemView.swift`: cada item mostra estabelecimento,
@@ -262,7 +275,9 @@ Spec: `docs/cartao-sem-open-finance.md` §1 (partes A e B implementadas).
   item da fila depois do `save` e grava `criadoEm = recebidaEm`.
 - `Scenes/ComoLigarApplePayView.swift` — tela de ajuda na seção Preferências
   de `PerfilView` (linha "Apple Pay (atalho)"); a automação é criada pelo
-  usuário no app Atalhos (a Apple não permite criar pelo app).
+  usuário no app Atalhos (a Apple não permite criar pelo app). O passo a
+  passo ensina a marcar, em **Cartões**, só os cartões que devem entrar —
+  com "Qualquer cartão", todas as compras entram.
 
 ### Pegadinhas SwiftData / SwiftUI (crashes conhecidos)
 
@@ -541,6 +556,13 @@ em `DetalheViagemView` ("Importar fatura do cartão", `.sheet`):
   "Desvincular"/"Confirmar" da conferência refeitos no servidor (o `match` da
   prévia não tem id; o vínculo é localizado pelo `gasto_id`). Falha na
   gravação → nenhum gasto criado.
+- Sem `vencimento` no arquivo (CSV/OFX sem a data), a conferência mostra um
+  `DatePicker` (`vencimentoInformado`, padrão = data da última compra) e a
+  data vai no envio — sem ela o `POST /api/faturas` responde 422.
+- O `sync(forcar:)` antes da leitura tem teto (`tetoSync`, 20 s): estourado,
+  a leitura segue e o sync continua em background — **não é cancelado**,
+  senão os itens em voo ganhariam `.failed`+backoff no `SyncActor`. A `Task`
+  da leitura é cancelada no `onDisappear` da folha (`cancelarLeitura`).
 
 | Variável | Default | Descrição |
 | --- | --- | --- |
@@ -588,6 +610,26 @@ Foram adicionados dois mecanismos:
    - Adiciona `Strict-Transport-Security` nas respostas HTTPS.
    - Requisicoes diretas (sem o header) nao sao redirecionadas, permitindo
      health checks locais HTTP.
+
+O `GET /health` consulta o banco (`SELECT 1`), entao tem rate limit em duas
+camadas. No nginx (`deploy/ec2/nginx-softspend.conf`), `limit_req_zone` +
+`location = /health` seguram 30 r/m por IP real (burst 10, responde 429) e
+funcionam mesmo com `TRUST_PROXY=false`. No codigo,
+`@limiter.limit("30/minute")` (mesmo slowapi das rotas), com
+`exempt_when=_healthcheck_local` — IP resolvido loopback (`127.0.0.1`/`::1`)
+nao conta, porque o health check do `deploy.yml` vai direto ao uvicorn
+(`curl 127.0.0.1:8000`, sem passar pelo nginx) e um 429 ali quebraria o
+deploy.
+
+Pegadinha de teste: os fixtures que fazem `sys.modules.pop("main")` +
+`import_module("main")` acumulam uma copia do `Limit` em
+`limiter._route_limits` a cada reimportacao — uma unica requisicao passa a
+custar N hits no mesmo bucket. Por isso os testes de HSTS desligam o limiter
+(`limiter.enabled = False`, padrao dos outros arquivos) e os testes do limite
+de `/health` truncam `_route_limits["main.health_check"]` para uma copia via
+`_uma_copia_do_limite_de_health` (a copia recente pertence ao `main` mais
+novo; o `__globals__` do `exempt_when` dela e onde o patch de `get_real_ip`
+faz efeito).
 
 2. **Config nginx** (`deploy/ec2/nginx-softspend.conf`):
    - Escuta `80` e redireciona tudo para HTTPS.
@@ -654,6 +696,10 @@ Arquivos para rodar a API como serviço systemd e rotacionar logs:
 - `deploy/ec2/softspend.service` — serviço systemd
 - `deploy/ec2/logrotate-softspend` — rotação diária de logs
 - `deploy/ec2/setup.sh` — instala tudo no servidor
+- `deploy/ec2/backup-mysql.sh`, `backup_mysql.py`, `softspend-backup.service`/`.timer`
+  e `backup.env.example` — backup diário do MySQL para o S3 (`docs/backup-mysql.md`;
+  roteiro de instalação no §12). O `setup.sh` instala o timer desligado até existirem
+  `/etc/softspend/backup.env` com o bucket e `/etc/softspend/backup.cnf`.
 
 Configure uma única vez no EC2:
 
