@@ -1,0 +1,125 @@
+{
+  "identifier": "50F75E00",
+  "nonRenewingSubscriptions": [],
+  "products": [],
+  "settings": {
+    "_developerTeamID": "DHFGW8SG9X",
+    "_failTransactionsEnabled": false,
+    "_locale": "pt_BR",
+    "_storefront": "BRA",
+    "_storeKitErrors": [
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Load Products"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Purchase"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Verification"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "App Store Sync"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Subscription Status"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "App Transaction"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Manage Subscriptions Sheet"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Refund Request Sheet"
+      },
+      {
+        "current": null,
+        "enabled": false,
+        "name": "Offer Code Redeem Sheet"
+      }
+    ]
+  },
+  "subscriptionGroups": [
+    {
+      "id": "50F75E01",
+      "localizations": [],
+      "name": "SoftSpend",
+      "subscriptions": [
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "144.90",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "50F75E11",
+          "introductoryOffer": {
+            "internalID": "50F75E21",
+            "numberOfPeriods": 1,
+            "paymentMode": "free",
+            "subscriptionPeriod": "P2W"
+          },
+          "localizations": [
+            {
+              "description": "Viagens novas, leitura por IA e relatórios, com cobrança anual.",
+              "displayName": "SoftSpend Anual",
+              "locale": "pt_BR"
+            }
+          ],
+          "productID": "br.com.softspend.app.assinatura.anual",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "SoftSpend Anual",
+          "subscriptionGroupID": "50F75E01",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        },
+        {
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "14.90",
+          "familyShareable": false,
+          "groupNumber": 2,
+          "internalID": "50F75E10",
+          "introductoryOffer": {
+            "internalID": "50F75E20",
+            "numberOfPeriods": 1,
+            "paymentMode": "free",
+            "subscriptionPeriod": "P2W"
+          },
+          "localizations": [
+            {
+              "description": "Viagens novas, leitura por IA e relatórios, com cobrança mensal.",
+              "displayName": "SoftSpend Mensal",
+              "locale": "pt_BR"
+            }
+          ],
+          "productID": "br.com.softspend.app.assinatura.mensal",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "SoftSpend Mensal",
+          "subscriptionGroupID": "50F75E01",
+          "type": "RecurringSubscription",
+          "winbackOffers": []
+        }
+      ]
+    }
+  ],
+  "version": {
+    "major": 4,
+    "minor": 0
+  }
+}
