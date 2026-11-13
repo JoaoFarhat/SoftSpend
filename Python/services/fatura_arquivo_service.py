@@ -17,13 +17,12 @@ from decimal import Decimal, InvalidOperation
 import filetype
 from fastapi import UploadFile
 
-from dtos.fatura import CompraLida, FaturaLida
+from dtos.fatura import MAXIMO_COMPRAS, CompraLida, FaturaLida
 from enums.categoria_enum import Categoria
 
 TAMANHO_MAXIMO_PDF = 10 * 1024 * 1024
 TAMANHO_MAXIMO_TEXTO = 2 * 1024 * 1024
 MAXIMO_PAGINAS_PDF = 20
-MAXIMO_COMPRAS = 200
 VALOR_MAXIMO_COMPRA = Decimal("100000")
 TOLERANCIA_SOMA = Decimal("0.05")
 JANELA_DIAS_ANTES_FECHAMENTO = 40

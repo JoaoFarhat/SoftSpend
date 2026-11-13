@@ -439,6 +439,108 @@ def test_post_faturas_so_grava_as_compras_enviadas(ambiente):
     assert ambiente.session.query(models.CreditCardTransaction).count() == 2
 
 
+def test_post_faturas_sem_vencimento_da_422(ambiente):
+    """Fatura sem `vencimento` (CSV, OFX sem DTASOF) não tem chave: seria
+    achada por `due_date IS NULL` e meses diferentes virariam a mesma
+    fatura com o total sobrescrito. Recusa com 422 e não grava nada."""
+    import models
+
+    client = ambiente.como(USER_A)
+    lida = _ler(client, _ofx([("DEBIT", _data(INICIO), "-10.00", "CAFE")]))
+    lida["vencimento"] = None
+
+    resposta = client.post("/api/faturas", json=lida)
+    assert resposta.status_code == 422
+    assert ambiente.session.query(models.CreditCardBill).count() == 0
+    assert ambiente.session.query(models.CreditCardTransaction).count() == 0
+
+
+def test_post_faturas_limites_do_dto_na_borda(ambiente):
+    """O Pydantic recusa antes de montar o corpo todo: `compras` acima de
+    `MAXIMO_COMPRAS` e `descricao` acima do teto dão 422, não 413/500."""
+    from dtos.fatura import MAXIMO_COMPRAS
+
+    client = ambiente.como(USER_A)
+    lida = _ler(client, _ofx([("DEBIT", _data(INICIO), "-10.00", "CAFE")]))
+
+    cheia = dict(lida)
+    cheia["compras"] = [lida["compras"][0]] * (MAXIMO_COMPRAS + 1)
+    assert client.post("/api/faturas", json=cheia).status_code == 422
+
+    longa = dict(lida)
+    longa["compras"] = [dict(lida["compras"][0], descricao="x" * 501)]
+    assert client.post("/api/faturas", json=longa).status_code == 422
+
+
+def test_gravar_fatura_refaz_busca_em_corrida(ambiente, monkeypatch):
+    """Duas gravações da mesma fatura no mesmo cartão calculam o mesmo
+    `transaction_id`: a segunda bate na unicidade no `flush`, refaz a
+    busca e termina sem erro nem duplicata — em vez de 500."""
+    import models
+    from sqlalchemy.orm import Session as _Session
+
+    from dtos.fatura import CompraLida, FaturaLida
+    from services import fatura_service
+
+    session = ambiente.session
+    # O cartão precisa já existir comitado e casar com a `lida` (sem emissor
+    # nem final): o `account_id` dele entra no hash — com cartões diferentes
+    # os `transaction_id` não colidem.
+    session.add(
+        models.CreditCardAccount(
+            user_id=USER_A,
+            conexao_id=None,
+            origem="FATURA",
+            account_id="fatura:cartao-da-corrida",
+            institution_name=None,
+            number_last4=None,
+            name="Cartão importado",
+            currency_code="BRL",
+        )
+    )
+    session.commit()
+
+    lida = FaturaLida(
+        vencimento=date(2026, 10, 20),
+        compras=[
+            CompraLida(
+                indice=0,
+                data=INICIO,
+                descricao="CAFE",
+                valor=Decimal("10.00"),
+            )
+        ],
+    )
+
+    # A "outra requisição" grava e comita a mesma fatura no meio do nosso
+    # primeiro flush — o mesmo furo entre a busca de existentes e o insert.
+    engine = session.get_bind()
+    flush_real = _Session.flush
+    rival_feita = False
+
+    def flush_com_rival(self, *args, **kwargs):
+        nonlocal rival_feita
+        if self is session and not rival_feita:
+            rival_feita = True
+            outra = _Session(engine)
+            try:
+                fatura_service.gravar_fatura(outra, USER_A, lida)
+                outra.commit()
+            finally:
+                outra.close()
+        return flush_real(self, *args, **kwargs)
+
+    monkeypatch.setattr(_Session, "flush", flush_com_rival)
+
+    fatura = fatura_service.gravar_fatura(session, USER_A, lida)
+    session.commit()
+
+    assert fatura.id is not None
+    assert session.query(models.CreditCardAccount).count() == 1
+    assert session.query(models.CreditCardBill).count() == 1
+    assert session.query(models.CreditCardTransaction).count() == 1
+
+
 def test_post_faturas_funciona_com_open_finance_desligado(ambiente):
     client = ambiente.como(USER_A)
     detalhe = _gravar(

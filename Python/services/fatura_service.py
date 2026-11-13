@@ -15,14 +15,14 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
 
-from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, selectinload
 
 import models
-from dtos.fatura import FaturaLida, MatchPrevia
+from dtos.fatura import MAXIMO_COMPRAS, FaturaLida, MatchPrevia
 from services import open_finance_reconciliation_service
 from services.fatura_arquivo_service import (
     ErroFatura,
-    MAXIMO_COMPRAS,
     VALOR_MAXIMO_COMPRA,
 )
 
@@ -65,6 +65,11 @@ def marcar_previa(
     """
     ciclo = (
         session.query(models.Ciclo)
+        .options(
+            selectinload(models.Ciclo.dias)
+            .selectinload(models.Dia.gastos)
+            .selectinload(models.Gasto.open_finance_match)
+        )
         .filter(
             models.Ciclo.id == ciclo_id,
             models.Ciclo.id_usuario == user_id,
@@ -252,13 +257,31 @@ def gravar_fatura(
     """Grava a fatura e as compras enviadas, de forma idempotente.
 
     Só as compras que o app mandou (as que a pessoa deixou na conferência)
-    são gravadas; compras repetidas de uma reimportação são puladas.
+    são gravadas; compras repetidas de uma reimportação são puladas. Sem
+    `vencimento` a fatura não tem chave (seria achada por `due_date IS NULL`
+    e meses diferentes virariam a mesma fatura): 422.
+
+    Duas gravações simultâneas da mesma fatura calculam o mesmo
+    `transaction_id` e a segunda bate na unicidade no `flush`: refaz a
+    busca uma vez — as repetidas passam a constar como existentes.
     """
     if len(lida.compras) > MAXIMO_COMPRAS:
         raise ErroFatura(
             413, f"Fatura com mais de {MAXIMO_COMPRAS} compras"
         )
+    if lida.vencimento is None:
+        raise ErroFatura(422, "Informe o vencimento da fatura")
 
+    try:
+        return _gravar_fatura_uma_vez(session, user_id, lida)
+    except IntegrityError:
+        session.rollback()
+        return _gravar_fatura_uma_vez(session, user_id, lida)
+
+
+def _gravar_fatura_uma_vez(
+    session: Session, user_id: str, lida: FaturaLida
+) -> models.CreditCardBill:
     cartao = _cartao_importado(
         session, user_id, lida.emissor, lida.final_cartao
     )

@@ -273,7 +273,7 @@ Hoje as tabelas exigem Pluggy (`conexao_id NOT NULL`). Uma migration nova, `f2c4
 - Coluna nova `credit_card_accounts.origem String(20) NOT NULL DEFAULT 'PLUGGY'` (`PLUGGY` ou `FATURA`).
 - `account_id`, `bill_id` e `transaction_id` continuam únicos e obrigatórios: as importadas usam `fatura:<uuid>` e `fatura:<sha256>`, que nunca colidem com os do Pluggy.
 - O cartão é achado ou criado por `(user_id, origem = FATURA, emissor, final_cartao)`.
-- **Idempotência:** o `transaction_id` é `fatura:` + sha256 de `user_id | cartão | data | valor | descrição normalizada | parcela | ordem entre iguais` (a ordem desempata duas compras idênticas no mesmo dia). Importar o mesmo arquivo duas vezes, ou a fatura aberta e depois a fechada, **não duplica** (as repetidas são puladas). A fatura é achada por `(cartão, vencimento)`; se o total mudou, atualiza.
+- **Idempotência:** o `transaction_id` é `fatura:` + sha256 de `user_id | cartão | data | valor | descrição normalizada | parcela | tipo | ordem entre iguais` (o tipo evita que um estorno idêntico a uma compra seja confundido com ela; a ordem desempata duas compras idênticas no mesmo dia). Importar o mesmo arquivo duas vezes, ou a fatura aberta e depois a fechada, **não duplica** (as repetidas são puladas). A fatura é achada por `(cartão, vencimento)`; se o total mudou, atualiza.
 - Downgrade: apaga as linhas `origem = FATURA` e remove a coluna; `conexao_id` volta a `NOT NULL`.
 
 ### 2.7 OFX e CSV (sem IA, sem custo)
