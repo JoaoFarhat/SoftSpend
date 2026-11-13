@@ -397,6 +397,10 @@ Cadeia de migrations:
     ganha `origem` (`PLUGGY`/`FATURA`, default `PLUGGY`) e `conexao_id` passa a
     aceitar NULL (cartão importado não tem conexão Pluggy). O downgrade apaga
     as linhas `FATURA` com as filhas e devolve `conexao_id` a NOT NULL.
+11. `a7c3e9f1b5d2` — assinatura AS1: tabelas `assinaturas` (uma por usuário,
+    FK para `users` com `ON DELETE CASCADE`) e `apple_notificacoes`
+    (`notification_uuid` único). Sem ela, `GET /api/assinatura` e as 4 rotas
+    bloqueadas falham com `Table 'softspend.assinaturas' doesn't exist`.
 
 ## Isolamento por usuário (UUID)
 
@@ -523,6 +527,41 @@ O `_pontuacao`/`_pontuacao_texto` de `open_finance_reconciliation_service.py`
 aceitam qualquer objeto com `amount`, `date` (`date` ou `datetime`) e
 `merchant_name`/`description`, sem mudar regra nenhuma — a prévia pontua
 compras ainda não gravadas por um adaptador (`_CompraComoTransacao`).
+
+Assinatura AS1 (`docs/publicacao.md` §1.4; decisões de 13/11: 14 dias
+grátis, sem assinatura bloqueia ciclo novo, IA e exportar). Ainda **sem**
+Apple: JWS, webhook e App Store Server API ficam para a AS2.
+
+- `models/assinatura.py`: `Assinatura` (tabela `assinaturas`, uma linha por
+  usuário: `app_account_token` UUID gerado no servidor,
+  `original_transaction_id`, `produto`, `ambiente`, `status`, `expira_em`,
+  `carencia_ate`, `renovacao_automatica`, `atualizado_em`, datas em UTC sem
+  fuso) e `AppleNotificacao` (tabela `apple_notificacoes`, só usada na AS2).
+  Excluir a conta apaga a linha (cascade no ORM e na FK).
+- `services/assinatura_service.calcular_acesso(assinatura, agora)` é o
+  **único** lugar que decide o acesso (função pura, teste de tabela em
+  `tests/test_assinatura.py`). Devolve `(status, tem_acesso)` com os estados
+  `none`, `trial`, `active`, `grace`, `billing_retry`, `expired`, `revoked`:
+  sem linha ou sem compra é `none`; `expired`/`revoked` gravados valem como
+  estão; antes de `expira_em` (estrito) é `trial`/`active`; depois, antes de
+  `carencia_ate` (estrito), `grace`; depois disso `billing_retry` (se a
+  cobrança vinha falhando) ou `expired`. Acesso só em `trial`, `active` e
+  `grace`.
+- `GET /api/assinatura` (autenticada) devolve `status`, `tem_acesso`,
+  `expira_em`, `produto` e `app_account_token`. A primeira chamada cria a
+  linha (`status = none`) e as seguintes devolvem o mesmo token; duas
+  primeiras chamadas simultâneas não duplicam (savepoint + releitura).
+- `dependencies.exigir_assinatura` responde `403` com
+  `{"detail": "subscription_required"}` (mais `error` e `request_id`, como
+  os outros erros; usa a exceção própria `AssinaturaNecessaria`, porque o
+  handler de `HTTPException` troca `detail` por `error`). Está **só** em
+  `POST /ciclos`, `POST /gastos/extrair`, `POST /api/faturas/ler` e
+  `GET /ciclos/{ciclo_id}/export`. Dias, gastos à mão, sync, login e excluir
+  conta nunca bloqueiam.
+
+| Variável | Default | Descrição |
+| --- | --- | --- |
+| `BILLING_ENFORCEMENT` | `off` | Lida a cada requisição. Só `on` liga o bloqueio; com qualquer outro valor `tem_acesso` é sempre `true` e nada responde `subscription_required` (o `status` real continua no `GET /api/assinatura`) |
 
 | Variável | Default | Descrição |
 | --- | --- | --- |

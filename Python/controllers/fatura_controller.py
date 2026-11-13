@@ -5,7 +5,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from database import get_db
-from dependencies import get_current_user_id
+from dependencies import exigir_assinatura, get_current_user_id
 from dtos.fatura import FaturaLida
 from dtos.open_finance import (
     CreditCardBillDetailResponse,
@@ -26,7 +26,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["faturas"])
 
 
-@router.post("/api/faturas/ler", response_model=FaturaLida)
+@router.post(
+    "/api/faturas/ler",
+    response_model=FaturaLida,
+    dependencies=[Depends(exigir_assinatura)],
+)
 @limiter.limit("5/minute")
 async def ler_fatura(
     request: Request,

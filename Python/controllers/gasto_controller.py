@@ -3,7 +3,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 import filetype
 from database import get_db
-from dependencies import get_current_user_id
+from dependencies import exigir_assinatura, get_current_user_id
 from dtos.gasto import GastoResponse, GastoRequest, GastoExtraidoResponse
 from services import gasto_service, ocr_service, storage_service
 from limiter import limiter
@@ -92,7 +92,11 @@ async def _ler_arquivo(arquivo: UploadFile, permitir_pdf: bool = False) -> tuple
     return conteudo, kind.mime
 
 
-@router.post("/gastos/extrair", response_model=GastoExtraidoResponse)
+@router.post(
+    "/gastos/extrair",
+    response_model=GastoExtraidoResponse,
+    dependencies=[Depends(exigir_assinatura)],
+)
 @limiter.limit("20/minute")
 async def extrair_gasto_de_imagem(request: Request, imagem: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
     conteudo, mime = await _ler_arquivo(imagem, permitir_pdf=True)
