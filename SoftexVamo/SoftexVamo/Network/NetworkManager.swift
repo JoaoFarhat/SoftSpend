@@ -641,6 +641,28 @@ final class NetworkManager: Sendable {
         )
     }
 
+    // MARK: - Assinatura (docs/assinatura.md §2.3)
+
+    nonisolated func obterAssinatura() async throws -> AssinaturaResponse {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/assinatura") else {
+            throw URLError(.badURL)
+        }
+        return try decoder.decode(AssinaturaResponse.self, from: try await execute(makeRequest(url: url)))
+    }
+
+    nonisolated func enviarTransacaoAssinatura(jws: String) async throws -> AssinaturaResponse {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/assinatura/transacoes") else {
+            throw URLError(.badURL)
+        }
+        let request = makeRequest(
+            url: url,
+            method: "POST",
+            body: try encoder.encode(TransacaoAssinaturaRequest(jws: jws))
+        )
+        // O servidor verifica o JWS e pode consultar a Apple: 8 s é pouco.
+        return try decoder.decode(AssinaturaResponse.self, from: try await executeUpload(request))
+    }
+
     nonisolated func login(dados: LoginRequest) async throws -> AuthResponse {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/login") else {
             throw URLError(.badURL)

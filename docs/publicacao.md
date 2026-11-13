@@ -46,6 +46,7 @@ O `Safeel.App.Backend/docs/assinatura.md` é o modelo; o princípio é o mesmo: 
 - Verificação: biblioteca oficial da Apple para Python (`app-store-server-library-python`; o Devin confere se está mantida antes de usar) e consulta à App Store Server API (`Get All Subscription Statuses`). **Um único caminho de cálculo do estado ("reconciliar")**, função pura com teste de tabela.
 - Estados: `none`, `trial`, `active`, `grace`, `billing_retry`, `expired`, `revoked`. Conciliação diária em segundo plano. O servidor aceita comprovantes do **Sandbox** em produção (a revisão da Apple compra no Sandbox).
 - Bloqueio no servidor: `POST /api/ciclos` (ciclo novo) e `POST /api/gastos/extrair` (IA) respondem `403 subscription_required` sem acesso. Os outros caminhos não bloqueiam (§1.3).
+  - Feito na AS1 (13/11), já com as decisões do usuário: o bloqueio vale para `POST /ciclos`, `POST /gastos/extrair`, `POST /api/faturas/ler` e `GET /ciclos/{ciclo_id}/export` (exportar entrou no bloqueio). Detalhes no `AGENTS.md`.
 - **Interruptor** `BILLING_ENFORCEMENT` (`off` por padrão): com `off`, todo mundo tem acesso. Sem isso, o teste e a revisão travam antes da conta paga existir.
 - **Exclusão de conta:** a linha da assinatura guarda só ids da Apple e datas; o que reter por obrigação fiscal vai para a pergunta U9 (não decidir no código).
 - Segredos novos no `.env` da EC2 (nunca no repositório): `APPLE_BUNDLE_ID`, `APPLE_ISSUER_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY`.
@@ -121,11 +122,11 @@ Conferido no código em 12/11.
 | **Restaurar compras** | Não existe (sem StoreKit) | Entra com a assinatura (§1.5); é exigência da Apple em app com compra |
 | **Conta de demonstração para a revisão** | Não existe. `DemoInicio.swift` é só `#if DEBUG` e não vai para a loja | Criar uma conta na **produção** com ciclos e gastos de exemplo (script de seed), com assinatura liberada (`BILLING_ENFORCEMENT=off` ou concessão manual) e senha só nas "Notas para a revisão". O servidor precisa estar no ar e com a chave do Gemini durante a revisão |
 | **Ícone** | `AppIcon.appiconset` tem 1024×1024 claro e escuro; o "tinted" está vazio (opcional) | Conferir no Mac que não tem transparência (a Apple recusa) e a aparência no Archive |
-| **Manifesto de privacidade** (`PrivacyInfo.xcprivacy`) | **Não existe** | Criar: sem rastreamento; dados coletados (e-mail, nome, ID de usuário, conteúdo do usuário: gastos e notas, histórico de compra); `UserDefaults` com motivo `CA92.1` (o app usa `UserDefaults`). Rótulo da loja igual ao manifesto |
-| **Criptografia de exportação** | Chave `ITSAppUsesNonExemptEncryption` ausente (o app usa HTTPS e CryptoKit AES-GCM, algoritmos padrão) | Mesma decisão já tomada no Safeel (12/11): `YES` e responder no envio que só usa algoritmos padrão, isentos. A classificação é responsabilidade do dono do produto (U7) |
-| **Versão mínima do iOS** | `IPHONEOS_DEPLOYMENT_TARGET = 26.0` | **Só roda no iOS 26.** Se o objetivo é alcançar mais gente, avaliar baixar (exige conferir o visual e os testes). **Decisão do usuário (U6)** |
-| **Identificador do app** | `com.joao.softspend` (nome pessoal) | **Não muda depois de criado na loja.** Decidir o definitivo (ex.: `br.com.softspend.app`) **antes** de criar o app na App Store Connect (U5) |
-| **Configuração só de desenvolvimento em produção** | `Info.plist` tem `NSBonjourServices` e `NSAllowsLocalNetworking`, e o app pede "servidor local em desenvolvimento" | Tirar do build de Release para não gerar pergunta de rede local e questionamento da revisão |
+| **Manifesto de privacidade** (`PrivacyInfo.xcprivacy`) | **Feito (13/11)**: `SoftexVamo/SoftexVamo/PrivacyInfo.xcprivacy` no alvo do app — sem rastreamento; dados ligados ao usuário (e-mail, nome, ID de usuário, outro conteúdo do usuário: gastos e notas, histórico de compra) só para funcionalidade do app; `UserDefaults` com motivo `CA92.1` | Rótulo da loja igual ao manifesto |
+| **Criptografia de exportação** | **Feito (13/11)**: `ITSAppUsesNonExemptEncryption = NO` nos dois `Info.plist` (o app só usa a criptografia do sistema: HTTPS, Keychain e CryptoKit) | Decisão U7: `NO` |
+| **Versão mínima do iOS** | `IPHONEOS_DEPLOYMENT_TARGET = 17.0` | **Decidido (13/11, U6): iOS 17**, o mínimo do SwiftData. O `@Entry` (iOS 18) virou `EnvironmentKey`/`EnvironmentValues`. Conferir o visual e os testes no CI |
+| **Identificador do app** | **Feito (13/11)**: `br.com.softspend.app` (testes: `br.com.softspend.app.tests`), decidido em U5 | **Não muda depois de criado na loja.** No iPhone o app vira outro: o usuário precisa sincronizar tudo antes e instalar de novo |
+| **Configuração só de desenvolvimento em produção** | **Feito (13/11)**: `Info.plist` (Release) sem `NSBonjourServices`, `NSAllowsLocalNetworking`, `API_BASE_URL_LOCAL` e sem a descrição de rede local — tudo ficou só no `Info-Debug.plist` (Debug); o ambiente `.local` só existe em `#if DEBUG` | Nada |
 | **Sign in with Apple** | Não é exigido: o login é próprio (e-mail e senha), sem Google/Facebook | Nada |
 | **Ficha da loja** | Não existe | Nome, subtítulo, descrição, palavras-chave, categoria (Finanças), classificação etária, URL de suporte (obrigatória) e de privacidade, e-mail de contato, capturas de iPhone e de iPad 13" (o app declara iPad, `TARGETED_DEVICE_FAMILY = 1,2`), texto de renovação da assinatura, notas para a revisão. As capturas saem do modo demonstração (`-demo`) no simulador |
 | **Disponibilidade** | — | Só Brasil na v1 (Termos e LGPD em português). Decisão U6 |
@@ -198,5 +199,5 @@ Legenda: **[Você]** = decisão ou ação do usuário; **[Devin]** = código; **
 - Política de Privacidade ausente ou sem citar a IA (Gemini) e o armazenamento das notas.
 - Chave do Gemini em projeto sem faturamento (plano gratuito): o Google pode usar as notas dos clientes para melhorar os modelos (§2.1).
 - Assinatura sem "restaurar compras" ou com tela de planos sem preço, duração, renovação e links.
-- `iOS 26` como mínimo: legal para a Apple, mas reduz muito quem pode instalar.
+- `iOS 17` como mínimo (decidido em 13/11): alcança muito mais aparelhos; vale conferir o visual do app no simulador antes de enviar.
 - Mudar o identificador do app depois de criado na loja: não dá.

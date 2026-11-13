@@ -42,6 +42,7 @@ struct MainView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var syncManager = SyncManager.shared
     @ObservedObject private var authService = AuthService.shared
+    @ObservedObject private var assinatura = AssinaturaViewModel.shared
 
     /// "Hoje" fixo (modo de demonstração, DEBUG). `nil` = data atual, que
     /// acompanha a virada do dia e a volta do app para o primeiro plano.
@@ -93,6 +94,9 @@ struct MainView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             if mostrarBarra {
+                if let texto = assinatura.textoFaixa {
+                    faixaAssinatura(texto)
+                }
                 if syncManager.pendentesRestantes > 0 {
                     avisoPendentes
                 }
@@ -119,6 +123,19 @@ struct MainView: View {
         }
         .environment(\.abrirRota) { abrir($0) }
         .tint(Tema.marcaTexto)
+        // Ação bloqueada pela assinatura, toque na faixa ou 403 direto: a
+        // tela de planos abre em folha por cima de tudo (§3.5), inclusive
+        // das capas de lançar gasto e de importar fatura.
+        .sheet(isPresented: $assinatura.planosAbertos) {
+            NavigationStack {
+                PlanosAssinaturaView()
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button("Fechar") { assinatura.planosAbertos = false }
+                        }
+                    }
+            }
+        }
         .task {
             guard sincronizar else { return }
             viewModel.fetchCiclosResumo()
@@ -141,6 +158,31 @@ struct MainView: View {
                 viewModel.fetchCiclosResumo()
             }
         }
+    }
+
+    /// Faixa da assinatura (§3.5): "Seu pagamento falhou" em alerta ou
+    /// "Teste grátis até DD/MM" discreta, sobre a barra de abas como o
+    /// aviso de pendências. O toque abre a tela de planos.
+    private func faixaAssinatura(_ texto: String) -> some View {
+        Button { assinatura.pedirPlanos() } label: {
+            HStack(spacing: 5) {
+                Image(systemName: assinatura.pagamentoFalhando
+                      ? "exclamationmark.triangle.fill" : "sparkles")
+                    .accessibilityHidden(true)
+                Text(texto)
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right")
+                    .accessibilityHidden(true)
+            }
+            .font(.caption)
+            .foregroundStyle(assinatura.pagamentoFalhando ? Tema.alertaTexto : Tema.textoFraco)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .padding(.horizontal, Espaco.p)
+            .background(Tema.superficie)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Abre os planos")
     }
 
     /// "N alterações aguardando envio": faixa discreta sobre a barra de abas,
@@ -201,11 +243,11 @@ struct MainView: View {
     }
 
     /// "Viagens" é uma aba: troca de aba em vez de empilhar a mesma lista de novo. O resto empilha
-    /// na aba atual.
+    /// na aba atual. "Nova viagem" é o bloqueio da §3.5: sem acesso, `permiteAbrir` pede os planos.
     private func abrir(_ rota: Rota) {
         if rota == .viagens {
             selecionar(.viagens)
-        } else {
+        } else if assinatura.permiteAbrir(rota) {
             caminhos[aba, default: []].append(rota)
         }
     }

@@ -104,7 +104,7 @@ struct TodosGastosView: View {
         // Título curto; a viagem vai no subtítulo ("Florianópolis · 10 a 17 de novembro"), para o
         // título não ocupar três linhas nem repetir o nome da aba (10/11).
         .navigationTitle("Gastos")
-        .navigationSubtitle(ciclo.map(subtitulo) ?? "")
+        .subtituloDeNavegacao(ciclo.map(subtitulo) ?? "")
         .navigationBarTitleDisplayMode(raiz ? .large : .inline)
     }
 
@@ -315,5 +315,17 @@ private struct LinhaGastoCompacta: View {
             "\(gasto.titulo), \(gasto.categoria.localizedName), \(formatarBRL(gasto.valor))\(faltaFoto ? ", falta a foto" : "")\(estado.rotuloAcessivel.map { ", \($0)" } ?? "")"
         )
         .accessibilityAddTraits(.isButton)
+    }
+}
+
+private extension View {
+    /// `navigationSubtitle` só existe a partir do iOS 26; antes disso fica só o título.
+    @ViewBuilder
+    func subtituloDeNavegacao(_ texto: String) -> some View {
+        if #available(iOS 26.0, *) {
+            navigationSubtitle(texto)
+        } else {
+            self
+        }
     }
 }

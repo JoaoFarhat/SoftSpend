@@ -1,0 +1,12 @@
+[Unit]
+Description=SoftSpend - conciliação diária das assinaturas às 04:30 de Brasília (07:30 UTC)
+
+[Timer]
+# Uma hora depois do backup (06:30 UTC), para não disputar a máquina.
+OnCalendar=*-*-* 07:30:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+Unit=softspend-assinaturas.service
+
+[Install]
+WantedBy=timers.target

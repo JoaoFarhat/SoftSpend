@@ -148,6 +148,7 @@ final class ImportarFaturaViewModel: ObservableObject {
     private let api: FaturaAPI
     private let sincronizar: @MainActor () async -> Void
     private let criarGasto: @MainActor (CompraLida, DiaSoftex) async throws -> Void
+    private let acesso: AssinaturaViewModel
     private let defaults: UserDefaults
     private var arquivo: Data?
     private var nomeArquivo = "fatura"
@@ -169,6 +170,7 @@ final class ImportarFaturaViewModel: ObservableObject {
             await SyncManager.shared.sync(forcar: true)
         },
         criarGasto: @escaping @MainActor (CompraLida, DiaSoftex) async throws -> Void,
+        acesso: AssinaturaViewModel = .shared,
         defaults: UserDefaults = .standard,
         tetoSync: Duration = .seconds(20)
     ) {
@@ -176,6 +178,7 @@ final class ImportarFaturaViewModel: ObservableObject {
         self.api = api
         self.sincronizar = sincronizar
         self.criarGasto = criarGasto
+        self.acesso = acesso
         self.defaults = defaults
         self.tetoSync = tetoSync
     }
@@ -282,6 +285,9 @@ final class ImportarFaturaViewModel: ObservableObject {
         case .lendo, .conferindo, .importando, .pronto: return
         case .escolhendo, .consentindo, .pedindoSenha, .erro: break
         }
+        // §3.5: sem acesso conhecido a leitura não sai — a tela de planos
+        // abre por cima da folha e a etapa fica onde estava.
+        guard acesso.exigirAcesso() else { return }
         etapa = .lendo
         await sincronizarComTeto()
         guard !Task.isCancelled else { return }
@@ -309,6 +315,11 @@ final class ImportarFaturaViewModel: ObservableObject {
             etapa = .conferindo
         } catch {
             guard !Task.isCancelled else { return }
+            // 403 `subscription_required` direto: planos, não "Erro no servidor".
+            if acesso.tratarErroDeAcesso(error) {
+                etapa = .escolhendo
+                return
+            }
             // §2.4: o 422 de senha volta para a pergunta da senha, não para erro.
             if case APIError.serverError(let message, _, let code) = error,
                code == 422, message.localizedCaseInsensitiveContains("senha") {
