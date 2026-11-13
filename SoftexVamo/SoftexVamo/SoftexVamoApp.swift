@@ -75,6 +75,11 @@ struct SoftexVamoApp: App {
                 if fase == .active, !authService.isAuthenticated {
                     authService.checkAuthentication()
                 }
+                // Estado da assinatura relido ao voltar para o primeiro plano
+                // (só com login; sem login não faz nada).
+                if fase == .active {
+                    Task { await AssinaturaViewModel.shared.carregarEstado() }
+                }
             }
         }
         .modelContainer(modelContainer)
@@ -96,12 +101,19 @@ struct SoftexVamoApp: App {
         // Único alerta de erro do app: CiclosViewModel, AuthService e as telas
         // que usam `errorManager` (exportar, excluir viagem, apagar gasto...).
         .errorAlert(errorManager: errorManager)
+        // Assinatura (docs/assinatura.md §3.2): `Transaction.updates` ouvido
+        // desde a abertura do app, e as compras ainda não aceitas pelo
+        // servidor reenviadas. Transação sem login fica sem `finish()`.
+        .task { AssinaturaViewModel.shared.iniciar() }
         .onChange(of: authService.currentUser?.id) { _, _ in
             // Com userId nos models, não precisa limpar dados no logout —
             // cada usuário só vê os próprios dados via filtro por userId.
             // Dados offline pendentes de sync são preservados para quando
             // o usuário original logar novamente.
             listViewModel.reset()
+            // Esquece o estado da conta anterior; com login, relê e reenvia
+            // as compras pendentes com o token desta conta.
+            Task { await AssinaturaViewModel.shared.trocouUsuario() }
         }
     }
 

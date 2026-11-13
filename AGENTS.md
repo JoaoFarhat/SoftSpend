@@ -279,6 +279,37 @@ Spec: `docs/cartao-sem-open-finance.md` §1 (partes A e B implementadas).
   passo ensina a marcar, em **Cartões**, só os cartões que devem entrar —
   com "Qualquer cartão", todas as compras entram.
 
+### Assinatura no app (I1, StoreKit 2)
+
+Spec: `docs/assinatura.md` §3.2. O servidor é a única autoridade sobre o
+acesso (`tem_acesso` do `GET /api/assinatura`); o estado do StoreKit nunca
+libera recurso.
+
+- `Services/LojaAssinatura.swift` é o **único** arquivo que importa StoreKit.
+  Define o `LojaAssinaturaProtocolo` (`@MainActor`) e os tipos simples
+  (`PlanoLoja`, `OfertaGratis`, `TransacaoLoja`, `ResultadoCompraLoja`),
+  `LojaAppStore` (implementação real) e `View.gerenciarAssinatura(isPresented:)`
+  (folha da App Store, para as telas não importarem StoreKit). Produtos em
+  `ProdutoAssinatura` (`br.com.softspend.app.assinatura.mensal`/`.anual`).
+- `ViewModels/AssinaturaViewModel.swift` (`.shared`) tem a regra: compra com
+  `appAccountToken` = `app_account_token` do servidor; `finish()` só depois de
+  `POST /api/assinatura/transacoes` aceitar; servidor fora deixa a transação
+  sem `finish()` ("confirmando com o servidor…"); `409` ou token de outra conta
+  não finaliza nem repete na sessão. Depois de compra/restauração aceita:
+  `GET /api/assinatura` de novo e `SyncManager.sync(forcar: true)`. Sem
+  `isAuthenticated`, nada vai ao servidor.
+- A cena raiz (`SoftexVamoApp`) chama `iniciar()` (ouve `Transaction.updates`
+  e reenvia `Transaction.unfinished`), `trocouUsuario()` na troca de conta e
+  `carregarEstado()` ao voltar para o primeiro plano.
+- `Scenes/PlanosAssinaturaView.swift`: preço e duração do teste vêm da App
+  Store (semanas viram dias: "2 semanas" aparece "14 dias"). Termos e
+  Privacidade em `LinksLegais` (URLs ainda não hospedadas). Entrada sempre
+  disponível no Perfil (seção "Assinatura"), mesmo com o bloqueio desligado.
+- `AssinaturaResponse.expira_em` tem decodificação própria (UTC sem fuso, com
+  microssegundos, vira `nil` se ilegível).
+- Testes: `SoftSpendTests/AssinaturaLojaTests.swift` com
+  `FakeLojaAssinatura`/`FakeAssinaturaAPI`. Compra real só no Mac/TestFlight.
+
 ### Pegadinhas SwiftData / SwiftUI (crashes conhecidos)
 
 Estas armadilhas já causaram crashes em produção e foram corrigidas. Mantenha
