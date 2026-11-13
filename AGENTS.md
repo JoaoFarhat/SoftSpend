@@ -324,13 +324,13 @@ estas regras ao modificar o código:
 
 ## Bancos de dados
 
-Existem dois: um **MySQL local** (para testes) e o **da AWS** (produção). O
+Existem dois: um **MySQL local** (para testes) e o **da AWS** (produção; é um MySQL rodando dentro da própria EC2, sem RDS). O
 `.env` da raiz do repo — fora do versionamento — define qual está em uso:
 
 ```
 DB_USER=softspend_user
 DB_PASS=...
-DB_HOST=localhost   # local; troque pelo endpoint RDS para apontar na AWS
+DB_HOST=localhost   # local; na AWS, use o IP ou o host da EC2 onde o MySQL roda
 DB_NAME=softspend
 ```
 
