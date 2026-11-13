@@ -31,6 +31,11 @@ struct ComponentesTests {
         #expect(textoGastosSemFoto(2) == "2 gastos sem foto")
     }
 
+    @Test func comprasApplePay() {
+        #expect(textoComprasApplePay(1) == "1 compra do Apple Pay esperando uma viagem")
+        #expect(textoComprasApplePay(3) == "3 compras do Apple Pay esperando uma viagem")
+    }
+
     @Test func acessibilidadeDaBarra() {
         let estourado = DiaResumo(id: d(21), data: d(21), gasto: 488, diaria: 450, ehHoje: false, futuro: false)
         #expect(textoAcessivelBarra(estourado, fuso: fuso) == "21 de julho, passou R$ 38")

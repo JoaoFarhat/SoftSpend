@@ -218,8 +218,7 @@ no Keychain com `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`.
 
 ### Apple Pay (atalho "Registrar gasto")
 
-Spec: `docs/cartao-sem-open-finance.md` §1 (parte A implementada; a parte B, o
-aviso da fila no Início, ainda não existe).
+Spec: `docs/cartao-sem-open-finance.md` §1 (partes A e B implementadas).
 
 - `Intents/RegistrarGastoIntent.swift` — App Intent com
   `openAppWhenRun = false`; roda `@MainActor` no `mainContext` do
@@ -242,6 +241,14 @@ aviso da fila no Início, ainda não existe).
 - `Services/ComprasAguardandoViagem.swift` — fila "sem viagem" em JSON
   (`Application Support/compras-apple-pay.json`, escrita atômica, teto de 50
   por usuário, fora do SwiftData de propósito: nenhum `@Model` novo, sem V2).
+- Aviso da fila no `InicioView` (`AlertaPendencia` com `textoComprasApplePay`,
+  lido por `recarregarFila` no `task(id: hoje)`) e folha
+  `Scenes/ComprasSemViagemView.swift`: cada item mostra estabelecimento,
+  valor, cartão e data, com "Lançar em …" (destino por
+  `RegistroApplePay.viagemEDia(para:userId:ciclos:)`, no `DiaSoftex` da data
+  da compra) e "Descartar". Sem viagem para a data, só "Descartar" e o texto
+  "Crie a viagem desta data para lançar". `lancar` só tira o item da fila
+  depois do `save` e grava `criadoEm = recebidaEm`.
 - `Scenes/ComoLigarApplePayView.swift` — tela de ajuda na seção Preferências
   de `PerfilView` (linha "Apple Pay (atalho)"); a automação é criada pelo
   usuário no app Atalhos (a Apple não permite criar pelo app).

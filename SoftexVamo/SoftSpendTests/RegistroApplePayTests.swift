@@ -283,6 +283,53 @@ struct RegistroApplePayTests {
         #expect(try registrar() != .duplicado)
     }
 
+    // MARK: Destino do "Lançar em …" da folha da fila (§1.5)
+
+    @Test func destinoEhODiaDaCompraNaViagemQueAContem() throws {
+        let ciclo = viagem(dias: [dia(10), dia(11), dia(12)])
+        let quando = cal.date(from: DateComponents(year: 2026, month: 11, day: 11, hour: 15))!
+        let d = try #require(RegistroApplePay.viagemEDia(para: quando, userId: userId,
+                                                       ciclos: [ciclo], calendario: cal))
+        #expect(d.ciclo === ciclo)
+        #expect(cal.isDate(d.dia.data, inSameDayAs: dia(11)))
+    }
+
+    @Test func destinoNilSemViagemNaData() {
+        let ciclo = viagem(dias: [dia(10), dia(11)])
+        #expect(RegistroApplePay.viagemEDia(para: dia(20), userId: userId,
+                                          ciclos: [ciclo], calendario: cal) == nil)
+    }
+
+    @Test func destinoNilQuandoODiaDaCompraEstaApagado() throws {
+        let ciclo = viagem(dias: [dia(10), dia(11), dia(12)])
+        let dia11 = try #require((ciclo.dias ?? []).first {
+            cal.isDate($0.data, inSameDayAs: dia(11))
+        })
+        dia11.deletadoEm = agora
+        try ctx.save()
+        // O intervalo ainda cobre 11/11 (dias 10 e 12 vivos), mas não há
+        // DiaSoftex vivo da data para receber o gasto.
+        #expect(RegistroApplePay.viagemEDia(para: dia(11), userId: userId,
+                                          ciclos: [ciclo], calendario: cal) == nil)
+    }
+
+    @Test func destinoIgnoraViagemApagadaEDeOutroUsuario() throws {
+        let apagada = viagem(dias: [dia(11)])
+        apagada.deletadoEm = agora
+        let deOutro = viagem(userId: "u2", dias: [dia(11)])
+        try ctx.save()
+        #expect(RegistroApplePay.viagemEDia(para: dia(11), userId: userId,
+                                          ciclos: [apagada, deOutro], calendario: cal) == nil)
+    }
+
+    @Test func destinoEmSobreposicaoUsaAPrimeiroDiaMaisRecente() throws {
+        let antiga = viagem(titulo: "Antiga", dias: [dia(10), dia(11), dia(12)])
+        let recente = viagem(titulo: "Recente", dias: [dia(11), dia(12)])
+        let d = try #require(RegistroApplePay.viagemEDia(para: dia(11), userId: userId,
+                                                       ciclos: [antiga, recente], calendario: cal))
+        #expect(d.ciclo === recente)
+    }
+
     // MARK: Recusas
 
     @Test func valorInvalido() throws {

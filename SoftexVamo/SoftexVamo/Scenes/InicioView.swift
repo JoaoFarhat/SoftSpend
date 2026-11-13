@@ -17,6 +17,9 @@ struct InicioView: View {
     @State private var lancamento: Lancamento?
     @State private var viagemEmEdicao: CicloSoftex?
     @State private var diaTocado: DiaResumo?
+    /// Fila "sem viagem" do Apple Pay (§1.5): vem do JSON, não do SwiftData.
+    @State private var comprasFila: [CompraAguardandoViagem] = []
+    @State private var filaAberta = false
 
     init(hoje: Date, origem: String? = nil, usuario: UsuarioMenu, menuInicial: Bool = false,
          lancamentoInicial: Lancamento? = nil) {
@@ -51,6 +54,13 @@ struct InicioView: View {
             NewCicloView(ciclo: ciclo)
                 .environmentObject(viewModel)
         }
+        .sheet(isPresented: $filaAberta) {
+            ComprasSemViagemView(compras: comprasFila) { recarregarFila() }
+                .environmentObject(viewModel)
+        }
+        // `hoje` muda na virada do dia e ao voltar para o app (MainView):
+        // recarrega a fila, que pode ter recebido compras em segundo plano.
+        .task(id: hoje) { recarregarFila() }
     }
 
     // MARK: Topo
@@ -122,35 +132,38 @@ struct InicioView: View {
 
     private var semViagem: some View {
         VStack {
-            Spacer()
-            VStack(spacing: Espaco.p) {
-                Image(systemName: "airplane")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(Tema.marca)
-                    .padding(.bottom, Espaco.p)
-                    .accessibilityHidden(true)
-                Text("Nenhuma viagem agora")
-                    .font(.title3.weight(.bold))
-                    .foregroundStyle(Tema.texto)
-                Text("Crie a viagem antes de sair para acompanhar quanto ainda dá para gastar a cada dia.")
-                    .font(.body)
-                    .foregroundStyle(Tema.textoFraco)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
+            avisoFila
+            VStack {
+                Spacer()
+                VStack(spacing: Espaco.p) {
+                    Image(systemName: "airplane")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(Tema.marca)
+                        .padding(.bottom, Espaco.p)
+                        .accessibilityHidden(true)
+                    Text("Nenhuma viagem agora")
+                        .font(.title3.weight(.bold))
+                        .foregroundStyle(Tema.texto)
+                    Text("Crie a viagem antes de sair para acompanhar quanto ainda dá para gastar a cada dia.")
+                        .font(.body)
+                        .foregroundStyle(Tema.textoFraco)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, Espaco.g + 8)
+                .padding(.vertical, 40)
+                .frame(maxWidth: .infinity)
+                .background(Tema.superficie, in: RoundedRectangle(cornerRadius: Raio.passagem, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: Raio.passagem, style: .continuous)
+                        .strokeBorder(Tema.borda, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+                }
+                .accessibilityElement(children: .combine)
+                Spacer()
+                Spacer()
             }
-            .padding(.horizontal, Espaco.g + 8)
-            .padding(.vertical, 40)
-            .frame(maxWidth: .infinity)
-            .background(Tema.superficie, in: RoundedRectangle(cornerRadius: Raio.passagem, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: Raio.passagem, style: .continuous)
-                    .strokeBorder(Tema.borda, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
-            }
-            .accessibilityElement(children: .combine)
-            Spacer()
-            Spacer()
+            .padding(.horizontal, Espaco.g + 2)
         }
-        .padding(.horizontal, Espaco.g + 2)
         .safeAreaInset(edge: .bottom) {
             rodape { BotaoPrincipal("Nova viagem") { abrirRota(.novaViagem) } }
         }
@@ -171,6 +184,8 @@ struct InicioView: View {
                         .padding(.top, Espaco.p)
                         .transition(.opacity)
                 }
+
+                avisoFila
 
                 switch resumo.estado {
                 case .antes:
@@ -234,6 +249,22 @@ struct InicioView: View {
         if !resumo.semComprovante.isEmpty {
             AlertaPendencia(quantidade: resumo.semComprovante.count) {
                 abrirRota(.todosGastos(filtro: .semComprovante))
+            }
+            .padding(.horizontal, Espaco.g + 2)
+            .padding(.top, Espaco.g)
+        }
+    }
+
+    /// Aviso da fila "sem viagem" do Apple Pay (§1.5), no padrão de
+    /// `AlertaPendencia`. O toque abre a folha com as compras esperando.
+    @ViewBuilder
+    private var avisoFila: some View {
+        if !comprasFila.isEmpty {
+            AlertaPendencia(quantidade: comprasFila.count,
+                            texto: textoComprasApplePay(comprasFila.count),
+                            rotulo: "Ver",
+                            dica: "Ver as compras") {
+                filaAberta = true
             }
             .padding(.horizontal, Espaco.g + 2)
             .padding(.top, Espaco.g)
@@ -337,6 +368,18 @@ struct InicioView: View {
     }
 
     // MARK: Dados e ações
+
+    /// Relê a fila "sem viagem" do usuário logado (§1.5). `UsuarioSalvo` cobre
+    /// o app acordado pela ação antes do `checkAuthentication` encher
+    /// `currentUser`; sem usuário, esconde o aviso.
+    private func recarregarFila() {
+        guard let userId = AuthService.shared.currentUser?.id ?? UsuarioSalvo.id() else {
+            comprasFila = []
+            return
+        }
+        comprasFila = ComprasAguardandoViagem.shared.ler(userId: userId)
+            .sorted { $0.recebidaEm > $1.recebidaEm }
+    }
 
     private func periodo(_ resumo: ResumoViagem) -> String {
         guard let ini = resumo.dias.first?.data, let fim = resumo.dias.last?.data else { return "" }
