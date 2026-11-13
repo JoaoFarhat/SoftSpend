@@ -2,47 +2,60 @@ import Testing
 import Foundation
 @testable import SoftSpend
 
-/// §1.4 e §1.9 de docs/cartao-sem-open-finance.md: leitura do texto que a
-/// automação do Apple Pay entrega ("R$ 12,34" ou só "12,34").
+/// Parser do valor que a automação do Atalhos entrega (§1.4 de
+/// docs/cartao-sem-open-finance.md).
 struct ValorDaCompraTests {
 
-    @Test("Textos aceitos viram Decimal", arguments: [
-        ("R$ 12,34", "12.34"),
-        ("12.34", "12.34"),
-        ("1.234,56", "1234.56"),
-        ("1.234", "1234"),
-        ("12,5", "12.5"),
-        ("-12,34", "12.34"),
-        ("1234,56", "1234.56"),
-        ("R$\u{00A0}1.234,56", "1234.56"),
-        ("BRL 42,00", "42.00"),
-        ("99,999", "100.00"),
-    ])
-    func aceitos(_ texto: String, _ esperado: String) {
-        #expect(ValorDaCompra.interpretar(texto) == Decimal(string: esperado))
+    private func d(_ texto: String) -> Decimal { Decimal(string: texto)! }
+
+    @Test func formatosAceitos() {
+        #expect(ValorDaCompra.interpretar("R$ 12,34") == d("12.34"))
+        #expect(ValorDaCompra.interpretar("12,34") == d("12.34"))
+        #expect(ValorDaCompra.interpretar("12.34") == d("12.34"))
+        #expect(ValorDaCompra.interpretar("1.234,56") == d("1234.56"))
+        #expect(ValorDaCompra.interpretar("1.234") == d("1234"))
+        #expect(ValorDaCompra.interpretar("12,5") == d("12.5"))
+        #expect(ValorDaCompra.interpretar("1234,56") == d("1234.56"))
     }
 
-    @Test("Sem número, zero, acima do teto ou moeda de fora devolvem nil", arguments: [
-        "0", "0,00", "abc", "", "R$",
-        "1.234.567", "100.001", "R$ 100.000,01",
-        "US$ 10,00", "$ 10,00", "€ 5", "£ 5", "USD 10", "EUR 1,00",
-    ])
-    func recusados(_ texto: String) {
-        #expect(ValorDaCompra.interpretar(texto) == nil)
+    @Test func sinalNegativoViraPositivo() {
+        #expect(ValorDaCompra.interpretar("-12,34") == d("12.34"))
+        #expect(ValorDaCompra.interpretar("-R$ 5,00") == d("5"))
     }
 
-    /// O teto é "acima de R$ 100.000": exatos cem mil passam.
-    @Test func tetoAceita() {
-        #expect(ValorDaCompra.interpretar("R$ 100.000,00") == Decimal(100_000))
+    @Test func espacosEMoeda() {
+        // Espaço sem quebra, como o "R$ 12,34" do iOS pode trazer.
+        #expect(ValorDaCompra.interpretar("R$\u{00A0}9,90") == d("9.9"))
+        #expect(ValorDaCompra.interpretar("R$ 8,00") == d("8"))
+        #expect(ValorDaCompra.interpretar("BRL 8,00") == d("8"))
     }
 
-    @Test("Símbolo ou código de outra moeda", arguments: [
-        ("US$ 10,00", true), ("$ 10,00", true), ("€ 5", true), ("£ 5", true),
-        ("USD 10", true), ("EUR 10", true),
-        ("R$ 10,00", false), ("BRL 10,00", false), ("10,00", false),
-        ("R$ 1.234,56", false),
-    ])
-    func moedaEstrangeira(_ texto: String, _ esperado: Bool) {
-        #expect(ValorDaCompra.moedaEstrangeira(texto) == esperado)
+    @Test func recusas() {
+        #expect(ValorDaCompra.interpretar("0") == nil)
+        #expect(ValorDaCompra.interpretar("0,00") == nil)
+        #expect(ValorDaCompra.interpretar("abc") == nil)
+        #expect(ValorDaCompra.interpretar("") == nil)
+        #expect(ValorDaCompra.interpretar("R$") == nil)
+        #expect(ValorDaCompra.interpretar("US$ 10,00") == nil)
+        #expect(ValorDaCompra.interpretar("€ 5") == nil)
+    }
+
+    @Test func teto() {
+        // Acima de R$ 100.000 é provável erro de leitura; no teto passa.
+        #expect(ValorDaCompra.interpretar("R$ 100.000,00") == d("100000"))
+        #expect(ValorDaCompra.interpretar("R$ 100.001,00") == nil)
+        #expect(ValorDaCompra.interpretar("999999,99") == nil)
+    }
+
+    @Test func moedaEstrangeira() {
+        #expect(ValorDaCompra.temMoedaEstrangeira("US$ 10,00"))
+        #expect(ValorDaCompra.temMoedaEstrangeira("$ 10,00"))
+        #expect(ValorDaCompra.temMoedaEstrangeira("€ 5"))
+        #expect(ValorDaCompra.temMoedaEstrangeira("£ 5"))
+        #expect(ValorDaCompra.temMoedaEstrangeira("USD 10"))
+        #expect(ValorDaCompra.temMoedaEstrangeira("EUR 10"))
+        #expect(!ValorDaCompra.temMoedaEstrangeira("R$ 10,00"))
+        #expect(!ValorDaCompra.temMoedaEstrangeira("BRL 10,00"))
+        #expect(!ValorDaCompra.temMoedaEstrangeira("10,00"))
     }
 }

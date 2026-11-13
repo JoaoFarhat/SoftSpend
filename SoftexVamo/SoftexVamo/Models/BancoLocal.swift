@@ -1,31 +1,37 @@
+//
+//  BancoLocal.swift
+//  SoftexVamo
+//
+//  Container único do banco local (SwiftData), extraído de `SoftexVamoApp`.
+//
+
 import Foundation
 import SwiftData
 import os
 
-/// O container único do banco local (§1.3 de `docs/cartao-sem-open-finance.md`).
+/// O `ModelContainer` único do app, compartilhado com o App Intent
+/// "Registrar gasto" (Apple Pay, docs/cartao-sem-open-finance.md §1.3).
+/// O nome `"softspend"` e o arquivo `softspend_v1.sqlite` não mudam, e a
+/// quarentena continua igual: dois containers no mesmo arquivo é o que se
+/// quer evitar, e o `mainContext` compartilhado faz a tela aberta atualizar
+/// na hora em que a ação grava um gasto.
 ///
-/// O `SoftexVamoApp` e a ação do Apple Pay (`RegistrarGastoIntent`, que roda
-/// sem abrir o app) usam a mesma instância: dois `ModelContainer` no mesmo
-/// arquivo é o que se quer evitar. Como a ação grava no `mainContext`
-/// compartilhado, a tela aberta também atualiza na hora.
-///
-/// O conteúdo é o `createModelContainer` que vivia em `SoftexVamoApp`, sem
-/// mudança: nome `"softspend"`, arquivo `softspend_v1.sqlite` e quarentena do
-/// banco que não abre (`docs/migracao-banco-local-ios.md`).
+/// `nonisolated` porque a ação pode rodar com o aparelho trancado, fora do
+/// MainActor; a inicialização é preguiçosa e thread-safe (static let).
 nonisolated enum BancoLocal {
     static let container: ModelContainer = criar()
 
     private static let logger = Logger(subsystem: "br.com.softspend", category: "BancoLocal")
 
     /// Abre o banco local com o schema versionado (`SoftSpendSchemaV1`) e o
-    /// `SoftSpendMigrationPlan`. O nome `"softspend"` e o arquivo
-    /// `softspend_v1.sqlite` não mudam: o banco da `main` é reconhecido como V1.
+    /// `SoftSpendMigrationPlan`.
     ///
     /// Se o container não abrir (banco de build antiga que não bate com nenhuma
     /// versão do plano, ou erro inesperado), o banco vai para quarentena: o
     /// `.sqlite`, o `-wal` e o `-shm` são movidos para
     /// `Application Support/softspend-backup-<yyyyMMdd-HHmmss>/` e um banco novo
     /// é criado. Nada é apagado; o que já estava sincronizado volta do backend.
+    /// Spec: docs/migracao-banco-local-ios.md.
     private static func criar() -> ModelContainer {
         let schema = Schema(versionedSchema: SoftSpendSchemaV1.self)
 

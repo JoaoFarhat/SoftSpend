@@ -17,12 +17,13 @@ struct SoftexVamoApp: App {
     @StateObject var errorManager = ErrorManager()
     /// Tema de Perfil e ajustes (Automático segue o iPhone).
     @AppStorage(PreferenciaTema.chave) private var tema: PreferenciaTema = .automatico
-    @Environment(\.scenePhase) private var faseDaCena
+    @Environment(\.scenePhase) private var scenePhase
 
-    /// O mesmo `BancoLocal.container` que a ação do Apple Pay usa.
     let modelContainer: ModelContainer
 
     init() {
+        // Container único (`BancoLocal`): o app e o App Intent "Registrar gasto"
+        // (Apple Pay) usam o mesmo — ver Models/BancoLocal.swift.
         self.modelContainer = BancoLocal.container
         let viewModel = CiclosViewModel()
         let errorManager = ErrorManager()
@@ -65,12 +66,13 @@ struct SoftexVamoApp: App {
                     (cena as? UIWindowScene)?.windows.forEach { $0.overrideUserInterfaceStyle = estilo }
                 }
             }
-            .onChange(of: faseDaCena) { _, fase in
-                // A ação do Apple Pay pode ter acordado o app com o iPhone
-                // trancado: o AuthService nasceu sem conseguir ler o token
-                // (Keychain "WhenUnlocked") e ficou na tela de login. Ao abrir
-                // o app, relê — só lê, nunca apaga nada.
-                if fase == .active && !authService.isAuthenticated {
+            .onChange(of: scenePhase) { _, fase in
+                // A ação "Registrar gasto" (Apple Pay) pode acordar o app com o
+                // iPhone trancado: o token (WhenUnlockedThisDeviceOnly) fica
+                // ilegível e o `AuthService` nasce com isAuthenticated == false.
+                // Reler ao ativar evita um falso logout; checkAuthentication só
+                // lê, nunca apaga nada. Ver docs/cartao-sem-open-finance.md §1.3.
+                if fase == .active, !authService.isAuthenticated {
                     authService.checkAuthentication()
                 }
             }

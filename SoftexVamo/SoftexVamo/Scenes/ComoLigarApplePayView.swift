@@ -1,19 +1,24 @@
+//
+//  ComoLigarApplePayView.swift
+//  SoftexVamo
+//
+//  Tela "Como ligar o Apple Pay" (§1.6 de docs/cartao-sem-open-finance.md).
+//  A automação não é criada pelo app — a Apple não permite; aqui só ensina.
+//
+
 import SwiftUI
 
-/// "Como ligar o Apple Pay" (§1.6 de `docs/cartao-sem-open-finance.md`): o
-/// passo a passo da automação "Transação" no app Atalhos, seguido das
-/// limitações honestas. Sem botão "criar automação": a Apple não permite.
 struct ComoLigarApplePayView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                Text("Pague com o Apple Pay e o gasto entra sozinho no dia de hoje da viagem, sem abrir o app. A automação é montada por você no app Atalhos — a Apple não deixa o app criar.")
+                Text("Pague com o Apple Pay e o SoftSpend grava o gasto sozinho, sem abrir o app. A automação é sua, no app Atalhos — o SoftSpend não cria nada por você.")
                     .font(.body)
                     .foregroundStyle(Tema.textoFraco)
                     .padding(.horizontal, Espaco.p)
-                    .padding(.top, Espaco.m)
+                    .padding(.top, Espaco.p)
 
-                secao("Passo a passo")
+                secao("Como ligar")
                 grupo {
                     passo(1, "Abra o app **Atalhos** → aba **Automação** → **+** → **Transação** (em alguns iOS aparece como **Carteira**).")
                     divisoria
@@ -27,25 +32,29 @@ struct ComoLigarApplePayView: View {
                 }
 
                 secao("O que esperar")
-                VStack(alignment: .leading, spacing: Espaco.m) {
-                    item("Só vale para compras pelo **Apple Pay** no iPhone ou no Apple Watch — não pega cartão físico, compra online sem Apple Pay, boleto nem Pix.")
-                    item("Pode **atrasar**, e o iPhone precisa ter sido desbloqueado ao menos uma vez desde que ligou.")
+                grupo {
+                    item("Só vale para compras pelo **Apple Pay** no iPhone ou no Apple Watch (não pega cartão físico, compra online sem Apple Pay, boleto, Pix).")
+                    divisoria
+                    item("**Pode atrasar**, e o iPhone precisa ter sido desbloqueado ao menos uma vez desde que ligou.")
+                    divisoria
                     item("**Alguns bancos e cartões não disparam** a automação. Se a sua compra não aparecer, lance à mão ou escaneie o comprovante.")
-                    item("Só reais: compra em outra moeda é recusada com aviso.")
-                    item("O app escolhe a categoria pelo nome do local — confira e troque se precisar.")
+                    divisoria
+                    item("Só reais; compra em outra moeda é recusada com aviso.")
+                    divisoria
+                    item("O app escolhe a categoria pelo nome do local; confira e troque se precisar.")
+                    divisoria
                     item("Nada sai do seu iPhone para outro serviço: o gasto é gravado no app e sobe só para o servidor do SoftSpend, como qualquer gasto.")
                 }
-                .padding(.horizontal, Espaco.p)
             }
             .padding(.horizontal, Espaco.g + 2)
             .padding(.bottom, Espaco.g + 8)
         }
         .background(Tema.fundo.ignoresSafeArea())
-        .navigationTitle("Como ligar o Apple Pay")
+        .navigationTitle("Apple Pay")
         .navigationBarTitleDisplayMode(.inline)
     }
 
-    // MARK: Partes (mesmo vocabulário visual do PerfilView)
+    // MARK: Partes (mesmo desenho de PerfilView)
 
     private func secao(_ titulo: String) -> some View {
         Text(titulo)
@@ -68,10 +77,11 @@ struct ComoLigarApplePayView: View {
 
     private func passo(_ numero: Int, _ texto: LocalizedStringKey) -> some View {
         HStack(alignment: .top, spacing: Espaco.m) {
-            Text("\(numero).")
-                .font(.body.weight(.semibold))
+            Text("\(numero)")
+                .font(.footnote.weight(.bold))
                 .foregroundStyle(Tema.marcaTexto)
-                .frame(width: 20, alignment: .leading)
+                .frame(width: 22, height: 22)
+                .background(Tema.marcaFundo, in: Circle())
                 .accessibilityHidden(true)
             Text(texto)
                 .font(.body)
@@ -80,30 +90,38 @@ struct ComoLigarApplePayView: View {
         }
         .padding(.horizontal, Espaco.g)
         .padding(.vertical, Espaco.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
+        .accessibilityLabel("Passo \(numero)")
     }
 
     private func item(_ texto: LocalizedStringKey) -> some View {
-        HStack(alignment: .top, spacing: Espaco.p) {
-            Text("•")
+        HStack(alignment: .top, spacing: Espaco.m) {
+            Image(systemName: "circle.fill")
+                .font(.system(size: 5))
                 .foregroundStyle(Tema.textoFraco)
+                .padding(.top, 7)
                 .accessibilityHidden(true)
             Text(texto)
+                .font(.body)
                 .foregroundStyle(Tema.texto)
                 .fixedSize(horizontal: false, vertical: true)
         }
-        .font(.subheadline)
+        .padding(.horizontal, Espaco.g)
+        .padding(.vertical, Espaco.m)
         .accessibilityElement(children: .combine)
     }
 }
 
 #Preview("Claro") {
-    NavigationStack { ComoLigarApplePayView() }
-        .preferredColorScheme(.light)
+    NavigationStack {
+        ComoLigarApplePayView()
+    }
+    .preferredColorScheme(.light)
 }
 
 #Preview("Escuro") {
-    NavigationStack { ComoLigarApplePayView() }
-        .preferredColorScheme(.dark)
+    NavigationStack {
+        ComoLigarApplePayView()
+    }
+    .preferredColorScheme(.dark)
 }

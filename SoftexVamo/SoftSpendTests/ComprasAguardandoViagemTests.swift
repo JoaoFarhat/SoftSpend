@@ -3,154 +3,125 @@ import Foundation
 import SwiftData
 @testable import SoftSpend
 
-/// §1.5 e §1.9 de docs/cartao-sem-open-finance.md: a fila "sem viagem" do
-/// Apple Pay — JSON em arquivo temporário, por usuário, teto de 50.
+/// Fila JSON "sem viagem" do Apple Pay (§1.5 e §1.9 de
+/// docs/cartao-sem-open-finance.md): arquivo temporário por teste.
 @MainActor
 struct ComprasAguardandoViagemTests {
+    let arquivo: URL
+    let fila: ComprasAguardandoViagem
+    let container: ModelContainer
+    let ctx: ModelContext
+    let userId = "u1"
 
-    // MARK: Apoio
-
-    func filaTemp() -> (fila: ComprasAguardandoViagem, url: URL) {
-        let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString)
-            .appendingPathComponent("compras.json")
-        return (ComprasAguardandoViagem(url: url), url)
-    }
-
-    func compra(userId: String = "u-1", estabelecimento: String = "Padaria Pao Quente",
-                recebidaEm: Date = Date(timeIntervalSince1970: 1_000)) -> CompraAguardandoViagem {
-        CompraAguardandoViagem(
-            id: UUID(), userId: userId, valor: Decimal(string: "12.34")!,
-            estabelecimento: estabelecimento, cartao: "Nubank",
-            categoria: .ALIMENTACAO, recebidaEm: recebidaEm
-        )
-    }
-
-    // MARK: Arquivo
-
-    @Test func leEGravaOJson() {
-        let (fila, url) = filaTemp()
-        let item = compra()
-        fila.adicionar(item)
-
-        // Outra instância no mesmo arquivo lê igual — o app e a ação do
-        // Apple Pay mexem no mesmo arquivo.
-        let outra = ComprasAguardandoViagem(url: url)
-        #expect(fila.itens(do: "u-1") == [item])
-        #expect(outra.itens(do: "u-1") == [item])
-    }
-
-    @Test func tetoDeCinquentaPorUsuario() {
-        let (fila, _) = filaTemp()
-        var ids: [UUID] = []
-        for i in 0..<55 {
-            let item = CompraAguardandoViagem(
-                id: UUID(), userId: "u-1", valor: 10, estabelecimento: "Loja \(i)",
-                cartao: nil, categoria: .OUTROS,
-                recebidaEm: Date(timeIntervalSince1970: TimeInterval(i))
-            )
-            ids.append(item.id)
-            fila.adicionar(item)
-        }
-        let itens = fila.itens(do: "u-1")
-        #expect(itens.count == 50)
-        // Passando de 50, a mais antiga sai: ficaram as de 5 a 54.
-        #expect(!itens.contains { $0.id == ids[0] })
-        #expect(!itens.contains { $0.id == ids[4] })
-        #expect(itens.contains { $0.id == ids[5] })
-        #expect(itens.contains { $0.id == ids[54] })
-    }
-
-    @Test func isolaPorUsuario() {
-        let (fila, _) = filaTemp()
-        let a = compra(userId: "u-1")
-        let b = compra(userId: "u-2")
-        fila.adicionar(a)
-        fila.adicionar(b)
-        // Itens de outro usuário ficam intocados e escondidos (§1.5).
-        #expect(fila.itens(do: "u-1") == [a])
-        #expect(fila.itens(do: "u-2") == [b])
-        #expect(fila.itens(do: "u-3").isEmpty)
-    }
-
-    @Test func arquivoCorrompidoViraListaVaziaSemDerrubar() throws {
-        let (fila, url) = filaTemp()
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("não é json".utf8).write(to: url)
-
-        #expect(fila.itens(do: "u-1").isEmpty)
-        // E grava por cima normalmente.
-        let item = compra()
-        fila.adicionar(item)
-        #expect(fila.itens(do: "u-1") == [item])
-    }
-
-    @Test func removerTiraSoOItem() {
-        let (fila, _) = filaTemp()
-        let a = compra()
-        let b = compra()
-        fila.adicionar(a)
-        fila.adicionar(b)
-        fila.remover(id: a.id)
-        #expect(fila.itens(do: "u-1") == [b])
-    }
-
-    // MARK: Lançar (§1.5): o item sai da fila só depois do save
-
-    func bancoComDia() throws -> (ctx: ModelContext, ciclo: CicloSoftex, dia: DiaSoftex) {
-        let container = try ModelContainer(
+    init() throws {
+        arquivo = FileManager.default.temporaryDirectory
+            .appendingPathComponent("fila-\(UUID().uuidString).json")
+        fila = ComprasAguardandoViagem(arquivo: arquivo)
+        container = try ModelContainer(
             for: CicloSoftex.self, DiaSoftex.self, GastosDia.self,
             configurations: ModelConfiguration(UUID().uuidString, isStoredInMemoryOnly: true)
         )
-        let ctx = ModelContext(container)
-        let ciclo = CicloSoftex(
-            userId: "u-1", valor_total: 300, gasto_total: 0,
-            periodo: "", diaria: 100, titulo: "Cuiabá, MT", dias: []
-        )
+        ctx = ModelContext(container)
+    }
+
+    func compra(userId: String? = nil, valor: Decimal = 10,
+                recebidaEm: Date = .now) -> CompraAguardandoViagem {
+        CompraAguardandoViagem(id: UUID(), userId: userId ?? self.userId,
+                               valor: valor, estabelecimento: "Padaria",
+                               cartao: nil, categoria: .OUTROS, recebidaEm: recebidaEm)
+    }
+
+    @Test func lerEGravar() throws {
+        #expect(fila.ler(userId: userId).isEmpty)
+
+        let item = compra(valor: Decimal(string: "12.34")!,
+                          recebidaEm: Date(timeIntervalSince1970: 1_780_000_000))
+        fila.adicionar(item)
+
+        // Sobrevive a uma instância nova no mesmo arquivo (leu o JSON).
+        let relida = ComprasAguardandoViagem(arquivo: arquivo)
+        let itens = relida.ler(userId: userId)
+        try #require(itens.count == 1)
+        #expect(itens[0] == item)
+    }
+
+    @Test func tetoDe50PorUsuario() {
+        for i in 0..<51 {
+            fila.adicionar(compra(valor: Decimal(i),
+                                  recebidaEm: Date(timeIntervalSince1970: TimeInterval(i))))
+        }
+
+        let itens = fila.ler(userId: userId)
+        #expect(itens.count == ComprasAguardandoViagem.tetoPorUsuario)
+        // A mais antiga (recebidaEm = 0) saiu; fica a segunda em diante.
+        #expect(itens.allSatisfy { $0.recebidaEm > Date(timeIntervalSince1970: 0) })
+        #expect(itens.contains { $0.valor == 50 })
+    }
+
+    @Test func isolamentoPorUsuario() {
+        fila.adicionar(compra(userId: "u1", valor: 10))
+        fila.adicionar(compra(userId: "u2", valor: 20))
+
+        #expect(fila.ler(userId: "u1").map(\.valor) == [10])
+        #expect(fila.ler(userId: "u2").map(\.valor) == [20])
+        #expect(fila.todas().count == 2)
+    }
+
+    @Test func tetoEhPorUsuario() {
+        for _ in 0..<50 { fila.adicionar(compra(userId: "u1")) }
+        for _ in 0..<10 { fila.adicionar(compra(userId: "u2")) }
+
+        #expect(fila.ler(userId: "u1").count == 50)
+        #expect(fila.ler(userId: "u2").count == 10)
+    }
+
+    @Test func arquivoCorrompidoViraListaVazia() throws {
+        try Data("lixo não-json".utf8).write(to: arquivo)
+        #expect(fila.todas().isEmpty)
+        #expect(fila.ler(userId: userId).isEmpty)
+
+        // E continua funcionando: gravar por cima do arquivo corrompido.
+        fila.adicionar(compra())
+        #expect(fila.ler(userId: userId).count == 1)
+    }
+
+    /// "Lançar" grava o gasto e tira o item da fila **depois** do save.
+    @Test func lancarRemoveODepoisDoSave() throws {
+        let item = compra(valor: 30)
+        fila.adicionar(item)
+
+        let ciclo = CicloSoftex(userId: userId, valor_total: 700, gasto_total: 0,
+                                periodo: "13/11 - 15/11", diaria: 100, titulo: "Cuiabá, MT")
         ctx.insert(ciclo)
         let dia = DiaSoftex(data: .now, saldo: 100)
         dia.ciclo = ciclo
         ctx.insert(dia)
         try ctx.save()
-        return (ctx, ciclo, dia)
+
+        try RegistroApplePay.lancar(item, em: dia, contexto: ctx, fila: fila)
+
+        #expect(fila.ler(userId: userId).isEmpty)
+        let gastos = try ctx.fetch(FetchDescriptor<GastosDia>())
+        try #require(gastos.count == 1)
+        #expect(gastos[0].valor == 30)
+        #expect(gastos[0].titulo == "Padaria")
+        #expect(ciclo.gasto_total == 30)
     }
 
-    @Test func lancarGravaOGastoETiraDaFilaDepoisDoSave() throws {
-        let (ctx, ciclo, dia) = try bancoComDia()
-        let (fila, _) = filaTemp()
+    /// Falhou antes do save (dia órfão, sem viagem para somar o total): o item
+    /// fica na fila.
+    @Test func lancarQueFalhaMantemOItem() throws {
         let item = compra()
         fila.adicionar(item)
 
-        let ok = try RegistroApplePay.lancar(item, no: dia, em: ctx, agora: .now, fila: fila)
-        #expect(ok)
-        #expect(fila.itens(do: "u-1").isEmpty)
-
-        let gastos = try ctx.fetch(FetchDescriptor<GastosDia>())
-        try #require(gastos.count == 1)
-        #expect(gastos[0].syncStatus == .pending)
-        #expect(gastos[0].titulo == item.estabelecimento)
-        #expect(gastos[0].dia?.id == dia.id)
-        #expect(ciclo.gasto_total == item.valor)
-    }
-
-    @Test func lancarNumDiaSemViagemNaoGravaNemTiraDaFila() throws {
-        let container = try ModelContainer(
-            for: CicloSoftex.self, DiaSoftex.self, GastosDia.self,
-            configurations: ModelConfiguration(UUID().uuidString, isStoredInMemoryOnly: true)
-        )
-        let ctx = ModelContext(container)
-        // Dia órfão: sem viagem, o lançamento é recusado e o item fica na fila.
-        let diaOrfao = DiaSoftex(data: .now, saldo: 0)
+        let diaOrfao = DiaSoftex(data: .now, saldo: 100)
         ctx.insert(diaOrfao)
         try ctx.save()
 
-        let (fila, _) = filaTemp()
-        let item = compra()
-        fila.adicionar(item)
-
-        let ok = try RegistroApplePay.lancar(item, no: diaOrfao, em: ctx, fila: fila)
-        #expect(!ok)
-        #expect(fila.itens(do: "u-1") == [item])
+        #expect(throws: ErroRegistro.diaSemViagem) {
+            try RegistroApplePay.lancar(item, em: diaOrfao, contexto: ctx, fila: fila)
+        }
+        #expect(fila.ler(userId: userId).count == 1)
         #expect(try ctx.fetch(FetchDescriptor<GastosDia>()).isEmpty)
     }
 }

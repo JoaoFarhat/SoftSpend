@@ -49,9 +49,13 @@ struct PerfilView: View {
                         set: { leituraAutomatica = $0 }
                     ))
                     divisoria
-                    linhaTema
+                    NavigationLink {
+                        ComoLigarApplePayView()
+                    } label: {
+                        linhaLink("Apple Pay (atalho)")
+                    }
                     divisoria
-                    linhaDestino("Apple Pay (atalho)") { ComoLigarApplePayView() }
+                    linhaTema
                 }
                 Text("Ligada, a foto do comprovante é enviada para um serviço de leitura (Google Gemini) que preenche valor, local, data e categoria.")
                     .font(.footnote)
@@ -169,6 +173,21 @@ struct PerfilView: View {
         .frame(minHeight: 50)
     }
 
+    private func linhaLink(_ titulo: String) -> some View {
+        HStack(spacing: Espaco.m) {
+            Text(titulo)
+                .font(.body)
+                .foregroundStyle(Tema.texto)
+            Spacer(minLength: Espaco.p)
+            Image(systemName: "chevron.right")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Tema.textoFraco)
+                .accessibilityHidden(true)
+        }
+        .padding(.horizontal, Espaco.g)
+        .frame(minHeight: 50)
+    }
+
     private var linhaTema: some View {
         HStack(spacing: Espaco.m) {
             Text("Tema")
@@ -195,26 +214,6 @@ struct PerfilView: View {
         }
         .padding(.horizontal, Espaco.g)
         .frame(minHeight: 50)
-    }
-
-    private func linhaDestino<Destino: View>(_ titulo: String, @ViewBuilder destino: () -> Destino) -> some View {
-        NavigationLink {
-            destino()
-        } label: {
-            HStack(spacing: Espaco.m) {
-                Text(titulo)
-                    .foregroundStyle(Tema.texto)
-                Spacer(minLength: Espaco.p)
-                Image(systemName: "chevron.right")
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Tema.textoFraco)
-                    .accessibilityHidden(true)
-            }
-            .font(.body)
-            .padding(.horizontal, Espaco.g)
-            .frame(minHeight: 50)
-            .contentShape(Rectangle())
-        }
     }
 
     #if DEBUG

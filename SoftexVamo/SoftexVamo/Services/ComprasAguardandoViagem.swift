@@ -1,9 +1,15 @@
-import Foundation
-import os
+//
+//  ComprasAguardandoViagem.swift
+//  SoftexVamo
+//
+//  Fila "sem viagem" das compras do Apple Pay (§1.5 de
+//  docs/cartao-sem-open-finance.md).
+//
 
-/// Compra do Apple Pay que chegou sem viagem aberta nem dia local de hoje
-/// (§1.5 de `docs/cartao-sem-open-finance.md`). Fica na fila até o usuário
-/// lançar numa viagem ou descartar — nunca sai sozinha por tempo.
+import Foundation
+
+/// Compra do Apple Pay que chegou sem viagem aberta. Fica na fila até o usuário
+/// lançar numa viagem ou descartar; nunca sai sozinha por tempo.
 nonisolated struct CompraAguardandoViagem: Codable, Identifiable, Equatable, Sendable {
     var id: UUID
     var userId: String
@@ -14,69 +20,66 @@ nonisolated struct CompraAguardandoViagem: Codable, Identifiable, Equatable, Sen
     var recebidaEm: Date
 }
 
-/// A fila "sem viagem" do Apple Pay (§1.5).
+/// A fila é um arquivo JSON em `Application Support/compras-apple-pay.json`,
+/// com escrita atômica — fora do SwiftData de propósito: mudar um `@Model`
+/// exigiria congelar o schema V1 e criar o V2 com migração, custo e risco
+/// grandes para uma lista pequena e passageira.
 ///
-/// Fica fora do SwiftData de propósito: um `@Model` novo exigiria congelar o
-/// V1 e criar o V2 com migração, custo e risco grandes para uma lista pequena
-/// e passageira. É um JSON em `Application Support/compras-apple-pay.json`,
-/// por usuário, com teto de 50 itens — passando, a mais antiga sai.
-///
-/// A escrita é atômica e o arquivo usa a proteção padrão do iOS (disponível
-/// depois do primeiro desbloqueio), para a ação rodar com o aparelho trancado.
-/// Arquivo ausente ou corrompido vira lista vazia, sem derrubar o app.
-nonisolated struct ComprasAguardandoViagem: Sendable {
-    static let compartilhada = ComprasAguardandoViagem()
-    static let teto = 50
+/// O arquivo usa a proteção padrão do iOS (disponível depois do primeiro
+/// desbloqueio), para a ação "Registrar gasto" rodar com o aparelho trancado.
+/// Arquivo ausente ou corrompido lê como lista vazia, sem derrubar o app.
+final class ComprasAguardandoViagem {
+    /// Teto de itens por usuário; passando, a mais antiga sai.
+    static let tetoPorUsuario = 50
 
-    private let url: URL
+    static let shared = ComprasAguardandoViagem()
 
-    init(url: URL? = nil) {
-        if let url {
-            self.url = url
-        } else {
-            let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            self.url = support.appendingPathComponent("compras-apple-pay.json")
-        }
+    let arquivo: URL
+
+    init(arquivo: URL? = nil) {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        self.arquivo = arquivo ?? dir.appendingPathComponent("compras-apple-pay.json")
     }
 
-    /// Os itens do usuário, da mais antiga para a mais nova.
-    func itens(do userId: String) -> [CompraAguardandoViagem] {
-        ler().filter { $0.userId == userId }.sorted { $0.recebidaEm < $1.recebidaEm }
+    /// Itens do usuário. Os de outros usuários ficam no arquivo, intocados e
+    /// escondidos — tudo filtra por `userId`.
+    func ler(userId: String) -> [CompraAguardandoViagem] {
+        todas().filter { $0.userId == userId }
     }
 
-    /// Guarda a compra no fim da fila do usuário; passando do teto, a mais antiga sai.
-    func adicionar(_ compra: CompraAguardandoViagem) {
-        var todos = ler()
-        todos.append(compra)
-        let doUsuario = todos.filter { $0.userId == compra.userId }
-        if doUsuario.count > Self.teto,
-           let maisAntiga = doUsuario.min(by: { $0.recebidaEm < $1.recebidaEm }) {
-            todos.removeAll { $0.id == maisAntiga.id }
-        }
-        gravar(todos)
-    }
-
-    /// Tira o item da fila (depois de lançado ou descartado pelo usuário).
-    func remover(id: UUID) {
-        gravar(ler().filter { $0.id != id })
-    }
-
-    private func ler() -> [CompraAguardandoViagem] {
-        guard let data = try? Data(contentsOf: url),
-              let itens = try? JSONDecoder().decode([CompraAguardandoViagem].self, from: data)
+    func todas() -> [CompraAguardandoViagem] {
+        guard let dados = try? Data(contentsOf: arquivo),
+              let lista = try? JSONDecoder().decode([CompraAguardandoViagem].self, from: dados)
         else { return [] }
-        return itens
+        return lista
     }
 
-    private func gravar(_ itens: [CompraAguardandoViagem]) {
-        do {
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            let data = try JSONEncoder().encode(itens)
-            try data.write(to: url, options: .atomic)
-        } catch {
-            Self.logger.error("ComprasAguardandoViagem: falha ao gravar a fila: \(error.localizedDescription, privacy: .public)")
+    func adicionar(_ compra: CompraAguardandoViagem) {
+        var lista = todas()
+        lista.append(compra)
+
+        let doUsuario = lista.filter { $0.userId == compra.userId }
+        let excedente = doUsuario.count - Self.tetoPorUsuario
+        if excedente > 0 {
+            let maisAntigas = Set(doUsuario
+                .sorted { $0.recebidaEm < $1.recebidaEm }
+                .prefix(excedente)
+                .map(\.id))
+            lista.removeAll { maisAntigas.contains($0.id) }
         }
+
+        gravar(lista)
     }
 
-    private static let logger = Logger(subsystem: "br.com.softspend", category: "ComprasAguardandoViagem")
+    func remover(id: UUID) {
+        var lista = todas()
+        lista.removeAll { $0.id == id }
+        gravar(lista)
+    }
+
+    private func gravar(_ lista: [CompraAguardandoViagem]) {
+        guard let dados = try? JSONEncoder().encode(lista) else { return }
+        try? dados.write(to: arquivo, options: .atomic)
+    }
 }
