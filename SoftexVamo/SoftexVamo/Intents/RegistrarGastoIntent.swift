@@ -1,5 +1,6 @@
 import AppIntents
 import Foundation
+import SwiftData
 import os
 
 /// Ação "Registrar gasto" para a automação "Transação" do Apple Pay no app

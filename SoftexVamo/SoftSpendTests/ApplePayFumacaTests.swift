@@ -1,5 +1,6 @@
 import Testing
 import AppIntents
+import SwiftData
 @testable import SoftSpend
 
 /// §1.9 de docs/cartao-sem-open-finance.md: fumaça — a ação existe e o
