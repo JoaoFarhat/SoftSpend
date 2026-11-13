@@ -541,6 +541,13 @@ em `DetalheViagemView` ("Importar fatura do cartão", `.sheet`):
   "Desvincular"/"Confirmar" da conferência refeitos no servidor (o `match` da
   prévia não tem id; o vínculo é localizado pelo `gasto_id`). Falha na
   gravação → nenhum gasto criado.
+- Sem `vencimento` no arquivo (CSV/OFX sem a data), a conferência mostra um
+  `DatePicker` (`vencimentoInformado`, padrão = data da última compra) e a
+  data vai no envio — sem ela o `POST /api/faturas` responde 422.
+- O `sync(forcar:)` antes da leitura tem teto (`tetoSync`, 20 s): estourado,
+  a leitura segue e o sync continua em background — **não é cancelado**,
+  senão os itens em voo ganhariam `.failed`+backoff no `SyncActor`. A `Task`
+  da leitura é cancelada no `onDisappear` da folha (`cancelarLeitura`).
 
 | Variável | Default | Descrição |
 | --- | --- | --- |

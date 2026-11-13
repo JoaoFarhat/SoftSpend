@@ -163,7 +163,9 @@ nonisolated struct FaturaLida: Sendable {
     let emissor: String?
     let finalCartao: String?
     let fechamento: Date?
-    let vencimento: Date?
+    /// `var`: o "Importar" preenche com a data informada na conferência
+    /// quando o arquivo não trouxe o vencimento (sem ela o POST dá 422).
+    var vencimento: Date?
     let totalFatura: Decimal?
     let moeda: String
     let somaConfere: Bool?
