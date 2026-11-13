@@ -232,7 +232,7 @@ Spec: `docs/cartao-sem-open-finance.md` §1 (partes A e B implementadas).
   desligado devolve `.ignoradoCartaoDesligado` antes de gravar ou ir para a
   fila), parse do valor (`ValorDaCompra`), categoria por
   `InterpretadorComprovante.inferirCategoria`, dia de hoje da viagem aberta
-  (em sobreposição, a de primeiro dia mais recente), duplicata em janela
+  (em sobreposição, a que começou primeiro), duplicata em janela
   deslizante de 60 s (mesmo valor + estabelecimento normalizado, em gasto
   vivo **ou** item da fila). Sem viagem/dia de hoje, vai para a fila.
 - `Services/UsuarioSalvo.swift` — `userId` lido do `user_data` do

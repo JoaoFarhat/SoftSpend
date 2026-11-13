@@ -186,6 +186,27 @@ struct FormularioViagemTests {
         #expect(ciclo.diaria == 450)
         #expect((ciclo.dias ?? []).count == 6)
     }
+
+    /// Criar uma viagem no período de outra em andamento não tira a atual do
+    /// lugar: o início e a viagem aberta continuam sendo a primeira.
+    @Test func criarViagemNoPeriodoDeOutraMantemAAtiva() async throws {
+        let container = try ModelContainer(
+            for: CicloSoftex.self, DiaSoftex.self, GastosDia.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let vm = CiclosViewModel()
+        vm.modelContext = ModelContext(container)
+        let cal = Calendar.current
+        let hoje = cal.startOfDay(for: .now)
+        func dias(_ n: Int) -> Date { cal.date(byAdding: .day, value: n, to: hoje)! }
+
+        try await vm.createNewCiclo(startDate: dias(-2), endDate: dias(3), totalValue: 600, titulo: "Em andamento")
+        try await vm.createNewCiclo(startDate: hoje, endDate: dias(5), totalValue: 600, titulo: "Nova")
+
+        #expect(vm.allCiclos.count == 2)
+        #expect(vm.cicloInicio?.titulo == "Em andamento")
+        #expect(vm.atualCiclo.titulo == "Em andamento")
+    }
 }
 
 @MainActor

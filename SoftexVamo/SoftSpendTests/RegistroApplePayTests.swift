@@ -175,7 +175,7 @@ struct RegistroApplePayTests {
         #expect(try gastosNoBanco().isEmpty)
     }
 
-    @Test func sobreposicaoUsaADePrimeiroDiaMaisRecente() throws {
+    @Test func sobreposicaoUsaAQueComecouPrimeiro() throws {
         let antiga = viagem(titulo: "Antiga", dias: [dia(10), hoje])
         let recente = viagem(titulo: "Recente", dias: [dia(12), hoje])
 
@@ -184,11 +184,11 @@ struct RegistroApplePayTests {
             Issue.record("esperava .gravado, veio \(r)")
             return
         }
-        #expect(viagem == "Recente")
-        let diaHoje = try #require(diaDeHoje(recente))
+        #expect(viagem == "Antiga")
+        let diaHoje = try #require(diaDeHoje(antiga))
         #expect(diaHoje.gastos.count == 1)
-        #expect(recente.gasto_total == Decimal(string: "12.34"))
-        #expect(antiga.gasto_total == 0)
+        #expect(antiga.gasto_total == Decimal(string: "12.34"))
+        #expect(recente.gasto_total == 0)
     }
 
     @Test func semViagemVaiParaFila() throws {

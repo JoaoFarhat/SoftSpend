@@ -72,7 +72,7 @@ enum ResultadoRegistro: Equatable {
 **Categoria:** `InterpretadorComprovante.inferirCategoria(de: [estabelecimento]) ?? .OUTROS`. Reaproveita a lista de palavras que já existe (a mesma da leitura local do comprovante). Sem acertar, é `.OUTROS`, que o usuário troca editando o gasto. Limitação conhecida e herdada: a lista é curta e a ordem das categorias faz "Mercado Livre" cair em Alimentação; melhorar a lista é outra tarefa.
 
 **Em qual dia o gasto entra:**
-1. Viagens do usuário (`userId`), sem `deletadoEm`, cujo intervalo (`intervaloViagem`, que já usa os dias locais ou o `periodo`) **contém o dia de hoje**. Com mais de uma, a de primeiro dia mais recente (mesma regra de `cicloDoInicio`, mas **sem** cair na "próxima" ou na "última encerrada": isso não é viagem aberta).
+1. Viagens do usuário (`userId`), sem `deletadoEm`, cujo intervalo (`intervaloViagem`, que já usa os dias locais ou o `periodo`) **contém o dia de hoje**. Com mais de uma, a que começou primeiro (mesma regra de `cicloDoInicio`, mas **sem** cair na "próxima" ou na "última encerrada": isso não é viagem aberta).
 2. Dentro dela, o `DiaSoftex` com `deletadoEm == nil` cuja `data` é hoje (`Calendar.isDate(_:inSameDayAs:)`).
 3. Não achou viagem aberta ou não existe dia local de hoje (ex.: instalação nova que ainda não baixou os dias) → **fila "sem viagem"** (§1.5), nunca um dia errado.
 

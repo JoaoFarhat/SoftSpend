@@ -155,10 +155,18 @@ struct ResumoViagemTests {
         #expect(cicloDoInicio([antigo], hoje: hoje, calendario: cal) === antigo)
         #expect(cicloDoInicio([], hoje: hoje, calendario: cal) == nil)
     }
-    @Test func cicloDoInicioSobreposicaoPegaOMaisRecente() {
+    @Test func cicloDoInicioSobreposicaoMantemAQueComecouPrimeiro() {
         let a = ciclo(titulo: "A", de: 20, ate: 25)
         let b = ciclo(titulo: "B", de: 22, ate: 28)
-        #expect(cicloDoInicio([a, b], hoje: d("23/07"), calendario: cal) === b)
+        #expect(cicloDoInicio([a, b], hoje: d("23/07"), calendario: cal) === a)
+        #expect(cicloDoInicio([b, a], hoje: d("23/07"), calendario: cal) === a)
+    }
+    @Test func cicloDoInicioMesmoInicioMantemACriadaAntes() {
+        let antiga = ciclo(titulo: "Antiga", de: 20, ate: 25)
+        let nova = ciclo(titulo: "Nova", de: 20, ate: 28)
+        antiga.criadoEm = d("01/07")
+        nova.criadoEm = d("02/07")
+        #expect(cicloDoInicio([nova, antiga], hoje: d("23/07"), calendario: cal) === antiga)
     }
     @Test func valores() {
         #expect(ValoresViagem.diaria(total: 2700, dias: 6) == 450)

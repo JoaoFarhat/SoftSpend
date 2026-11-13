@@ -118,20 +118,27 @@ func intervaloViagem(_ ciclo: CicloSoftex, calendario: Calendar = .current) -> (
     return (ini, fim)
 }
 
-/// Ciclo que o início deve mostrar: o que contém hoje (em sobreposição, o de
-/// primeiro dia mais recente); senão o próximo futuro; senão o último encerrado.
+/// Ciclo que o início deve mostrar: o que contém hoje (em sobreposição, o que
+/// começou primeiro, para a viagem em andamento não perder o lugar para uma
+/// criada depois); senão o próximo futuro; senão o último encerrado.
 /// Ciclo ainda sem dias locais (instalação nova) conta pelo `periodo`.
 func cicloDoInicio(_ ciclos: [CicloSoftex], hoje: Date, calendario: Calendar = .current) -> CicloSoftex? {
     let h = calendario.startOfDay(for: hoje)
     let comIntervalo = ciclos.compactMap { c in intervaloViagem(c, calendario: calendario).map { (c, $0.ini, $0.fim) } }
 
-    if let atual = comIntervalo.filter({ $0.1 <= h && h <= $0.2 }).max(by: { $0.1 < $1.1 }) {
+    if let atual = comIntervalo.filter({ $0.1 <= h && h <= $0.2 })
+        .min(by: { comecouAntes($0.0, $0.1, que: $1.0, $1.1) }) {
         return atual.0
     }
     if let proximo = comIntervalo.filter({ $0.1 > h }).min(by: { $0.1 < $1.1 }) {
         return proximo.0
     }
     return comIntervalo.max(by: { $0.2 < $1.2 })?.0
+}
+
+/// Ordem da sobreposição: primeiro dia mais antigo; no empate, a criada antes.
+func comecouAntes(_ a: CicloSoftex, _ iniA: Date, que b: CicloSoftex, _ iniB: Date) -> Bool {
+    iniA != iniB ? iniA < iniB : a.criadoEm < b.criadoEm
 }
 
 enum ValoresViagem {
