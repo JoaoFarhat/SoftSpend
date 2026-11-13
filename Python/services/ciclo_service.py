@@ -2,6 +2,7 @@ import models
 from sqlalchemy.orm import Session
 from dtos.ciclo import CicloResponse, CicloRequest
 from repositories import ciclo_repository
+from services import assinatura_service
 from fastapi import HTTPException
 
 
@@ -20,7 +21,13 @@ def criar_ciclo(db: Session, ciclo: CicloRequest, user_id: str):
     if ciclo.client_id:
         existente = ciclo_repository.find_by_client_id(db, ciclo.client_id, user_id)
         if existente:
+            # Reenvio (resposta perdida ou o T7 recuperando o id): devolve o
+            # que já existe mesmo sem assinatura (`docs/assinatura.md` §3.3).
             return existente
+
+    # Só ciclo novo exige assinatura: 403 aqui significa "não está no servidor".
+    if not assinatura_service.tem_acesso(db, user_id):
+        raise assinatura_service.AssinaturaNecessaria()
 
     novo_ciclo = montar_ciclo(ciclo)
     novo_ciclo.id_usuario = user_id

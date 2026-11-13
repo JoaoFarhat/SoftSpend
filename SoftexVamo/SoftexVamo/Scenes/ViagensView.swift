@@ -263,6 +263,7 @@ struct DetalheViagemView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var editando: CicloSoftex?
     @State private var lancando: CicloSoftex?
+    @State private var importandoFatura: CicloSoftex?
     @State private var confirmarExclusao = false
 
     private var ciclo: CicloSoftex? { viewModel.ciclo(id: cicloId) }
@@ -274,6 +275,9 @@ struct DetalheViagemView: View {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             Button { lancando = ciclo } label: { Label("Lançar gasto", systemImage: "plus") }
+                            Button { importandoFatura = ciclo } label: {
+                                Label("Importar fatura do cartão", systemImage: "doc.badge.arrow.up")
+                            }
                             Button { abrirRota(.fecharViagem(ciclo.id)) } label: {
                                 Label("Fechar viagem e PDF", systemImage: "doc.text")
                             }
@@ -300,6 +304,21 @@ struct DetalheViagemView: View {
                 LancarGastoView(ciclo: ciclo, hoje: hoje, comFoto: false)
                     .environmentObject(viewModel)
                     .environmentObject(errorManager)
+            }
+            .sheet(item: $importandoFatura) { ciclo in
+                // Criação de gasto pelo caminho existente (§2.5): `garantirAtual`
+                // + `createNewGasto`, nada de `dia.gastos.append`.
+                ImportarFaturaView(ciclo: ciclo) { compra, dia in
+                    viewModel.garantirAtual(ciclo)
+                    try await viewModel.createNewGasto(
+                        title: ImportarFaturaViewModel.tituloDoGasto(compra),
+                        value: compra.valor,
+                        dia: dia,
+                        categoria: compra.categoria
+                    )
+                }
+                .environmentObject(viewModel)
+                .environmentObject(errorManager)
             }
             .confirmationDialog("Excluir \(ciclo.map { nomeCidade($0.titulo) } ?? "viagem")?",
                                 isPresented: $confirmarExclusao, titleVisibility: .visible) {

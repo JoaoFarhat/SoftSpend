@@ -263,7 +263,11 @@ def gravar_fatura(
 
     Duas gravações simultâneas da mesma fatura calculam o mesmo
     `transaction_id` e a segunda bate na unicidade no `flush`: refaz a
-    busca uma vez — as repetidas passam a constar como existentes.
+    busca uma vez — as repetidas passam a constar como existentes. Se a
+    refaz também esbarra em `IntegrityError` (duas corridas seguidas ou
+    outra restrição do banco), a resposta é 409 — um conflito que o
+    cliente pode repetir com o mesmo corpo (a gravação é idempotente),
+    não um erro interno 500.
     """
     if len(lida.compras) > MAXIMO_COMPRAS:
         raise ErroFatura(
@@ -276,7 +280,15 @@ def gravar_fatura(
         return _gravar_fatura_uma_vez(session, user_id, lida)
     except IntegrityError:
         session.rollback()
-        return _gravar_fatura_uma_vez(session, user_id, lida)
+        try:
+            return _gravar_fatura_uma_vez(session, user_id, lida)
+        except IntegrityError:
+            session.rollback()
+            raise ErroFatura(
+                409,
+                "Outra gravação da mesma fatura estava em andamento; "
+                "tente de novo",
+            ) from None
 
 
 def _gravar_fatura_uma_vez(

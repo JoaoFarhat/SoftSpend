@@ -540,6 +540,121 @@ final class NetworkManager: Sendable {
         )
     }
 
+    // MARK: - Fatura importada por arquivo (§2)
+
+    /// Multipart da `POST /api/faturas/ler`: `arquivo` + os campos de texto
+    /// `senha?` e `ciclo_id?`. A senha do PDF só vive nesta requisição.
+    nonisolated private func makeFaturaUploadRequest(
+        url: URL,
+        arquivo: Data,
+        nomeArquivo: String,
+        mime: String,
+        senha: String?,
+        cicloId: Int?
+    ) -> URLRequest {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+        func campo(_ nome: String, _ valor: String) {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(nome)\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(valor)\r\n".data(using: .utf8)!)
+        }
+        if let senha, !senha.isEmpty { campo("senha", senha) }
+        if let cicloId { campo("ciclo_id", String(cicloId)) }
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"arquivo\"; filename=\"\(nomeArquivo)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mime)\r\n\r\n".data(using: .utf8)!)
+        body.append(arquivo)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+
+        var request = makeRequest(url: url, method: "POST", body: body, contentType: "multipart/form-data; boundary=\(boundary)")
+        request.timeoutInterval = 90
+        return request
+    }
+
+    /// Só leitura (o servidor não grava nada). A IA pode demorar: sobe pela
+    /// `uploadSession`, com timeout de 90 s (§2.5).
+    nonisolated func lerFatura(
+        arquivo: Data,
+        nomeArquivo: String,
+        tipo: ArquivoFatura.Tipo,
+        senha: String?,
+        cicloId: Int?
+    ) async throws -> FaturaLida {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/faturas/ler") else {
+            throw URLError(.badURL)
+        }
+        let request = makeFaturaUploadRequest(
+            url: url, arquivo: arquivo, nomeArquivo: nomeArquivo,
+            mime: tipo.mime, senha: senha, cicloId: cicloId
+        )
+        return try decoder.decode(FaturaLida.self, from: try await executeUpload(request))
+    }
+
+    /// Grava a fatura e as compras mantidas na conferência (idempotente no
+    /// servidor) e roda a conciliação. Devolve a fatura com as transações e
+    /// os vínculos já com id.
+    nonisolated func gravarFatura(_ lida: FaturaLida) async throws -> CreditCardBillDetailResponse {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/faturas") else {
+            throw URLError(.badURL)
+        }
+        let request = makeRequest(url: url, method: "POST", body: try encoder.encode(lida))
+        return try decoder.decode(CreditCardBillDetailResponse.self, from: try await executeUpload(request))
+    }
+
+    /// Concilia de novo depois que os gastos criados na conferência subiram.
+    nonisolated func conciliarFatura(faturaId: Int) async throws -> CreditCardBillDetailResponse {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/faturas/\(faturaId)/conciliar") else {
+            throw URLError(.badURL)
+        }
+        return try decoder.decode(
+            CreditCardBillDetailResponse.self,
+            from: try await execute(makeRequest(url: url, method: "POST"))
+        )
+    }
+
+    nonisolated func confirmarMatchFatura(matchId: Int) async throws -> ExpenseTransactionMatchResponse {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/faturas/matches/\(matchId)/confirm") else {
+            throw URLError(.badURL)
+        }
+        return try decoder.decode(
+            ExpenseTransactionMatchResponse.self,
+            from: try await execute(makeRequest(url: url, method: "POST"))
+        )
+    }
+
+    nonisolated func removerMatchFatura(matchId: Int) async throws -> ExpenseTransactionMatchResponse {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/faturas/matches/\(matchId)") else {
+            throw URLError(.badURL)
+        }
+        return try decoder.decode(
+            ExpenseTransactionMatchResponse.self,
+            from: try await execute(makeRequest(url: url, method: "DELETE"))
+        )
+    }
+
+    // MARK: - Assinatura (docs/assinatura.md §2.3)
+
+    nonisolated func obterAssinatura() async throws -> AssinaturaResponse {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/assinatura") else {
+            throw URLError(.badURL)
+        }
+        return try decoder.decode(AssinaturaResponse.self, from: try await execute(makeRequest(url: url)))
+    }
+
+    nonisolated func enviarTransacaoAssinatura(jws: String) async throws -> AssinaturaResponse {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/assinatura/transacoes") else {
+            throw URLError(.badURL)
+        }
+        let request = makeRequest(
+            url: url,
+            method: "POST",
+            body: try encoder.encode(TransacaoAssinaturaRequest(jws: jws))
+        )
+        // O servidor verifica o JWS e pode consultar a Apple: 8 s é pouco.
+        return try decoder.decode(AssinaturaResponse.self, from: try await executeUpload(request))
+    }
+
     nonisolated func login(dados: LoginRequest) async throws -> AuthResponse {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/login") else {
             throw URLError(.badURL)

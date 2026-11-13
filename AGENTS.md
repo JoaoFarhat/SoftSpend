@@ -279,6 +279,37 @@ Spec: `docs/cartao-sem-open-finance.md` §1 (partes A e B implementadas).
   passo ensina a marcar, em **Cartões**, só os cartões que devem entrar —
   com "Qualquer cartão", todas as compras entram.
 
+### Assinatura no app (I1, StoreKit 2)
+
+Spec: `docs/assinatura.md` §3.2. O servidor é a única autoridade sobre o
+acesso (`tem_acesso` do `GET /api/assinatura`); o estado do StoreKit nunca
+libera recurso.
+
+- `Services/LojaAssinatura.swift` é o **único** arquivo que importa StoreKit.
+  Define o `LojaAssinaturaProtocolo` (`@MainActor`) e os tipos simples
+  (`PlanoLoja`, `OfertaGratis`, `TransacaoLoja`, `ResultadoCompraLoja`),
+  `LojaAppStore` (implementação real) e `View.gerenciarAssinatura(isPresented:)`
+  (folha da App Store, para as telas não importarem StoreKit). Produtos em
+  `ProdutoAssinatura` (`br.com.softspend.app.assinatura.mensal`/`.anual`).
+- `ViewModels/AssinaturaViewModel.swift` (`.shared`) tem a regra: compra com
+  `appAccountToken` = `app_account_token` do servidor; `finish()` só depois de
+  `POST /api/assinatura/transacoes` aceitar; servidor fora deixa a transação
+  sem `finish()` ("confirmando com o servidor…"); `409` ou token de outra conta
+  não finaliza nem repete na sessão. Depois de compra/restauração aceita:
+  `GET /api/assinatura` de novo e `SyncManager.sync(forcar: true)`. Sem
+  `isAuthenticated`, nada vai ao servidor.
+- A cena raiz (`SoftexVamoApp`) chama `iniciar()` (ouve `Transaction.updates`
+  e reenvia `Transaction.unfinished`), `trocouUsuario()` na troca de conta e
+  `carregarEstado()` ao voltar para o primeiro plano.
+- `Scenes/PlanosAssinaturaView.swift`: preço e duração do teste vêm da App
+  Store (semanas viram dias: "2 semanas" aparece "14 dias"). Termos e
+  Privacidade em `LinksLegais` (URLs ainda não hospedadas). Entrada sempre
+  disponível no Perfil (seção "Assinatura"), mesmo com o bloqueio desligado.
+- `AssinaturaResponse.expira_em` tem decodificação própria (UTC sem fuso, com
+  microssegundos, vira `nil` se ilegível).
+- Testes: `SoftSpendTests/AssinaturaLojaTests.swift` com
+  `FakeLojaAssinatura`/`FakeAssinaturaAPI`. Compra real só no Mac/TestFlight.
+
 ### Pegadinhas SwiftData / SwiftUI (crashes conhecidos)
 
 Estas armadilhas já causaram crashes em produção e foram corrigidas. Mantenha
@@ -397,6 +428,12 @@ Cadeia de migrations:
     ganha `origem` (`PLUGGY`/`FATURA`, default `PLUGGY`) e `conexao_id` passa a
     aceitar NULL (cartão importado não tem conexão Pluggy). O downgrade apaga
     as linhas `FATURA` com as filhas e devolve `conexao_id` a NOT NULL.
+11. `a7c3e9f1b5d2` — assinatura AS1: tabelas `assinaturas` (uma por usuário,
+    FK para `users` com `ON DELETE CASCADE`) e `apple_notificacoes`
+    (`notification_uuid` único). Sem ela, `GET /api/assinatura` e as 4 rotas
+    bloqueadas falham com `Table 'softspend.assinaturas' doesn't exist`. A
+    AS2 não tem migration (o índice único de `original_transaction_id` já
+    está nesta).
 
 ## Isolamento por usuário (UUID)
 
@@ -523,6 +560,161 @@ O `_pontuacao`/`_pontuacao_texto` de `open_finance_reconciliation_service.py`
 aceitam qualquer objeto com `amount`, `date` (`date` ou `datetime`) e
 `merchant_name`/`description`, sem mudar regra nenhuma — a prévia pontua
 compras ainda não gravadas por um adaptador (`_CompraComoTransacao`).
+
+Assinatura AS1 (`docs/publicacao.md` §1.4; decisões de 13/11: 14 dias
+grátis, sem assinatura bloqueia ciclo novo, IA e exportar). Ainda **sem**
+Apple: JWS, webhook e App Store Server API ficam para a AS2.
+
+- `models/assinatura.py`: `Assinatura` (tabela `assinaturas`, uma linha por
+  usuário: `app_account_token` UUID gerado no servidor,
+  `original_transaction_id`, `produto`, `ambiente`, `status`, `expira_em`,
+  `carencia_ate`, `renovacao_automatica`, `atualizado_em`, datas em UTC sem
+  fuso) e `AppleNotificacao` (tabela `apple_notificacoes`, só usada na AS2).
+  Excluir a conta apaga a linha (cascade no ORM e na FK).
+- `services/assinatura_service.calcular_acesso(assinatura, agora)` é o
+  **único** lugar que decide o acesso (função pura, teste de tabela em
+  `tests/test_assinatura.py`). Devolve `(status, tem_acesso)` com os estados
+  `none`, `trial`, `active`, `grace`, `billing_retry`, `expired`, `revoked`:
+  sem linha ou sem compra é `none`; `expired`/`revoked` gravados valem como
+  estão; antes de `expira_em` (estrito) é `trial`/`active`; depois, antes de
+  `carencia_ate` (estrito), `grace`; depois disso `billing_retry` (se a
+  cobrança vinha falhando) ou `expired`. Acesso só em `trial`, `active` e
+  `grace`.
+- `GET /api/assinatura` (autenticada) devolve `status`, `tem_acesso`,
+  `expira_em`, `produto` e `app_account_token`. A primeira chamada cria a
+  linha (`status = none`) e as seguintes devolvem o mesmo token; duas
+  primeiras chamadas simultâneas não duplicam (savepoint + releitura).
+- `dependencies.exigir_assinatura` responde `403` com
+  `{"detail": "subscription_required"}` (mais `error` e `request_id`, como
+  os outros erros; usa a exceção própria `AssinaturaNecessaria`, porque o
+  handler de `HTTPException` troca `detail` por `error`). Está **só** em
+  `POST /ciclos`, `POST /gastos/extrair`, `POST /api/faturas/ler` e
+  `GET /ciclos/{ciclo_id}/export`. Dias, gastos à mão, sync, login e excluir
+  conta nunca bloqueiam.
+
+| Variável | Default | Descrição |
+| --- | --- | --- |
+| `BILLING_ENFORCEMENT` | `off` | Lida a cada requisição. Só `on` liga o bloqueio; com qualquer outro valor `tem_acesso` é sempre `true` e nada responde `subscription_required` (o `status` real continua no `GET /api/assinatura`) |
+
+No iOS (tarefa A1, §2.1/§2.5/§2.8), o fluxo mora em
+`ViewModels/ImportarFaturaViewModel.swift` (regra, testável sem tela) e
+`Scenes/ImportarFaturaView.swift` (montagem), aberto pelo menu "⋯" da viagem
+em `DetalheViagemView` ("Importar fatura do cartão", `.sheet`):
+
+- DTOs em `Models/DTOs/FaturaDTO.swift` (`FaturaLida`, `CompraLida`,
+  `MatchPreviaFatura`): a resposta do `ler` e o corpo do `POST /api/faturas`
+  são a mesma estrutura. `date` do Python serializa "2026-07-21" (dia
+  inteiro), que o `JSONDecoder` compartilhado não aceita — `data`,
+  `fechamento` e `vencimento` têm Codable próprio como início do dia no fuso
+  local, para casar com `DiaSoftex` por `isDate(_:inSameDayAs:)`.
+- `Network/FaturaAPI.swift` é o protocolo injetável (como `SyncAPI`);
+  `NetworkManager` implementa `lerFatura` (multipart `arquivo`/`senha?`/
+  `ciclo_id`, `uploadSession` de 90 s), `gravarFatura`, `conciliarFatura` e os
+  confirm/remover de match. Testes usam `SoftSpendTests/FakeFaturaAPI.swift`.
+- Consentimento (§2.8): `Consentimento.leituraAutomatica` vale para
+  comprovante **e fatura** (texto da `ConsentimentoLeituraView` e do Perfil
+  dizem "foto ou arquivo"); `Consentimento.avisoFatura` guarda se o aviso de
+  uma tela da primeira importação já foi aceito. PDF sem `leituraAutomatica`
+  não lê; OFX/CSV não passam pela IA e vão direto.
+- Conferência em structs (`CompraConferencia`): "Já lançadas" (match, com
+  "Confirmar"/"Desvincular"), "Faltam" (desmarcadas por padrão, "Marcar
+  todas"), estornos/encargos (só leitura) e "Fora desta viagem" (recolhido).
+  Os grupos são locais: `dia == nil` = fora — não depende do `dentro_da_viagem`
+  do servidor, que pode estar vazio quando o ciclo ainda não subiu.
+- Ordem do "Importar" (§2.1): `POST /api/faturas` com todas as compras com
+  dia na viagem ("compras mantidas") → só então os gastos marcados são criados
+  via `CiclosViewModel.createNewGasto` (`.pending`, dia local pela data) →
+  `sync(forcar: true)` → `/conciliar` → matches aplicados em `GastosDia` →
+  "Desvincular"/"Confirmar" da conferência refeitos no servidor (o `match` da
+  prévia não tem id; o vínculo é localizado pelo `gasto_id`). Falha na
+  gravação → nenhum gasto criado.
+- Sem `vencimento` no arquivo (CSV/OFX sem a data), a conferência mostra um
+  `DatePicker` (`vencimentoInformado`, padrão = data da última compra) e a
+  data vai no envio — sem ela o `POST /api/faturas` responde 422.
+- O `sync(forcar:)` antes da leitura tem teto (`tetoSync`, 20 s): estourado,
+  a leitura segue e o sync continua em background — **não é cancelado**,
+  senão os itens em voo ganhariam `.failed`+backoff no `SyncActor`. A `Task`
+  da leitura é cancelada no `onDisappear` da folha (`cancelarLeitura`).
+
+Assinatura AS1 (`docs/publicacao.md` §1.4; decisões de 13/11: 14 dias
+grátis, sem assinatura bloqueia ciclo novo, IA, importar fatura e exportar).
+
+- `models/assinatura.py`: `Assinatura` (tabela `assinaturas`, uma linha por
+  usuário: `app_account_token` UUID gerado no servidor,
+  `original_transaction_id` único, `produto`, `ambiente`, `status`,
+  `expira_em`, `carencia_ate`, `renovacao_automatica`, `atualizado_em`,
+  datas em UTC sem fuso) e `AppleNotificacao` (tabela `apple_notificacoes`).
+  Excluir a conta apaga a linha (cascade no ORM e na FK).
+- `services/assinatura_service.calcular_acesso(assinatura, agora)` é o
+  **único** lugar que decide o acesso (função pura, teste de tabela em
+  `tests/test_assinatura.py`). Devolve `(status, tem_acesso)` com os estados
+  `none`, `trial`, `active`, `grace`, `billing_retry`, `expired`, `revoked`:
+  sem linha ou sem compra é `none`; `expired`/`revoked` gravados valem como
+  estão; antes de `expira_em` (estrito) é `trial`/`active`; depois, antes de
+  `carencia_ate` (estrito), `grace`; depois disso `billing_retry` (se a
+  cobrança vinha falhando) ou `expired`. Acesso só em `trial`, `active` e
+  `grace`.
+- `GET /api/assinatura` (autenticada) devolve `status`, `tem_acesso`,
+  `expira_em`, `produto` e `app_account_token`. A primeira chamada cria a
+  linha (`status = none`) e as seguintes devolvem o mesmo token; duas
+  primeiras chamadas simultâneas não duplicam (savepoint + releitura).
+- O bloqueio responde `403` com `{"detail": "subscription_required"}` (mais
+  `error` e `request_id`, como os outros erros; exceção própria
+  `AssinaturaNecessaria`, porque o handler de `HTTPException` troca `detail`
+  por `error`). `dependencies.exigir_assinatura` está em
+  `POST /gastos/extrair`, `POST /api/faturas/ler` e
+  `GET /ciclos/{ciclo_id}/export`. Em `POST /ciclos` a checagem fica
+  **dentro** de `ciclo_service.criar_ciclo`, **depois** da busca por
+  `client_id` (AS2, `docs/assinatura.md` §3.3): reenviar um ciclo que já
+  existe devolve 200 com ele mesmo sem assinatura, então 403 ali quer dizer
+  "não está no servidor". Dias, gastos à mão, sync, login e excluir conta
+  nunca bloqueiam.
+
+Assinatura AS2 (`docs/assinatura.md` §2): Apple no servidor.
+
+- `services/apple_service.py` é o único arquivo que importa a
+  `app-store-server-library` (fixada em `requirements.txt`), e só dentro das
+  classes reais. O resto vê dataclasses (`Transacao`, `Renovacao`,
+  `Notificacao`, `EstadoApple`). Duas fábricas, **substituídas nos testes**:
+  `obter_verificador(ambiente)` e `obter_cliente_apple(ambiente)` (consulta
+  `Get All Subscription Statuses` no ambiente pedido). A verificação tenta
+  Production e, com erro de ambiente, Sandbox (`APPLE_ACEITA_SANDBOX`).
+  Certificados raiz em `Python/certificados_apple/*.cer`, lidos do disco.
+- `assinatura_service.reconciliar(db, assinatura, transacao, renovacao,
+  agora, status_apple=None, ambiente=None)` é o único caminho que grava o
+  estado da Apple: copia campos e traduz o status (`traduzir_status`: código
+  da API 1–5, ou datas quando só há a notificação). Trial = `offerType = 1`
+  com `FREE_TRIAL`. O acesso segue em `calcular_acesso`.
+- `POST /api/assinatura/transacoes` (`{"jws"}`, autenticada, 20/min):
+  `registrar_transacao` verifica, confere bundle, tipo e os dois produtos
+  (400), `appAccountToken` diferente do usuário ou compra de outro usuário
+  (409), consulta a Apple **antes** de gravar qualquer coisa (fora do ar:
+  503 sem gravar) e devolve o corpo do GET. Sem `appAccountToken`: liga só
+  se a compra estiver livre.
+- `POST /api/webhooks/apple` (`{"signedPayload"}`, sempre registrada, sem
+  login): `processar_notificacao`. Inválido 400 sem gravar; UUID repetido
+  200; desconhecida 200 e registrada; `TEST` e os tipos de `SO_REGISTRA` só
+  registram. O estado vem da API; com ela fora, a notificação só vale se o
+  `signedDate` for mais novo que `atualizado_em`. O UUID é gravado no mesmo
+  commit do resultado: falha interna dá 500 e a Apple repete.
+- Job diário: `python -m services.assinatura_job` (timer
+  `deploy/ec2/softspend-assinaturas.timer`, 07:30 UTC, ligado pelo
+  `setup.sh` só com `APPLE_*` e certificados). Linhas com
+  `original_transaction_id` e status fora de `expired`/`revoked`, ou que
+  expiraram há até 7 dias, consultadas no ambiente da linha; falha de uma
+  não para as outras; log só com contagens. Saída 0, 1 (alguma falhou) ou 2
+  (sem configuração).
+- Testes em `tests/test_assinatura_as2.py` (`FakeApple`; nenhum chama a
+  Apple).
+
+| Variável | Default | Descrição |
+| --- | --- | --- |
+| `BILLING_ENFORCEMENT` | `off` | Lida a cada requisição. Só `on` liga o bloqueio; com qualquer outro valor `tem_acesso` é sempre `true` e nada responde `subscription_required` (o `status` real continua no `GET /api/assinatura`) |
+| `APPLE_BUNDLE_ID` | — | `br.com.softspend.app` |
+| `APPLE_APP_ID` | — | Número do app na App Store Connect (obrigatório em Production) |
+| `APPLE_ISSUER_ID` / `APPLE_KEY_ID` | — | Da chave de In-App Purchase |
+| `APPLE_PRIVATE_KEY` | — | Conteúdo do `.p8` (ou `APPLE_PRIVATE_KEY_PATH`, arquivo fora do repositório, permissão 600). Sem as `APPLE_*` (ou sem os certificados), `/transacoes` e o webhook dão 503 e o job sai com 2; `GET /api/assinatura` segue |
+| `APPLE_ACEITA_SANDBOX` | `true` | `false` recusa comprovantes do Sandbox (400) |
 
 | Variável | Default | Descrição |
 | --- | --- | --- |
@@ -660,6 +852,10 @@ Arquivos para rodar a API como serviço systemd e rotacionar logs:
   e `backup.env.example` — backup diário do MySQL para o S3 (`docs/backup-mysql.md`;
   roteiro de instalação no §12). O `setup.sh` instala o timer desligado até existirem
   `/etc/softspend/backup.env` com o bucket e `/etc/softspend/backup.cnf`.
+- `deploy/ec2/softspend-assinaturas.service`/`.timer` — conciliação diária das
+  assinaturas com a Apple (`docs/assinatura.md` §2.7), log em
+  `/var/log/softspend/assinaturas.log`. O `setup.sh` só liga o timer com as
+  `APPLE_*` no `.env` e os certificados em `Python/certificados_apple/`.
 
 Configure uma única vez no EC2:
 

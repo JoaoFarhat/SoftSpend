@@ -27,7 +27,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # O projeto pede iOS 26 (Xcode 26): usa o Xcode 26 mais novo da máquina.
+      # O projeto compila com Xcode 26: usa o mais novo da máquina.
       - name: Escolher o Xcode
         run: |
           XCODE=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)

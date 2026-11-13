@@ -14,6 +14,8 @@ struct PerfilView: View {
     let usuario: UsuarioMenu
 
     @ObservedObject private var authService = AuthService.shared
+    @ObservedObject private var assinatura = AssinaturaViewModel.shared
+    @State private var mostrarGerenciarAssinatura = false
 
     /// Ausente = ligado (`AvisoDiaria.ativos`).
     @AppStorage(AvisoDiaria.chaveAtivos) private var avisosDiaria = true
@@ -34,6 +36,16 @@ struct PerfilView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 cabecalho
+                // Sempre disponível, mesmo com BILLING_ENFORCEMENT=off: é por
+                // aqui que a revisão da Apple chega à compra (§3.2 e §4).
+                secao("Assinatura")
+                grupo {
+                    NavigationLink {
+                        PlanosAssinaturaView()
+                    } label: {
+                        linhaLink("Assinatura", valor: assinatura.resumo)
+                    }
+                }
                 secao("Conta")
                 grupo {
                     linhaValor("Nome", usuario.nome.isEmpty ? "—" : usuario.nome)
@@ -47,7 +59,7 @@ struct PerfilView: View {
                 grupo {
                     linhaToggle("Avisos de diária", isOn: $avisosDiaria)
                     divisoria
-                    linhaToggle("Leitura automática do comprovante", isOn: Binding(
+                    linhaToggle("Leitura automática (comprovante e fatura)", isOn: Binding(
                         get: { leituraAutomatica == true },
                         set: { leituraAutomatica = $0 }
                     ))
@@ -60,7 +72,7 @@ struct PerfilView: View {
                     divisoria
                     linhaTema
                 }
-                Text("Ligada, a foto do comprovante é enviada para um serviço de leitura (Google Gemini) que preenche valor, local, data e categoria.")
+                Text("Ligada, a foto ou o arquivo (comprovante ou fatura do cartão) é enviado para um serviço de leitura (Google Gemini).")
                     .font(.footnote)
                     .foregroundStyle(Tema.textoFraco)
                     .padding(.horizontal, Espaco.g)
@@ -119,15 +131,18 @@ struct PerfilView: View {
         .navigationTitle("Perfil e ajustes")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear { recarregarCartoes() }
+        .task { await assinatura.carregarEstado() }
         .confirmationDialog("Excluir conta permanentemente?", isPresented: $confirmarExclusao,
                             titleVisibility: .visible) {
             Button("Excluir minha conta", role: .destructive) {
                 Task { await authService.deleteAccount() }
             }
+            Button("Gerenciar assinatura") { mostrarGerenciarAssinatura = true }
             Button("Cancelar", role: .cancel) {}
         } message: {
-            Text("Todos os seus dados, ciclos e gastos serão apagados. Esta ação não pode ser desfeita.")
+            Text("Todos os seus dados, ciclos e gastos serão apagados. Esta ação não pode ser desfeita. Excluir a conta não cancela a assinatura da App Store.")
         }
+        .gerenciarAssinatura(isPresented: $mostrarGerenciarAssinatura)
     }
 
     // MARK: Partes
@@ -215,12 +230,18 @@ struct PerfilView: View {
         .frame(minHeight: 50)
     }
 
-    private func linhaLink(_ titulo: String) -> some View {
+    private func linhaLink(_ titulo: String, valor: String? = nil) -> some View {
         HStack(spacing: Espaco.m) {
             Text(titulo)
                 .font(.body)
                 .foregroundStyle(Tema.texto)
             Spacer(minLength: Espaco.p)
+            if let valor {
+                Text(valor)
+                    .font(.body)
+                    .foregroundStyle(Tema.textoFraco)
+                    .lineLimit(1)
+            }
             Image(systemName: "chevron.right")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(Tema.textoFraco)
