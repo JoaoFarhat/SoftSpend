@@ -504,6 +504,39 @@ aceitam qualquer objeto com `amount`, `date` (`date` ou `datetime`) e
 `merchant_name`/`description`, sem mudar regra nenhuma — a prévia pontua
 compras ainda não gravadas por um adaptador (`_CompraComoTransacao`).
 
+No iOS (tarefa A1, §2.1/§2.5/§2.8), o fluxo mora em
+`ViewModels/ImportarFaturaViewModel.swift` (regra, testável sem tela) e
+`Scenes/ImportarFaturaView.swift` (montagem), aberto pelo menu "⋯" da viagem
+em `DetalheViagemView` ("Importar fatura do cartão", `.sheet`):
+
+- DTOs em `Models/DTOs/FaturaDTO.swift` (`FaturaLida`, `CompraLida`,
+  `MatchPreviaFatura`): a resposta do `ler` e o corpo do `POST /api/faturas`
+  são a mesma estrutura. `date` do Python serializa "2026-07-21" (dia
+  inteiro), que o `JSONDecoder` compartilhado não aceita — `data`,
+  `fechamento` e `vencimento` têm Codable próprio como início do dia no fuso
+  local, para casar com `DiaSoftex` por `isDate(_:inSameDayAs:)`.
+- `Network/FaturaAPI.swift` é o protocolo injetável (como `SyncAPI`);
+  `NetworkManager` implementa `lerFatura` (multipart `arquivo`/`senha?`/
+  `ciclo_id`, `uploadSession` de 90 s), `gravarFatura`, `conciliarFatura` e os
+  confirm/remover de match. Testes usam `SoftSpendTests/FakeFaturaAPI.swift`.
+- Consentimento (§2.8): `Consentimento.leituraAutomatica` vale para
+  comprovante **e fatura** (texto da `ConsentimentoLeituraView` e do Perfil
+  dizem "foto ou arquivo"); `Consentimento.avisoFatura` guarda se o aviso de
+  uma tela da primeira importação já foi aceito. PDF sem `leituraAutomatica`
+  não lê; OFX/CSV não passam pela IA e vão direto.
+- Conferência em structs (`CompraConferencia`): "Já lançadas" (match, com
+  "Confirmar"/"Desvincular"), "Faltam" (desmarcadas por padrão, "Marcar
+  todas"), estornos/encargos (só leitura) e "Fora desta viagem" (recolhido).
+  Os grupos são locais: `dia == nil` = fora — não depende do `dentro_da_viagem`
+  do servidor, que pode estar vazio quando o ciclo ainda não subiu.
+- Ordem do "Importar" (§2.1): `POST /api/faturas` com todas as compras com
+  dia na viagem ("compras mantidas") → só então os gastos marcados são criados
+  via `CiclosViewModel.createNewGasto` (`.pending`, dia local pela data) →
+  `sync(forcar: true)` → `/conciliar` → matches aplicados em `GastosDia` →
+  "Desvincular"/"Confirmar" da conferência refeitos no servidor (o `match` da
+  prévia não tem id; o vínculo é localizado pelo `gasto_id`). Falha na
+  gravação → nenhum gasto criado.
+
 | Variável | Default | Descrição |
 | --- | --- | --- |
 | `ALLOWED_ORIGINS` | `https://softspend.com.br` | Origens CORS permitidas, separadas por vírgula |

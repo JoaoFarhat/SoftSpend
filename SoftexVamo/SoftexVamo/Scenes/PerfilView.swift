@@ -44,7 +44,7 @@ struct PerfilView: View {
                 grupo {
                     linhaToggle("Avisos de diária", isOn: $avisosDiaria)
                     divisoria
-                    linhaToggle("Leitura automática do comprovante", isOn: Binding(
+                    linhaToggle("Leitura automática (comprovante e fatura)", isOn: Binding(
                         get: { leituraAutomatica == true },
                         set: { leituraAutomatica = $0 }
                     ))
@@ -57,7 +57,7 @@ struct PerfilView: View {
                     divisoria
                     linhaTema
                 }
-                Text("Ligada, a foto do comprovante é enviada para um serviço de leitura (Google Gemini) que preenche valor, local, data e categoria.")
+                Text("Ligada, a foto ou o arquivo (comprovante ou fatura do cartão) é enviado para um serviço de leitura (Google Gemini).")
                     .font(.footnote)
                     .foregroundStyle(Tema.textoFraco)
                     .padding(.horizontal, Espaco.g)
