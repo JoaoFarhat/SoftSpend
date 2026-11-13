@@ -201,8 +201,8 @@ enum RegistroApplePay {
         fila.remover(id: compra.id)
     }
 
-    /// Viagem do usuário cujo intervalo contém `data` (em sobreposição, a de
-    /// primeiro dia mais recente — mesma regra do registro) e o `DiaSoftex`
+    /// Viagem do usuário cujo intervalo contém `data` (em sobreposição, a que
+    /// começou primeiro — mesma regra de `cicloDoInicio`) e o `DiaSoftex`
     /// vivo desse dia. `nil` quando não há onde lançar: a folha "sem viagem"
     /// do Início (§1.5) mostra só "Descartar" nesse caso.
     static func viagemEDia(para data: Date, userId: String, ciclos: [CicloSoftex],
@@ -215,7 +215,7 @@ enum RegistroApplePay {
             else { return nil }
             return (ciclo, intervalo.ini)
         }
-        guard let ciclo = contendo.max(by: { $0.1 < $1.1 })?.0 else { return nil }
+        guard let ciclo = contendo.min(by: { comecouAntes($0.0, $0.1, que: $1.0, $1.1) })?.0 else { return nil }
         guard let dia = (ciclo.dias ?? []).first(where: {
             $0.deletadoEm == nil && calendario.isDate($0.data, inSameDayAs: d)
         }) else { return nil }
@@ -283,8 +283,8 @@ enum RegistroApplePay {
         }
     }
 
-    /// Viagem aberta do usuário (intervalo contém hoje; em sobreposição, a de
-    /// primeiro dia mais recente — como `cicloDoInicio`, mas sem cair na
+    /// Viagem aberta do usuário (intervalo contém hoje; em sobreposição, a que
+    /// começou primeiro — como `cicloDoInicio`, mas sem cair na
     /// "próxima" ou na "última encerrada") e o `DiaSoftex` vivo de hoje nela.
     private static func viagemEDiaDeHoje(userId: String, hoje: Date,
                                          calendario: Calendar,

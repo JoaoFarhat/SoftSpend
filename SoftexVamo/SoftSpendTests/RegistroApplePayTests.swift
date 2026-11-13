@@ -175,7 +175,7 @@ struct RegistroApplePayTests {
         #expect(try gastosNoBanco().isEmpty)
     }
 
-    @Test func sobreposicaoUsaADePrimeiroDiaMaisRecente() throws {
+    @Test func sobreposicaoUsaAQueComecouPrimeiro() throws {
         let antiga = viagem(titulo: "Antiga", dias: [dia(10), hoje])
         let recente = viagem(titulo: "Recente", dias: [dia(12), hoje])
 
@@ -184,11 +184,11 @@ struct RegistroApplePayTests {
             Issue.record("esperava .gravado, veio \(r)")
             return
         }
-        #expect(viagem == "Recente")
-        let diaHoje = try #require(diaDeHoje(recente))
+        #expect(viagem == "Antiga")
+        let diaHoje = try #require(diaDeHoje(antiga))
         #expect(diaHoje.gastos.count == 1)
-        #expect(recente.gasto_total == Decimal(string: "12.34"))
-        #expect(antiga.gasto_total == 0)
+        #expect(antiga.gasto_total == Decimal(string: "12.34"))
+        #expect(recente.gasto_total == 0)
     }
 
     @Test func semViagemVaiParaFila() throws {
@@ -343,12 +343,12 @@ struct RegistroApplePayTests {
                                           ciclos: [apagada, deOutro], calendario: cal) == nil)
     }
 
-    @Test func destinoEmSobreposicaoUsaAPrimeiroDiaMaisRecente() throws {
+    @Test func destinoEmSobreposicaoUsaAQueComecouPrimeiro() throws {
         let antiga = viagem(titulo: "Antiga", dias: [dia(10), dia(11), dia(12)])
         let recente = viagem(titulo: "Recente", dias: [dia(11), dia(12)])
         let d = try #require(RegistroApplePay.viagemEDia(para: dia(11), userId: userId,
                                                        ciclos: [antiga, recente], calendario: cal))
-        #expect(d.ciclo === recente)
+        #expect(d.ciclo === antiga)
     }
 
     // MARK: Filtro por cartão (§1.10)

@@ -1026,8 +1026,11 @@ final class CiclosViewModel: ObservableObject {
         salvarNovoCicloLocal(newCiclo, comDias: dias)
 
         self.allCiclos.insert(newCiclo, at: 0)
-        self.atualCiclo = newCiclo
-        self.index = 0
+        // Abre a viagem do início (como no carregamento): criar uma viagem no
+        // período de outra não tira a que está em andamento do lugar.
+        let aberta = cicloInicio ?? newCiclo
+        self.atualCiclo = aberta
+        self.index = allCiclos.firstIndex(where: { $0.id == aberta.id }) ?? 0
 
         Task {
             await SyncManager.shared.sync(forcar: true)
