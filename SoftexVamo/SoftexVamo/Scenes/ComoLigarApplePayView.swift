@@ -92,6 +92,7 @@ struct ComoLigarApplePayView: View {
                 .foregroundStyle(Tema.texto)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Espaco.g)
         .padding(.vertical, Espaco.m)
         .accessibilityElement(children: .combine)
@@ -110,6 +111,7 @@ struct ComoLigarApplePayView: View {
                 .foregroundStyle(Tema.texto)
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, Espaco.g)
         .padding(.vertical, Espaco.m)
         .accessibilityElement(children: .combine)
