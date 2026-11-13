@@ -1,7 +1,8 @@
 import SwiftUI
 
-/// Tela 8: pergunta, uma vez, se a foto do comprovante pode ir para a leitura
-/// automática (Google Gemini). Exigência do `AGENTS.md` (LGPD).
+/// Tela 8: pergunta, uma vez, se a foto ou o arquivo (comprovante ou fatura
+/// do cartão) pode ir para a leitura automática (Google Gemini). Exigência do
+/// `AGENTS.md` (LGPD) e da §2.8 de docs/cartao-sem-open-finance.md.
 struct ConsentimentoLeituraView: View {
     /// `true` = "Permitir leitura"; `false` = "Agora não, preencho eu".
     let aoResponder: (Bool) -> Void
@@ -18,14 +19,14 @@ struct ConsentimentoLeituraView: View {
                     .background(Tema.marcaFundo, in: RoundedRectangle(cornerRadius: Raio.lista, style: .continuous))
                     .accessibilityHidden(true)
 
-                Text("Ler o comprovante para você?")
+                Text("Ler o comprovante ou a fatura para você?")
                     .font(.title.weight(.bold))
                     .foregroundStyle(Tema.texto)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 28)
                     .accessibilityAddTraits(.isHeader)
 
-                Text("A foto é enviada para um serviço de leitura (Google Gemini) que preenche valor, local, data e categoria. Ela não é usada para outra coisa e continua guardada só na sua conta.")
+                Text("A foto ou arquivo (comprovante ou fatura do cartão) é enviado para um serviço de leitura (Google Gemini) que preenche valor, local, data e categoria ou lê as compras. O comprovante continua guardado só na sua conta; a fatura não fica guardada — só as compras que você confirmar.")
                     .padding(.top, Espaco.m)
 
                 Text("Você pode mudar isso depois em Perfil e ajustes.")

@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from limiter import get_real_ip
+from services.assinatura_service import AssinaturaNecessaria, ERRO_SEM_ASSINATURA
 from logging_config import request_id_var
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,25 @@ def setup_exception_handlers(app):
                 },
             )
         return build_error_response(request, exc.status_code, exc.detail)
+
+    @app.exception_handler(AssinaturaNecessaria)
+    async def assinatura_necessaria_handler(
+        request: Request, exc: AssinaturaNecessaria
+    ):
+        logger.info(
+            ERRO_SEM_ASSINATURA,
+            extra={"status_code": 403, "path": request.url.path},
+        )
+        # `detail` é o contrato com o app; `error` e `request_id` mantêm o
+        # formato dos outros erros da API.
+        return JSONResponse(
+            status_code=403,
+            content={
+                "detail": ERRO_SEM_ASSINATURA,
+                "error": ERRO_SEM_ASSINATURA,
+                "request_id": get_request_id(request),
+            },
+        )
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(request: Request, exc: RequestValidationError):

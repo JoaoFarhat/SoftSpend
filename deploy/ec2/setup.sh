@@ -84,6 +84,40 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Conciliação diária das assinaturas (docs/assinatura.md §2.7)
+#
+# Instala o timer, mas só o liga quando o .env da API tem as variáveis APPLE_*
+# e Python/certificados_apple/ tem os certificados raiz.
+# ---------------------------------------------------------------------------
+echo "Instalando conciliação diária das assinaturas..."
+APP_ENV="$APP_DIR/.env"
+touch "$LOG_DIR/assinaturas.log"
+sudo cp "$(dirname "$0")/softspend-assinaturas.service" "$(dirname "$0")/softspend-assinaturas.timer" /etc/systemd/system/
+sudo systemctl daemon-reload
+apple_ok=true
+for var in APPLE_BUNDLE_ID APPLE_APP_ID APPLE_ISSUER_ID APPLE_KEY_ID; do
+    if ! grep -Eq "^${var}=[^[:space:]]+" "$APP_ENV" 2>/dev/null; then
+        apple_ok=false
+    fi
+done
+if ! grep -Eq '^APPLE_PRIVATE_KEY(_PATH)?=[^[:space:]]+' "$APP_ENV" 2>/dev/null; then
+    apple_ok=false
+fi
+if ! ls "$APP_DIR"/certificados_apple/*.cer >/dev/null 2>&1; then
+    apple_ok=false
+fi
+if [ "$apple_ok" = true ]; then
+    sudo systemctl enable --now softspend-assinaturas.timer
+    echo "Timer das assinaturas ligado: systemctl list-timers softspend-assinaturas.timer"
+else
+    sudo systemctl disable --now softspend-assinaturas.timer 2>/dev/null || true
+    echo "AVISO: conciliação das assinaturas instalada mas desligada. Preencha"
+    echo "      APPLE_* em $APP_ENV e os certificados em"
+    echo "      $APP_DIR/certificados_apple/ (docs/assinatura.md §2.2) e rode"
+    echo "      este script de novo."
+fi
+
+# ---------------------------------------------------------------------------
 # nginx + TLS
 #
 # A config final referencia os certificados do Let's Encrypt. Numa maquina nova
