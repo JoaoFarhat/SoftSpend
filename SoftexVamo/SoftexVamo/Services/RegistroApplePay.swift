@@ -90,7 +90,9 @@ nonisolated enum ValorDaCompra {
 
         // "12,34,56": a vírgula sobrou no meio — entrada malformada, não valor.
         guard !decimalTexto.contains(","),
-              let valor = Decimal(string: decimalTexto), valor != 0 else { return nil }
+              let lido = Decimal(string: decimalTexto), lido != 0 else { return nil }
+        // `NSDecimalRound` pede `UnsafePointer` — cópia var, como em ResumoViagem.
+        var valor = lido
         var arredondado = Decimal()
         NSDecimalRound(&arredondado, &valor, 2, .plain)
         guard arredondado > 0, arredondado <= teto else { return nil }
