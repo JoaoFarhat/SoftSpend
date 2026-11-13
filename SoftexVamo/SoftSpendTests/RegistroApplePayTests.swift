@@ -199,7 +199,7 @@ struct RegistroApplePayTests {
         #expect(item.valor == Decimal(string: "12.34"))
         #expect(item.estabelecimento == "Padaria")
         #expect(item.cartao == "Nubank")
-        #expect(item.categoria == .OUTROS)
+        #expect(item.categoria == .ALIMENTACAO)  // "padaria" está nas palavras de alimentação do InterpretadorComprovante
         #expect(item.recebidaEm == agora)
         #expect(try gastosNoBanco().isEmpty)
     }
