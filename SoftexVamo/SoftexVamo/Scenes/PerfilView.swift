@@ -50,6 +50,8 @@ struct PerfilView: View {
                     ))
                     divisoria
                     linhaTema
+                    divisoria
+                    linhaApplePay
                 }
                 Text("Ligada, a foto do comprovante é enviada para um serviço de leitura (Google Gemini) que preenche valor, local, data e categoria.")
                     .font(.footnote)
@@ -193,6 +195,27 @@ struct PerfilView: View {
         }
         .padding(.horizontal, Espaco.g)
         .frame(minHeight: 50)
+    }
+
+    /// "Apple Pay (atalho)" (§1.6): abre o passo a passo para ligar a
+    /// automação do Atalhos que grava a compra do Apple Pay sozinha.
+    private var linhaApplePay: some View {
+        NavigationLink {
+            ComoLigarApplePayView()
+        } label: {
+            HStack(spacing: Espaco.m) {
+                Text("Apple Pay (atalho)")
+                    .font(.body)
+                    .foregroundStyle(Tema.texto)
+                Spacer(minLength: Espaco.p)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Tema.textoFraco)
+                    .accessibilityHidden(true)
+            }
+            .padding(.horizontal, Espaco.g)
+            .frame(minHeight: 50)
+        }
     }
 
     #if DEBUG

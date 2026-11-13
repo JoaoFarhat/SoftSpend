@@ -20,7 +20,7 @@ final class AuthService: ObservableObject {
 
     var errorManager: ErrorManager?
 
-    private let userKey = "user_data"
+    private let userKey = UsuarioSalvo.chave
 
     init() {
         checkAuthentication()
