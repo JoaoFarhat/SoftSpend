@@ -274,7 +274,7 @@ struct ImportarFaturaTests {
         await conferindo(vm)
 
         vm.marcarTodas()
-        #expect(vm.faltam.allSatisfy(\.marcada))
+        #expect(vm.faltam.allSatisfy { $0.marcada })
         // Estorno não entra no "marcar todas" (nem é selecionável).
         #expect(vm.estornosEEncargos.count == 1)
 
