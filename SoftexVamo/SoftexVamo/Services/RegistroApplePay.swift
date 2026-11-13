@@ -53,7 +53,7 @@ nonisolated enum ValorDaCompra {
         guard s.allSatisfy({ ("0"..."9").contains($0) || $0 == "." }),
               s.filter({ $0 == "." }).count <= 1,
               s.contains(where: { ("0"..."9").contains($0) }),
-              let valor = Decimal(string: s, locale: Locale(identifier: "en_US_POSIX"))
+              var valor = Decimal(string: s, locale: Locale(identifier: "en_US_POSIX"))
         else { return nil }
         var arredondado = Decimal()
         NSDecimalRound(&arredondado, &valor, 2, .plain)
