@@ -35,8 +35,8 @@ nonisolated struct RegistrarGastoIntent: AppIntent {
     @Parameter(title: "Estabelecimento")
     var estabelecimento: String
 
-    /// Só aparece no diálogo de resposta e na fila "sem viagem"; **não** é
-    /// gravado no gasto (§1.8).
+    /// Aparece no diálogo de resposta, na fila "sem viagem" e alimenta a
+    /// lista de cartões do Perfil (§1.10); **não** é gravado no gasto (§1.8).
     @Parameter(title: "Cartão")
     var cartao: String?
 
@@ -88,6 +88,9 @@ nonisolated struct RegistrarGastoIntent: AppIntent {
                 resposta += " (\(cartao))"
             }
             return .result(dialog: IntentDialog(stringLiteral: resposta))
+
+        case .ignoradoCartaoDesligado(let cartao):
+            return .result(dialog: IntentDialog(stringLiteral: "Compra do cartão “\(cartao)” ignorada (desligado no SoftSpend)."))
 
         case .duplicado:
             return .result(dialog: "Essa compra já estava registrada.")

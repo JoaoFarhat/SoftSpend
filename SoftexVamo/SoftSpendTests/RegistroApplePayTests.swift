@@ -11,6 +11,7 @@ struct RegistroApplePayTests {
     let container: ModelContainer
     let ctx: ModelContext
     let fila: ComprasAguardandoViagem
+    let cartoes: CartoesApplePay
     let cal: Calendar
     let agora: Date
     let hoje: Date
@@ -25,6 +26,8 @@ struct RegistroApplePayTests {
         let arquivo = FileManager.default.temporaryDirectory
             .appendingPathComponent("fila-\(UUID().uuidString).json")
         fila = ComprasAguardandoViagem(arquivo: arquivo)
+        cartoes = CartoesApplePay(arquivo: FileManager.default.temporaryDirectory
+            .appendingPathComponent("cartoes-\(UUID().uuidString).json"))
         var c = Calendar(identifier: .gregorian)
         c.timeZone = TimeZone(identifier: "America/Cuiaba")!
         cal = c
@@ -67,9 +70,10 @@ struct RegistroApplePayTests {
     }
 
     func registrar(_ valor: String = "12,34", _ estabelecimento: String = "Padaria",
-                   userId: String? = "u1") throws -> ResultadoRegistro {
+                   cartao: String? = nil, userId: String? = "u1") throws -> ResultadoRegistro {
         try RegistroApplePay.registrar(valor: valor, estabelecimento: estabelecimento,
-                                       userId: userId, em: ctx, fila: fila,
+                                       cartao: cartao, userId: userId, em: ctx,
+                                       fila: fila, cartoes: cartoes,
                                        agora: agora, calendario: cal)
     }
 
@@ -190,7 +194,8 @@ struct RegistroApplePayTests {
     @Test func semViagemVaiParaFila() throws {
         let r = try RegistroApplePay.registrar(valor: "12,34", estabelecimento: "Padaria",
                                                cartao: "Nubank", userId: userId,
-                                               em: ctx, fila: fila, agora: agora, calendario: cal)
+                                               em: ctx, fila: fila, cartoes: cartoes,
+                                               agora: agora, calendario: cal)
         #expect(r == .guardadoSemViagem(titulo: "Padaria", valor: Decimal(string: "12.34")!))
         let itens = fila.ler(userId: userId)
         try #require(itens.count == 1)
@@ -223,7 +228,7 @@ struct RegistroApplePayTests {
         #expect(throws: (any Error).self) {
             try RegistroApplePay.registrar(valor: "12,34", estabelecimento: "Padaria",
                                            userId: userId, em: ctx, fila: quebrada,
-                                           agora: agora, calendario: cal)
+                                           cartoes: cartoes, agora: agora, calendario: cal)
         }
         #expect(try gastosNoBanco().isEmpty)
     }
@@ -344,6 +349,124 @@ struct RegistroApplePayTests {
         let d = try #require(RegistroApplePay.viagemEDia(para: dia(11), userId: userId,
                                                        ciclos: [antiga, recente], calendario: cal))
         #expect(d.ciclo === recente)
+    }
+
+    // MARK: Filtro por cartão (§1.10)
+
+    @Test func cartaoNovoEntraNaListaLigado() throws {
+        _ = viagem(dias: [hoje])
+
+        let r = try registrar(cartao: "  Nubank  ")
+        guard case .gravado = r else {
+            Issue.record("esperava .gravado, veio \(r)")
+            return
+        }
+
+        // O nome entra aparado e o cartão nasce ligado.
+        let lista = cartoes.ler(userId: userId)
+        try #require(lista.count == 1)
+        #expect(lista[0].nome == "Nubank")
+        #expect(lista[0].ligado)
+        #expect(lista[0].vistoEm == agora)
+    }
+
+    @Test func cartaoDesligadoNaoGravaNemVaiParaFila() throws {
+        _ = viagem(dias: [hoje])
+        _ = try registrar(cartao: "Nubank")
+        cartoes.definirLigado(nome: "Nubank", userId: userId, ligado: false)
+
+        let r = try registrar("20,00", "Farmácia", cartao: "Nubank")
+        #expect(r == .ignoradoCartaoDesligado(cartao: "Nubank"))
+        #expect(try gastosNoBanco().count == 1)  // só a primeira compra ficou
+        #expect(fila.ler(userId: userId).isEmpty)
+    }
+
+    @Test func cartaoDesligadoTambemIgnoraCompraQueIriaParaFila() throws {
+        // Sem viagem aberta a compra iria para a fila; com o cartão desligado some.
+        _ = try registrar(cartao: "Nubank")
+        cartoes.definirLigado(nome: "Nubank", userId: userId, ligado: false)
+        try #require(fila.ler(userId: userId).count == 1)
+
+        #expect(try registrar("20,00", "Farmácia", cartao: "Nubank")
+            == .ignoradoCartaoDesligado(cartao: "Nubank"))
+        #expect(fila.ler(userId: userId).count == 1)  // nada novo entrou
+        #expect(try gastosNoBanco().isEmpty)
+    }
+
+    @Test func religarVoltaAGravar() throws {
+        _ = viagem(dias: [hoje])
+        _ = try registrar(cartao: "Nubank")
+        cartoes.definirLigado(nome: "Nubank", userId: userId, ligado: false)
+        #expect(try registrar("20,00", "Farmácia", cartao: "Nubank")
+            == .ignoradoCartaoDesligado(cartao: "Nubank"))
+
+        cartoes.definirLigado(nome: "Nubank", userId: userId, ligado: true)
+        let r = try registrar("20,00", "Farmácia", cartao: "Nubank")
+        guard case .gravado = r else {
+            Issue.record("esperava .gravado, veio \(r)")
+            return
+        }
+        #expect(try gastosNoBanco().count == 2)
+    }
+
+    @Test func chaveDoCartaoEhPorUsuario() throws {
+        _ = viagem(dias: [hoje])
+        _ = viagem(userId: "u2", titulo: "Dois", dias: [hoje])
+        _ = try registrar(cartao: "Nubank")
+        cartoes.definirLigado(nome: "Nubank", userId: userId, ligado: false)
+
+        // O mesmo nome de cartão de outro usuário continua ligado.
+        let r = try registrar(cartao: "Nubank", userId: "u2")
+        guard case .gravado(_, _, let viagem, _) = r else {
+            Issue.record("esperava .gravado, veio \(r)")
+            return
+        }
+        #expect(viagem == "Dois")
+        #expect(cartoes.ler(userId: "u2").first?.ligado == true)
+        #expect(cartoes.ler(userId: "u1").first?.ligado == false)
+    }
+
+    @Test func compraSemNomeDeCartaoEntraComoSemNome() throws {
+        _ = viagem(dias: [hoje])
+        _ = try registrar()  // automação sem a variável "Cartão"
+
+        let lista = cartoes.ler(userId: userId)
+        try #require(lista.count == 1)
+        #expect(lista[0].nome == CartoesApplePay.nomePadrao)
+
+        // Desligando o "Cartão sem nome", compras sem cartão passam a ser ignoradas.
+        cartoes.definirLigado(nome: CartoesApplePay.nomePadrao, userId: userId, ligado: false)
+        #expect(try registrar("20,00", "Farmácia")
+            == .ignoradoCartaoDesligado(cartao: CartoesApplePay.nomePadrao))
+        #expect(try gastosNoBanco().count == 1)
+    }
+
+    @Test func desligarNaoApagaGastosJaLancados() throws {
+        let ciclo = viagem(dias: [hoje])
+        _ = try registrar("12,34", "Padaria", cartao: "Nubank")
+        cartoes.definirLigado(nome: "Nubank", userId: userId, ligado: false)
+
+        let gastos = try gastosNoBanco()
+        try #require(gastos.count == 1)
+        #expect(gastos[0].deletadoEm == nil)
+        #expect(ciclo.gasto_total == Decimal(string: "12.34"))
+    }
+
+    /// Falha ao ler/gravar a lista de cartões: o erro sobe e a ação responde
+    /// "lance no app" — sem a lista não dá para saber se o cartão está ligado.
+    @Test func falhaNaListaDeCartoesPropagaErro() throws {
+        _ = viagem(dias: [hoje])
+        let quebrada = CartoesApplePay(
+            arquivo: FileManager.default.temporaryDirectory
+                .appendingPathComponent("pasta-\(UUID().uuidString)")
+                .appendingPathComponent("cartoes.json"))
+        #expect(throws: (any Error).self) {
+            try RegistroApplePay.registrar(valor: "12,34", estabelecimento: "Padaria",
+                                           userId: userId, em: ctx, fila: fila,
+                                           cartoes: quebrada, agora: agora, calendario: cal)
+        }
+        #expect(try gastosNoBanco().isEmpty)
+        #expect(fila.ler(userId: userId).isEmpty)
     }
 
     // MARK: Recusas

@@ -227,11 +227,14 @@ Spec: `docs/cartao-sem-open-finance.md` §1 (partes A e B implementadas).
 - `Intents/SoftSpendAtalhos.swift` — `AppShortcutsProvider` com frases em
   português contendo `\(.applicationName)` (exigência da Apple).
 - `Services/RegistroApplePay.swift` — regra pura (recebe `ModelContext`,
-  `userId`, `agora`, `calendario`, fila): parse do valor (`ValorDaCompra`),
-  categoria por `InterpretadorComprovante.inferirCategoria`, dia de hoje da
-  viagem aberta (em sobreposição, a de primeiro dia mais recente), duplicata
-  em janela deslizante de 60 s (mesmo valor + estabelecimento normalizado, em
-  gasto vivo **ou** item da fila). Sem viagem/dia de hoje, vai para a fila.
+  `userId`, `agora`, `calendario`, fila, cartoes): filtro por cartão
+  (`CartoesApplePay.registrarChegada` — todo nome que chega entra na lista,
+  desligado devolve `.ignoradoCartaoDesligado` antes de gravar ou ir para a
+  fila), parse do valor (`ValorDaCompra`), categoria por
+  `InterpretadorComprovante.inferirCategoria`, dia de hoje da viagem aberta
+  (em sobreposição, a de primeiro dia mais recente), duplicata em janela
+  deslizante de 60 s (mesmo valor + estabelecimento normalizado, em gasto
+  vivo **ou** item da fila). Sem viagem/dia de hoje, vai para a fila.
 - `Services/UsuarioSalvo.swift` — `userId` lido do `user_data` do
   `UserDefaults` **sem Keychain**: a ação pode rodar com o iPhone trancado e o
   token é `WhenUnlockedThisDeviceOnly`. Sem `user_data`, recusa
@@ -249,6 +252,16 @@ Spec: `docs/cartao-sem-open-finance.md` §1 (partes A e B implementadas).
   **lança** quando a leitura ou a gravação falha (o `registrar` propaga e
   a ação responde "lance no app"), enquanto `remover` só loga e deixa o
   item.
+- `Services/CartoesApplePay.swift` — cartões que já chegaram pela ação, em
+  JSON (`Application Support/cartoes-apple-pay.json`, por usuário, mesmas
+  regras de arquivo da fila: fora do SwiftData, escrita atômica, `NSLock`,
+  corrompido para quarentena). O nome é o `cartao` do intent aparado; sem
+  nome vira `"Cartão sem nome"` (`nomePadrao`). `registrarChegada` cria o
+  cartão **ligado**, atualiza `vistoEm` e devolve `ligado`; **lança** em
+  falha de leitura/gravação (sem a lista não dá para saber se está ligado).
+  `definirLigado` só loga em falha. No Perfil, a seção "Cartões do Apple
+  Pay" lista os cartões com uma chave cada (`recarregarCartoes` no
+  `onAppear`); desligar não apaga gastos já lançados.
 - Aviso da fila no `InicioView` (`AlertaPendencia` com `textoComprasApplePay`,
   lido por `recarregarFila` no `task(id: hoje)`) e folha
   `Scenes/ComprasSemViagemView.swift`: cada item mostra estabelecimento,
@@ -262,7 +275,9 @@ Spec: `docs/cartao-sem-open-finance.md` §1 (partes A e B implementadas).
   item da fila depois do `save` e grava `criadoEm = recebidaEm`.
 - `Scenes/ComoLigarApplePayView.swift` — tela de ajuda na seção Preferências
   de `PerfilView` (linha "Apple Pay (atalho)"); a automação é criada pelo
-  usuário no app Atalhos (a Apple não permite criar pelo app).
+  usuário no app Atalhos (a Apple não permite criar pelo app). O passo a
+  passo ensina a marcar, em **Cartões**, só os cartões que devem entrar —
+  com "Qualquer cartão", todas as compras entram.
 
 ### Pegadinhas SwiftData / SwiftUI (crashes conhecidos)
 

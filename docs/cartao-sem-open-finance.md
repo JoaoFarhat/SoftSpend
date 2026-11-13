@@ -36,7 +36,7 @@ App Intent no alvo do app (sem extensão), com `openAppWhenRun = false`.
 | --- | --- | --- | --- |
 | `valor` | `String` | sim | Texto da variável "Valor" da automação |
 | `estabelecimento` | `String` | sim | Vira o título do gasto (cortado em 60 caracteres, sem espaços nas pontas) |
-| `cartao` | `String?` | não | Aparece só no diálogo de resposta e na fila (§1.5). **Não é gravado no gasto** na v1 (veja §1.8) |
+| `cartao` | `String?` | não | Aparece no diálogo de resposta, na fila (§1.5) e alimenta o filtro por cartão (§1.10). **Não é gravado no gasto** na v1 (veja §1.8) |
 
 - Título da ação: "Registrar gasto". Resposta: um diálogo curto, mostrado como confirmação ou erro no Atalhos (ex.: "Gasto de R$ 12,34 em Padaria Pão Quente registrado em Cuiabá, dia 3.").
 - `AppShortcutsProvider` (`SoftSpendAtalhos`) com a ação e frases em português que contêm `\(.applicationName)` (a Apple exige o nome do app em toda frase), por exemplo "Registrar gasto no \(.applicationName)". Isso faz a ação aparecer no Atalhos e na Siri sem o usuário montar nada.
@@ -55,6 +55,7 @@ Arquivo novo `SoftexVamo/SoftexVamo/Services/RegistroApplePay.swift`. A ação s
 enum ResultadoRegistro: Equatable {
     case gravado(titulo: String, valor: Decimal, viagem: String, dia: Date)
     case guardadoSemViagem(titulo: String, valor: Decimal)   // vai para a fila (§1.5)
+    case ignoradoCartaoDesligado(cartao: String)             // cartão desligado no Perfil (§1.10)
     case duplicado                                          // já registrado, nada mudou
     case recusado(MotivoRecusa)                             // .valorInvalido, .moedaEstrangeira, .semUsuario
 }
@@ -120,11 +121,12 @@ struct CompraAguardandoViagem: Codable, Identifiable {
 
 `ComoLigarApplePayView`, aberta por uma linha **"Apple Pay (atalho)"** na seção Preferências de `PerfilView`. Curta, texto simples, estilo do `Tema`:
 
-1. Abra o app **Atalhos** → aba **Automação** → **+** → **Transação** (em alguns iOS aparece como **Carteira**).
-2. Escolha os cartões que quer acompanhar e marque **Executar imediatamente**.
-3. Toque em **Criar novo atalho**, procure **SoftSpend → Registrar gasto** e preencha: Valor = **Valor**, Estabelecimento = **Estabelecimento**, Cartão = **Cartão ou passe**. (Usar os nomes que o iOS mostra; ver §1.2.)
-4. Desligue **Notificar quando executar** (opcional, para não receber um aviso a cada compra).
-5. Pague algo com o Apple Pay e confira no app.
+1. Abra o app **Atalhos** → aba **Automação** → **+** → **Transação** (no iOS 26 aparece como **Carteira**).
+2. Em **Cartões**, marque só os cartões que devem gravar gasto no SoftSpend. Com **Qualquer cartão** marcado, **todas as compras entram** — inclusive as de cartões que você não quer no app.
+3. Marque **Executar imediatamente**.
+4. Toque em **Criar novo atalho**, procure **SoftSpend → Registrar gasto** e preencha: Valor = **Valor**, Estabelecimento = **Estabelecimento**, Cartão = **Cartão ou passe**. (Usar os nomes que o iOS mostra; ver §1.2.)
+5. Desligue **Notificar quando executar** (opcional, para não receber um aviso a cada compra).
+6. Pague algo com o Apple Pay e confira no app.
 
 Seção **"O que esperar"**, com as limitações honestas, sem enfeite:
 - Só vale para compras pelo **Apple Pay** no iPhone ou no Apple Watch (não pega cartão físico, compra online sem Apple Pay, boleto, Pix).
@@ -132,6 +134,7 @@ Seção **"O que esperar"**, com as limitações honestas, sem enfeite:
 - **Alguns bancos e cartões não disparam** a automação. Se a sua compra não aparecer, lance à mão ou escaneie o comprovante.
 - Só reais; compra em outra moeda é recusada com aviso.
 - O app escolhe a categoria pelo nome do local; confira e troque se precisar.
+- Os cartões que já compraram aparecem em **Perfil → Cartões do Apple Pay**, cada um com uma chave liga/desliga (§1.10). Desligado, a compra é ignorada — e os gastos já lançados ficam.
 - "Nada sai do seu iPhone para outro serviço: o gasto é gravado no app e sobe só para o servidor do SoftSpend, como qualquer gasto."
 
 A tela fica atrás da linha de Perfil e também aparece uma vez como dica no primeiro uso do aviso da fila (opcional). Sem botão "criar automação": a Apple não permite.
@@ -163,6 +166,19 @@ Testes (Swift Testing, banco em memória, como `GastoDuplicadoTests`):
 - `BancoLocal` e a ação: um teste de fumaça que a ação existe e que o container compartilhado não é criado duas vezes.
 
 Pronto quando o CI (`.github/workflows/ios.yml`) compilar e todos os testes passarem; conferir no iPhone real o passo a passo do §1.2 e **anotar no PR os nomes exatos das variáveis do iOS** para ajustar o texto da §1.6.
+
+### 1.10 Escolher quais cartões entram (decisão de 13/11)
+
+A pessoa pode ter mais de um cartão no Apple Pay. Dois filtros, que se completam:
+
+- **Na automação** (§1.6, passo 2): em **Cartões**, marca só os cartões que devem ir para o SoftSpend. Com **Qualquer cartão**, todas as compras entram — inclusive dos cartões que a pessoa não quer no app.
+- **No app**: todo nome de cartão que chega pela ação entra numa lista por usuário — `cartoes-apple-pay.json` em `Application Support` (`Services/CartoesApplePay.swift`, mesmas regras de arquivo da fila do §1.5: escrita atômica, `NSLock`, corrompido vai para quarentena, fora do SwiftData de propósito). O nome é o `cartao` do `RegistrarGastoIntent` aparado; sem nome, entra como **"Cartão sem nome"**.
+
+No Perfil, a seção **"Cartões do Apple Pay"** lista esses cartões com uma chave liga/desliga cada; cartão novo nasce **ligado**. Em `RegistroApplePay.registrar`, compra de cartão desligado é ignorada **antes de gravar ou ir para a fila** (resultado `.ignoradoCartaoDesligado`, resposta do atalho `Compra do cartão X ignorada (desligado no SoftSpend)`). **Desligar não apaga os gastos já lançados.**
+
+A chegada marca `vistoEm` (ordena a lista, mais recentes primeiro). Falha ao ler/gravar a lista faz `registrarChegada` lançar — sem a lista não dá para saber se o cartão está ligado, então a ação responde "lance no app" em vez de gravar uma compra que o usuário mandou ignorar.
+
+Testes: cartão novo entra e aparece na lista; cartão desligado não grava nem vai para a fila; religar volta a gravar; isolamento por usuário; compra sem nome de cartão. Pronto quando o `xcodebuild test` do CI passa (`.github/workflows/ios.yml`).
 
 ---
 
