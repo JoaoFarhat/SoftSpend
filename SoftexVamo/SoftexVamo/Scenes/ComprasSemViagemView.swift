@@ -25,6 +25,10 @@ struct ComprasSemViagemView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var viewModel: CiclosViewModel
 
+    /// Compra esperando o "sim" do diálogo de descarte — a compra some da fila
+    /// para sempre, então um toque não basta.
+    @State private var paraDescartar: CompraAguardandoViagem?
+
     /// `UsuarioSalvo` cobre o app acordado pela ação antes do
     /// `checkAuthentication` encher `currentUser`.
     private var donoFila: String {
@@ -54,6 +58,19 @@ struct ComprasSemViagemView: View {
                 // Lançou ou descartou a última: a folha fecha sozinha.
                 if vazia { dismiss() }
             }
+            .confirmationDialog("Descartar esta compra?",
+                                isPresented: Binding(get: { paraDescartar != nil },
+                                                     set: { if !$0 { paraDescartar = nil } }),
+                                titleVisibility: .visible) {
+                Button("Descartar", role: .destructive) {
+                    if let compra = paraDescartar { descartar(compra) }
+                }
+                Button("Cancelar", role: .cancel) {}
+            } message: {
+                if let compra = paraDescartar {
+                    Text("\(compra.estabelecimento), \(formatarBRL(compra.valor)). A compra sai da fila e não tem desfazer.")
+                }
+            }
         }
         .presentationDetents([.medium, .large])
     }
@@ -62,8 +79,11 @@ struct ComprasSemViagemView: View {
 
     @ViewBuilder
     private func cartao(_ compra: CompraAguardandoViagem) -> some View {
+        // Destino lido do banco local, como `viagemEDiaDeHoje` faz no registro:
+        // `allCiclos` do ViewModel pode ainda não ter carregado e a folha
+        // diria "Crie a viagem desta data" por engano.
         let destino = RegistroApplePay.viagemEDia(para: compra.recebidaEm, userId: donoFila,
-                                                ciclos: viewModel.allCiclos)
+                                                em: contexto)
         VStack(alignment: .leading, spacing: Espaco.m) {
             HStack(spacing: Espaco.m) {
                 IconeCategoria(compra.categoria, tamanho: 36)
@@ -106,7 +126,7 @@ struct ComprasSemViagemView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: Espaco.p)
-                Button("Descartar", role: .destructive) { descartar(compra) }
+                Button("Descartar", role: .destructive) { paraDescartar = compra }
                     .font(.subheadline)
             }
         }

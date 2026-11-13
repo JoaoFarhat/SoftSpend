@@ -212,6 +212,22 @@ struct RegistroApplePayTests {
         #expect(fila.ler(userId: userId).count == 1)
     }
 
+    /// Falha ao gravar a fila (arquivo em pasta que não existe): o erro sobe e
+    /// a ação responde "Não consegui gravar a compra. Lance no app." — não
+    /// "guardado" com a compra perdida.
+    @Test func falhaNaGravacaoDaFilaPropagaErro() throws {
+        let quebrada = ComprasAguardandoViagem(
+            arquivo: FileManager.default.temporaryDirectory
+                .appendingPathComponent("pasta-\(UUID().uuidString)")
+                .appendingPathComponent("fila.json"))
+        #expect(throws: (any Error).self) {
+            try RegistroApplePay.registrar(valor: "12,34", estabelecimento: "Padaria",
+                                           userId: userId, em: ctx, fila: quebrada,
+                                           agora: agora, calendario: cal)
+        }
+        #expect(try gastosNoBanco().isEmpty)
+    }
+
     // MARK: Duplicata (janela deslizante de 60 s)
 
     @Test func duplicataEm30sEhBarrada() throws {
@@ -254,7 +270,7 @@ struct RegistroApplePayTests {
     }
 
     @Test func duplicataContraItemDaFila() throws {
-        fila.adicionar(CompraAguardandoViagem(
+        try fila.adicionar(CompraAguardandoViagem(
             id: UUID(), userId: userId, valor: Decimal(string: "12.34")!, estabelecimento: "Padaria",
             cartao: nil, categoria: .OUTROS, recebidaEm: agora.addingTimeInterval(-30)))
 
