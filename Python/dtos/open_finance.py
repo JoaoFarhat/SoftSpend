@@ -21,7 +21,8 @@ class OpenFinanceConnectionResponse(BaseModel):
 
 class CreditCardAccountResponse(BaseModel):
     id: int
-    conexao_id: int
+    conexao_id: int | None
+    origem: str
     account_id: str
     institution_name: str | None
     name: str | None

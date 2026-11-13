@@ -24,8 +24,11 @@ def _normalizar_texto(valor: str | None) -> str:
 
 def _pontuacao_texto(gasto: models.Gasto, transacao) -> int:
     titulo = _normalizar_texto(gasto.titulo)
+    # `transacao` não precisa ser o ORM: basta expor os campos de texto.
     descricao = _normalizar_texto(
-        transacao.merchant_name or transacao.description or transacao.description_raw
+        getattr(transacao, "merchant_name", None)
+        or getattr(transacao, "description", None)
+        or getattr(transacao, "description_raw", None)
     )
     if not titulo or not descricao:
         return 0
@@ -48,10 +51,14 @@ def _pontuacao(gasto: models.Gasto, transacao) -> int | None:
         return None
 
     data_gasto = _data_gasto(gasto)
-    if not data_gasto or not transacao.date:
+    data_transacao = getattr(transacao, "date", None)
+    if not data_gasto or not data_transacao:
         return None
+    # A coluna do ORM é DateTime; a compra da prévia da fatura é `date`.
+    if isinstance(data_transacao, datetime):
+        data_transacao = data_transacao.date()
 
-    diferenca_dias = (transacao.date.date() - data_gasto).days
+    diferenca_dias = (data_transacao - data_gasto).days
     if diferenca_dias < -1 or diferenca_dias > 5:
         return None
 
