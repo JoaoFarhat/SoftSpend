@@ -40,6 +40,16 @@ final class CartoesApplePay {
     /// Nome guardado quando a automação não manda o cartão (ou manda vazio).
     static let nomePadrao = "Cartão sem nome"
 
+    /// Teto do nome guardado: a automação manda texto livre e a lista do
+    /// Perfil não precisa de mais que isso para identificar o cartão.
+    static let tamanhoMaximoNome = 60
+
+    /// Teto de cartões por usuário. Chegando o 21º, sai o de `vistoEm` mais
+    /// antigo **que esteja ligado** — um desligado nunca sai, porque ao
+    /// voltar pela ação entraria ligado de novo, desfazendo a escolha do
+    /// usuário. Se os 20 estiverem desligados, a lista passa de 20.
+    static let maximoPorUsuario = 20
+
     static let shared = CartoesApplePay()
 
     private static let logger = Logger(subsystem: "br.com.softspend", category: "CartoesApplePay")
@@ -55,11 +65,13 @@ final class CartoesApplePay {
         self.arquivo = arquivo ?? dir.appendingPathComponent("cartoes-apple-pay.json")
     }
 
-    /// `cartao` do `RegistrarGastoIntent` vira o nome guardado: aparado, e
-    /// vazio ou ausente vira `nomePadrao`.
+    /// `cartao` do `RegistrarGastoIntent` vira o nome guardado: aparado,
+    /// cortado em `tamanhoMaximoNome` caracteres, e vazio ou ausente vira
+    /// `nomePadrao`.
     static func nomeNormalizado(_ cartao: String?) -> String {
         let limpo = (cartao ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return limpo.isEmpty ? nomePadrao : limpo
+        let cortado = String(limpo.prefix(tamanhoMaximoNome))
+        return cortado.isEmpty ? nomePadrao : cortado
     }
 
     /// Cartões do usuário, mais recentes primeiro (a lista do Perfil). Os de
@@ -85,22 +97,42 @@ final class CartoesApplePay {
     /// Marca a chegada de uma compra do cartão: nome novo entra **ligado**,
     /// conhecido só atualiza `vistoEm`. Devolve se o cartão está ligado — o
     /// `registrar` ignora a compra quando `false`. **Lança** quando a leitura
-    /// ou a gravação falha: sem a lista não dá para saber se o cartão está
-    /// desligado, então a ação responde "lance no app" em vez de gravar a
-    /// compra que o usuário mandou ignorar.
+    /// falha: sem a lista não dá para saber se o cartão está desligado,
+    /// então a ação responde "lance no app" em vez de gravar a compra que o
+    /// usuário mandou ignorar. Na gravação, lança só para cartão novo (ele
+    /// sumiria da lista); para cartão conhecido o `vistoEm` é cosmético —
+    /// só sai no log e o `ligado` lido é devolvido, sem impedir a compra.
     @discardableResult
     func registrarChegada(nome: String, userId: String, vistoEm: Date = .now) throws -> Bool {
         trava.lock()
         defer { trava.unlock() }
         var lista = try todosTrancado()
         if let i = lista.firstIndex(where: { $0.userId == userId && $0.nome == nome }) {
+            let ligado = lista[i].ligado
             lista[i].vistoEm = vistoEm
-            try gravar(lista)
-            return lista[i].ligado
+            do {
+                try gravar(lista)
+            } catch {
+                Self.logger.error("Não gravou o vistoEm do cartão: \(error.localizedDescription, privacy: .public)")
+            }
+            return ligado
+        }
+        if let vitima = cartaoParaSair(da: lista, userId: userId) {
+            lista.remove(at: vitima)
         }
         lista.append(CartaoApplePay(userId: userId, nome: nome, ligado: true, vistoEm: vistoEm))
         try gravar(lista)
         return true
+    }
+
+    /// Com a lista do usuário já no teto, escolhe o índice do cartão ligado
+    /// com `vistoEm` mais antigo para sair; `nil` quando ainda cabe ou quando
+    /// todos são desligados (nunca saem — voltariam ligados sozinhos).
+    private func cartaoParaSair(da lista: [CartaoApplePay], userId: String) -> Int? {
+        let doUsuario = lista.indices.filter { lista[$0].userId == userId }
+        guard doUsuario.count >= Self.maximoPorUsuario else { return nil }
+        return doUsuario.filter { lista[$0].ligado }
+            .min { lista[$0].vistoEm < lista[$1].vistoEm }
     }
 
     /// Liga ou desliga o cartão (a chave do Perfil). Falha na leitura ou na
