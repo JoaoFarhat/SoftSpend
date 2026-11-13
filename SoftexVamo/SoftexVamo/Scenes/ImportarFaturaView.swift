@@ -10,6 +10,7 @@
 //
 
 import SwiftUI
+import SwiftData
 import UniformTypeIdentifiers
 
 struct ImportarFaturaView: View {
