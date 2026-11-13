@@ -5,20 +5,40 @@ nonisolated func textoGastosSemFoto(_ quantidade: Int) -> String {
     quantidade == 1 ? "1 gasto sem foto" : "\(quantidade) gastos sem foto"
 }
 
-/// Faixa de pendência: "N gastos sem foto" + "Adicionar". Some quando não há pendência.
+/// "1 compra do Apple Pay esperando uma viagem" / "N compras ..." (fila do §1.5).
+nonisolated func textoComprasApplePay(_ quantidade: Int) -> String {
+    quantidade == 1 ? "1 compra do Apple Pay esperando uma viagem"
+                    : "\(quantidade) compras do Apple Pay esperando uma viagem"
+}
+
+/// Faixa de pendência: texto + ação à direita. Some quando não há pendência.
+/// O padrão é "N gastos sem foto" + "Adicionar"; `texto`, `rotulo` e `dica`
+/// vêm de fora para os outros avisos (ex.: a fila do Apple Pay no Início).
 struct AlertaPendencia: View {
     let quantidade: Int
+    let texto: String
+    let rotulo: String
+    let dica: String
     let aoAdicionar: () -> Void
+
+    init(quantidade: Int, texto: String? = nil, rotulo: String = "Adicionar",
+         dica: String = "Adicionar as fotos", aoAdicionar: @escaping () -> Void) {
+        self.quantidade = quantidade
+        self.texto = texto ?? textoGastosSemFoto(quantidade)
+        self.rotulo = rotulo
+        self.dica = dica
+        self.aoAdicionar = aoAdicionar
+    }
 
     var body: some View {
         if quantidade > 0 {
             Button(action: aoAdicionar) {
                 HStack(spacing: Espaco.p) {
-                    Text(textoGastosSemFoto(quantidade))
+                    Text(texto)
                         .font(.subheadline.weight(.semibold))
                         .lineLimit(1)
                     Spacer(minLength: Espaco.p)
-                    Text("Adicionar")
+                    Text(rotulo)
                         .font(.subheadline)
                         .lineLimit(1)
                 }
@@ -31,8 +51,8 @@ struct AlertaPendencia: View {
             }
             .buttonStyle(.plain)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(textoGastosSemFoto(quantidade))
-            .accessibilityHint("Adicionar as fotos")
+            .accessibilityLabel(texto)
+            .accessibilityHint(dica)
             .accessibilityAddTraits(.isButton)
         }
     }

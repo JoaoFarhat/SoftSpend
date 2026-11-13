@@ -87,7 +87,8 @@ struct ComprasAguardandoViagemTests {
 
     /// "Lançar" grava o gasto e tira o item da fila **depois** do save.
     @Test func lancarRemoveODepoisDoSave() throws {
-        let item = compra(valor: 30)
+        let recebida = Date(timeIntervalSince1970: 1_780_000_000)
+        let item = compra(valor: 30, recebidaEm: recebida)
         fila.adicionar(item)
 
         let ciclo = CicloSoftex(userId: userId, valor_total: 700, gasto_total: 0,
@@ -105,6 +106,8 @@ struct ComprasAguardandoViagemTests {
         try #require(gastos.count == 1)
         #expect(gastos[0].valor == 30)
         #expect(gastos[0].titulo == "Padaria")
+        // `criadoEm` é quando a compra aconteceu, não quando foi lançada.
+        #expect(gastos[0].criadoEm == recebida)
         #expect(ciclo.gasto_total == 30)
     }
 

@@ -164,16 +164,39 @@ enum RegistroApplePay {
         return .guardadoSemViagem(titulo: titulo, valor: valor)
     }
 
-    /// Lança um item da fila "sem viagem" no dia escolhido (§1.5, usado pelo
-    /// aviso do Início). O item sai da fila só **depois** do `save`: falhou o
-    /// save, o item fica.
+    /// Lança um item da fila "sem viagem" no dia escolhido (§1.5, usado pela
+    /// folha do aviso do Início). O item sai da fila só **depois** do `save`:
+    /// falhou o save, o item fica.
     static func lancar(_ compra: CompraAguardandoViagem, em dia: DiaSoftex,
                        contexto: ModelContext,
                        fila: ComprasAguardandoViagem = .shared) throws {
         guard dia.ciclo != nil else { throw ErroRegistro.diaSemViagem }
+        // `criadoEm` guarda quando a compra aconteceu, não quando foi lançada.
         try gravarGasto(valor: compra.valor, titulo: compra.estabelecimento,
-                        categoria: compra.categoria, dia: dia, em: contexto)
+                        categoria: compra.categoria, dia: dia,
+                        agora: compra.recebidaEm, em: contexto)
         fila.remover(id: compra.id)
+    }
+
+    /// Viagem do usuário cujo intervalo contém `data` (em sobreposição, a de
+    /// primeiro dia mais recente — mesma regra do registro) e o `DiaSoftex`
+    /// vivo desse dia. `nil` quando não há onde lançar: a folha "sem viagem"
+    /// do Início (§1.5) mostra só "Descartar" nesse caso.
+    static func viagemEDia(para data: Date, userId: String, ciclos: [CicloSoftex],
+                           calendario: Calendar = .current) -> (ciclo: CicloSoftex, dia: DiaSoftex)? {
+        let d = calendario.startOfDay(for: data)
+        let contendo = ciclos.compactMap { ciclo -> (CicloSoftex, Date)? in
+            guard ciclo.userId == userId, ciclo.deletadoEm == nil,
+                  let intervalo = intervaloViagem(ciclo, calendario: calendario),
+                  intervalo.ini <= d, d <= intervalo.fim
+            else { return nil }
+            return (ciclo, intervalo.ini)
+        }
+        guard let ciclo = contendo.max(by: { $0.1 < $1.1 })?.0 else { return nil }
+        guard let dia = (ciclo.dias ?? []).first(where: {
+            $0.deletadoEm == nil && calendario.isDate($0.data, inSameDayAs: d)
+        }) else { return nil }
+        return (ciclo, dia)
     }
 
     // MARK: - Partes da regra
@@ -235,21 +258,7 @@ enum RegistroApplePay {
             predicate: #Predicate { $0.userId == userId && $0.deletadoEm == nil }
         )
         let ciclos = (try? contexto.fetch(desc)) ?? []
-        let h = calendario.startOfDay(for: hoje)
-
-        let contendoHoje = ciclos.compactMap { ciclo -> (CicloSoftex, Date)? in
-            guard let intervalo = intervaloViagem(ciclo, calendario: calendario),
-                  intervalo.ini <= h, h <= intervalo.fim
-            else { return nil }
-            return (ciclo, intervalo.ini)
-        }
-        guard let ciclo = contendoHoje.max(by: { $0.1 < $1.1 })?.0 else { return nil }
-
-        guard let dia = (ciclo.dias ?? []).first(where: {
-            $0.deletadoEm == nil && calendario.isDate($0.data, inSameDayAs: hoje)
-        }) else { return nil }
-
-        return (ciclo, dia)
+        return viagemEDia(para: hoje, userId: userId, ciclos: ciclos, calendario: calendario)
     }
 
     /// Gravação igual à de `createNewGasto`, sem passar pelo ViewModel (que
