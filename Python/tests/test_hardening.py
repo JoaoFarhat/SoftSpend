@@ -190,14 +190,33 @@ def test_https_behind_proxy_includes_hsts_header(monkeypatch):
     assert "Strict-Transport-Security" in response.headers
 
 
-def test_health_is_rate_limited_for_remote_clients():
+def _uma_copia_do_limite_de_health(monkeypatch):
+    """Mantem so a copia mais recente do Limit de /health e a devolve.
+
+    Os fixtures que reimportam `main` acumulam uma copia do Limit em
+    `_route_limits` a cada import; sem isso uma request custa N hits no
+    mesmo bucket. Com uma copia o custo e 1 hit por request, como em
+    producao, e o teto de 30/minuto fica deterministico.
+    """
+    import limiter as limiter_module
+
+    limites = limiter_module.limiter._route_limits["main.health_check"]
+    monkeypatch.setitem(
+        limiter_module.limiter._route_limits, "main.health_check", limites[-1:]
+    )
+    return limites[-1]
+
+
+def test_health_is_rate_limited_for_remote_clients(monkeypatch):
     import limiter as limiter_module
     from main import app
 
+    _uma_copia_do_limite_de_health(monkeypatch)
     limiter_module.limiter.reset()
     try:
         client = TestClient(app)
-        respostas = [client.get("/health").status_code for _ in range(40)]
+        respostas = [client.get("/health").status_code for _ in range(31)]
+        assert 429 not in respostas[:30]
         assert respostas[-1] == 429
     finally:
         limiter_module.limiter.reset()
@@ -209,17 +228,12 @@ def test_health_localhost_is_not_rate_limited(monkeypatch):
     import main as main_module
     import limiter as limiter_module
 
-    # Cada reimportacao de `main` na suite acumula uma copia do Limit de
-    # /health em _route_limits, e a copia antiga aponta para o `get_real_ip`
-    # do modulo que a criou. Patch em todos os __globals__ simula o peer
-    # loopback em qualquer uma delas.
-    for lim in limiter_module.limiter._route_limits["main.health_check"]:
-        monkeypatch.setitem(
-            lim.exempt_when.__globals__,
-            "get_real_ip",
-            lambda request: "127.0.0.1",
-        )
-
+    limite = _uma_copia_do_limite_de_health(monkeypatch)
+    monkeypatch.setitem(
+        limite.exempt_when.__globals__,
+        "get_real_ip",
+        lambda request: "127.0.0.1",
+    )
     limiter_module.limiter.reset()
     try:
         client = TestClient(main_module.app)

@@ -585,9 +585,11 @@ Pegadinha de teste: os fixtures que fazem `sys.modules.pop("main")` +
 `import_module("main")` acumulam uma copia do `Limit` em
 `limiter._route_limits` a cada reimportacao — uma unica requisicao passa a
 custar N hits no mesmo bucket. Por isso os testes de HSTS desligam o limiter
-(`limiter.enabled = False`, padrao dos outros arquivos) e o teste da isencao
-de loopback patcha `get_real_ip` no `__globals__` de cada `exempt_when`
-acumulado.
+(`limiter.enabled = False`, padrao dos outros arquivos) e os testes do limite
+de `/health` truncam `_route_limits["main.health_check"]` para uma copia via
+`_uma_copia_do_limite_de_health` (a copia recente pertence ao `main` mais
+novo; o `__globals__` do `exempt_when` dela e onde o patch de `get_real_ip`
+faz efeito).
 
 2. **Config nginx** (`deploy/ec2/nginx-softspend.conf`):
    - Escuta `80` e redireciona tudo para HTTPS.
