@@ -9,6 +9,7 @@
 import AppIntents
 import Foundation
 import os
+import SwiftData
 
 /// Grava o gasto da compra do Apple Pay **sem abrir o app e sem perguntar
 /// nada**. A automação do app Atalhos (gatilho "Transação"/"Carteira") entrega
