@@ -29,8 +29,10 @@ nonisolated struct CompraAguardandoViagem: Codable, Identifiable, Equatable, Sen
 /// O arquivo usa a proteção padrão do iOS (disponível depois do primeiro
 /// desbloqueio), para a ação "Registrar gasto" rodar com o aparelho trancado.
 /// Arquivo ausente lê como lista vazia, sem derrubar o app. Arquivo corrompido
-/// é movido para `compras-apple-pay.json.corrompido` e lê como lista vazia —
-/// sobrescrever direto perderia os itens de todos os usuários.
+/// é movido para `compras-apple-pay.json.corrompido-<data>` e lê como lista
+/// vazia — sobrescrever direto perderia os itens de todos os usuários. Arquivo
+/// que existe mas não lê (permissão, I/O) faz `adicionar`/`remover` abortarem:
+/// ler como vazio deixaria a próxima gravação apagar a fila inteira.
 ///
 /// Toda leitura e gravação passa por `trava`: `adicionar`/`remover` leem e
 /// regravam o arquivo inteiro e, sem serializar, ação e folha mexendo juntas
@@ -63,15 +65,22 @@ final class ComprasAguardandoViagem {
     func todas() -> [CompraAguardandoViagem] {
         trava.lock()
         defer { trava.unlock() }
-        return todasTrancado()
+        do {
+            return try todasTrancado()
+        } catch {
+            Self.logger.error("Não leu a fila: \(error.localizedDescription, privacy: .public)")
+            return []
+        }
     }
 
     /// O `id` ainda está na fila? Conferido antes do "Lançar" gravar: a lista
     /// da folha é uma cópia e um toque duplo lançaria a mesma compra duas vezes.
+    /// Falha na leitura devolve `false` — o `lancar` vira no-op em vez de criar
+    /// um gasto sem conseguir tirar o item da fila.
     func contem(id: UUID) -> Bool {
         trava.lock()
         defer { trava.unlock() }
-        return todasTrancado().contains { $0.id == id }
+        return ((try? todasTrancado()) ?? []).contains { $0.id == id }
     }
 
     /// Guarda a compra e **lança** quando a gravação falha — `registrar`
@@ -79,7 +88,7 @@ final class ComprasAguardandoViagem {
     func adicionar(_ compra: CompraAguardandoViagem) throws {
         trava.lock()
         defer { trava.unlock() }
-        var lista = todasTrancado()
+        var lista = try todasTrancado()
         lista.append(compra)
 
         let doUsuario = lista.filter { $0.userId == compra.userId }
@@ -95,12 +104,19 @@ final class ComprasAguardandoViagem {
         try gravar(lista)
     }
 
-    /// Tira o item da fila. Falha na gravação só sai no log e deixa o item —
-    /// o usuário pode tentar de novo; nunca some compra sem querer.
+    /// Tira o item da fila. Falha na leitura ou na gravação só sai no log e
+    /// deixa o item — o usuário pode tentar de novo; nunca some compra sem
+    /// querer (nem grava uma lista "vazia" por cima de um arquivo ilegível).
     func remover(id: UUID) {
         trava.lock()
         defer { trava.unlock() }
-        var lista = todasTrancado()
+        var lista: [CompraAguardandoViagem]
+        do {
+            lista = try todasTrancado()
+        } catch {
+            Self.logger.error("Não leu a fila para remover: \(error.localizedDescription, privacy: .public)")
+            return
+        }
         lista.removeAll { $0.id == id }
         do {
             try gravar(lista)
@@ -111,31 +127,50 @@ final class ComprasAguardandoViagem {
 
     // MARK: - Arquivo (sempre chamado sob `trava`)
 
-    /// Lê o arquivo. Corrompido (JSON que não decodifica) é movido para
-    /// `….corrompido` — guarda os itens dos outros usuários em vez de
-    /// sobrescrever — e lê como lista vazia.
-    private func todasTrancado() -> [CompraAguardandoViagem] {
-        guard let dados = try? Data(contentsOf: arquivo) else { return [] }
+    /// Lê o arquivo. Ausente lê como lista vazia. Corrompido (JSON que não
+    /// decodifica) é movido para `….corrompido-<data>` — guarda os itens dos
+    /// outros usuários em vez de sobrescrever — e lê como lista vazia.
+    /// Arquivo que existe mas não lê (permissão, I/O) **lança**: tratar como
+    /// vazio deixaria `adicionar`/`remover` regravarem `[]` por cima e a fila
+    /// inteira se perderia.
+    private func todasTrancado() throws -> [CompraAguardandoViagem] {
+        let dados: Data
+        do {
+            dados = try Data(contentsOf: arquivo)
+        } catch {
+            guard FileManager.default.fileExists(atPath: arquivo.path) else {
+                return []
+            }
+            throw error
+        }
         guard let lista = try? JSONDecoder().decode([CompraAguardandoViagem].self, from: dados) else {
-            quarentenar()
+            try quarentenar()
             return []
         }
         return lista
     }
 
-    /// Move o arquivo ilegível para `<nome>.corrompido` (um só backup: um
-    /// corrompido anterior sai). Falha no move fica no log e a leitura segue
-    /// como lista vazia.
-    private func quarentenar() {
-        let copia = arquivo.appendingPathExtension("corrompido")
+    /// Move o arquivo ilegível para `<nome>.corrompido-<yyyyMMdd-HHmmss>`
+    /// (nome único: um corrompido anterior fica guardado). Se o move falha,
+    /// lança — o arquivo ruim não pode ficar para ser sobrescrito na próxima
+    /// gravação.
+    private func quarentenar() throws {
+        let copia = arquivo.appendingPathExtension("corrompido-\(Self.carimbo.string(from: .now))")
         do {
-            try? FileManager.default.removeItem(at: copia)
             try FileManager.default.moveItem(at: arquivo, to: copia)
             Self.logger.error("Fila corrompida movida para \(copia.lastPathComponent, privacy: .public)")
         } catch {
             Self.logger.error("Fila corrompida; não deu para mover: \(error.localizedDescription, privacy: .public)")
+            throw error
         }
     }
+
+    private static let carimbo: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd-HHmmss"
+        return f
+    }()
 
     private func gravar(_ lista: [CompraAguardandoViagem]) throws {
         let dados = try JSONEncoder().encode(lista)

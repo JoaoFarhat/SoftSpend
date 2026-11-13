@@ -76,20 +76,48 @@ struct ComprasAguardandoViagemTests {
     }
 
     /// Arquivo corrompido lê como lista vazia e vai para quarentena
-    /// (`<nome>.corrompido`) em vez de ser sobrescrito — os itens dos outros
-    /// usuários não se perdem num arquivo que dá para recuperar.
+    /// (`<nome>.corrompido-<data>`) em vez de ser sobrescrito — os itens dos
+    /// outros usuários não se perdem num arquivo que dá para recuperar.
     @Test func arquivoCorrompidoVaiParaQuarentenaELeComoVazia() throws {
         try Data("lixo não-json".utf8).write(to: arquivo)
         #expect(fila.todas().isEmpty)
         #expect(fila.ler(userId: userId).isEmpty)
 
-        let copia = arquivo.appendingPathExtension("corrompido")
-        #expect(try String(contentsOf: copia, encoding: .utf8) == "lixo não-json")
+        let backups = try FileManager.default.contentsOfDirectory(
+            at: arquivo.deletingLastPathComponent(),
+            includingPropertiesForKeys: nil
+        ).filter {
+            $0.lastPathComponent.hasPrefix("\(arquivo.lastPathComponent).corrompido-")
+        }
+        try #require(backups.count == 1)
+        #expect(try String(contentsOf: backups[0], encoding: .utf8) == "lixo não-json")
         #expect(!FileManager.default.fileExists(atPath: arquivo.path))
 
         // E continua funcionando: a próxima gravação cria um arquivo novo.
         try fila.adicionar(compra())
         #expect(fila.ler(userId: userId).count == 1)
+    }
+
+    /// Arquivo que existe mas não lê (permissão) não pode virar lista vazia:
+    /// `adicionar` lança em vez de sobrescrever os itens de todos os usuários
+    /// e `ler` segue devolvendo vazio sem derrubar o app.
+    @Test func arquivoIlegivelNaoEhLidoComoVazioNemSobrescrito() throws {
+        try fila.adicionar(compra(valor: 42))
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o000], ofItemAtPath: arquivo.path)
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: arquivo.path)
+        }
+
+        #expect(fila.ler(userId: userId).isEmpty)
+        #expect(!fila.contem(id: UUID()))
+        #expect(throws: (any Error).self) { try fila.adicionar(compra()) }
+
+        // Voltou a permissão, a fila continua lá — nada foi sobrescrito.
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o644], ofItemAtPath: arquivo.path)
+        #expect(fila.ler(userId: userId).map(\.valor) == [42])
     }
 
     /// Pasta que não existe: a escrita atômica falha e `adicionar` lança — a

@@ -242,16 +242,21 @@ Spec: `docs/cartao-sem-open-finance.md` §1 (partes A e B implementadas).
   (`Application Support/compras-apple-pay.json`, escrita atômica, teto de 50
   por usuário, fora do SwiftData de propósito: nenhum `@Model` novo, sem V2).
   Ler+regravar é serializado por `NSLock`; arquivo corrompido vai para
-  `.corrompido` em vez de ser sobrescrito; `adicionar` **lança** quando a
-  gravação falha (o `registrar` propaga e a ação responde "lance no app"),
-  enquanto `remover` só loga e deixa o item.
+  `.corrompido-<data>` (nome único, backups se acumulam) em vez de ser
+  sobrescrito — e se o move falhar, lança para não gravar por cima. Arquivo
+  que existe mas não lê (permissão, I/O) também lança: ler como vazio
+  deixaria a próxima gravação apagar os itens de todos. `adicionar`
+  **lança** quando a leitura ou a gravação falha (o `registrar` propaga e
+  a ação responde "lance no app"), enquanto `remover` só loga e deixa o
+  item.
 - Aviso da fila no `InicioView` (`AlertaPendencia` com `textoComprasApplePay`,
   lido por `recarregarFila` no `task(id: hoje)`) e folha
   `Scenes/ComprasSemViagemView.swift`: cada item mostra estabelecimento,
   valor, cartão e data, com "Lançar em …" (destino por
-  `RegistroApplePay.viagemEDia(para:userId:em:)`, que lê os ciclos do
-  `contexto` — `allCiclos` pode ainda não ter carregado) e "Descartar" (pede
-  `.confirmationDialog` — a compra some para sempre). Sem viagem para a data,
+  `RegistroApplePay.viagemEDia` — a folha puxa os ciclos num fetch só por
+  render, via `ciclosVivos`, e filtra em memória — `allCiclos` pode ainda
+  não ter carregado) e "Descartar" (pede `.confirmationDialog` com
+  `presenting:` — a compra some para sempre). Sem viagem para a data,
   só "Descartar" e o texto "Crie a viagem desta data para lançar". `lancar`
   só grava se o `id` ainda estiver na fila (toque duplo vira no-op), tira o
   item da fila depois do `save` e grava `criadoEm = recebidaEm`.
