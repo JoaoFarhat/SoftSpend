@@ -10,3 +10,4 @@ from .open_finance import (
 )
 from .user import User
 from .refresh_token import RefreshToken
+from .assinatura import AppleNotificacao, Assinatura
