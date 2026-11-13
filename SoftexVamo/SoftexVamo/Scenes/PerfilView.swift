@@ -22,6 +22,9 @@ struct PerfilView: View {
     @AppStorage(PreferenciaTema.chave) private var tema: PreferenciaTema = .automatico
 
     @State private var confirmarExclusao = false
+    /// Cartões que já chegaram pela ação "Registrar gasto" (§1.10), cada um
+    /// com a chave liga/desliga.
+    @State private var cartoesApplePay: [CartaoApplePay] = []
 
     #if DEBUG
     @State private var ambiente: APIEnvironment = APIConfig.shared.current
@@ -63,6 +66,33 @@ struct PerfilView: View {
                     .padding(.horizontal, Espaco.g)
                     .padding(.top, Espaco.p)
 
+                secao("Cartões do Apple Pay")
+                if cartoesApplePay.isEmpty {
+                    Text("Os cartões que chegarem pela automação aparecem aqui, cada um com uma chave liga/desliga.")
+                        .font(.footnote)
+                        .foregroundStyle(Tema.textoFraco)
+                        .padding(.horizontal, Espaco.g)
+                } else {
+                    grupo {
+                        ForEach(cartoesApplePay) { cartao in
+                            if cartao.id != cartoesApplePay.first?.id { divisoria }
+                            linhaToggle(cartao.nome, isOn: Binding(
+                                get: { cartao.ligado },
+                                set: { ligado in
+                                    CartoesApplePay.shared.definirLigado(
+                                        nome: cartao.nome, userId: cartao.userId, ligado: ligado)
+                                    recarregarCartoes()
+                                }
+                            ))
+                        }
+                    }
+                    Text("Cartão desligado tem as compras ignoradas. Desligar não apaga os gastos já lançados.")
+                        .font(.footnote)
+                        .foregroundStyle(Tema.textoFraco)
+                        .padding(.horizontal, Espaco.g)
+                        .padding(.top, Espaco.p)
+                }
+
                 #if DEBUG
                 if !CommandLine.arguments.contains("-demo") {
                     secao("Desenvolvimento")
@@ -88,6 +118,7 @@ struct PerfilView: View {
         .background(Tema.fundo.ignoresSafeArea())
         .navigationTitle("Perfil e ajustes")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear { recarregarCartoes() }
         .confirmationDialog("Excluir conta permanentemente?", isPresented: $confirmarExclusao,
                             titleVisibility: .visible) {
             Button("Excluir minha conta", role: .destructive) {
@@ -100,6 +131,17 @@ struct PerfilView: View {
     }
 
     // MARK: Partes
+
+    /// Relê a lista de cartões do usuário logado (§1.10). `UsuarioSalvo`
+    /// cobre o app acordado pela ação antes do `checkAuthentication` encher
+    /// `currentUser`; sem usuário, a seção mostra só o texto de espera.
+    private func recarregarCartoes() {
+        guard let userId = authService.currentUser?.id ?? UsuarioSalvo.id() else {
+            cartoesApplePay = []
+            return
+        }
+        cartoesApplePay = CartoesApplePay.shared.ler(userId: userId)
+    }
 
     private var cabecalho: some View {
         VStack(spacing: Espaco.p) {

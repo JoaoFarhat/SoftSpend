@@ -22,6 +22,8 @@ nonisolated enum ResultadoRegistro: Equatable {
     case gravado(titulo: String, valor: Decimal, viagem: String, dia: Date)
     /// Sem viagem aberta (ou sem dia local de hoje): foi para a fila (§1.5).
     case guardadoSemViagem(titulo: String, valor: Decimal)
+    /// Cartão desligado no Perfil: nem grava nem vai para a fila (§1.10).
+    case ignoradoCartaoDesligado(cartao: String)
     /// Já registrado (mesma compra chegando duas vezes): nada mudou.
     case duplicado
     case recusado(MotivoRecusa)
@@ -113,8 +115,8 @@ enum RegistroApplePay {
 
     /// Registra a compra vinda da automação. Devolve o que aconteceu para a
     /// ação montar o diálogo; só lança erro quando o `save` ou a gravação da
-    /// fila falha — a ação responde "lance no app" em vez de "guardado" com a
-    /// compra perdida.
+    /// fila ou da lista de cartões falha — a ação responde "lance no app" em
+    /// vez de "guardado" com a compra perdida.
     static func registrar(
         valor valorTexto: String,
         estabelecimento: String,
@@ -122,6 +124,7 @@ enum RegistroApplePay {
         userId: String?,
         em contexto: ModelContext,
         fila: ComprasAguardandoViagem = .shared,
+        cartoes: CartoesApplePay = .shared,
         agora: Date = .now,
         calendario: Calendar = .current
     ) throws -> ResultadoRegistro {
@@ -129,6 +132,18 @@ enum RegistroApplePay {
             logger.info("Registro recusado: sem usuário salvo")
             return .recusado(.semUsuario)
         }
+
+        // Filtro por cartão (§1.10): todo nome que chega entra na lista do
+        // Perfil (nasce ligado); desligado, a compra é ignorada aqui — antes
+        // de gravar ou ir para a fila — e os gastos já lançados ficam.
+        let nomeCartao = CartoesApplePay.nomeNormalizado(cartao)
+        let cartaoLigado = try cartoes.registrarChegada(
+            nome: nomeCartao, userId: userId, vistoEm: agora)
+        guard cartaoLigado else {
+            logger.info("Registro ignorado: cartão desligado no Perfil")
+            return .ignoradoCartaoDesligado(cartao: nomeCartao)
+        }
+
         guard !ValorDaCompra.temMoedaEstrangeira(valorTexto) else {
             logger.info("Registro recusado: moeda estrangeira")
             return .recusado(.moedaEstrangeira)

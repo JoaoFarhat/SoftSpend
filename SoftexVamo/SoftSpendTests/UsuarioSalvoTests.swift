@@ -13,6 +13,7 @@ struct UsuarioSalvoTests {
     let container: ModelContainer
     let ctx: ModelContext
     let fila: ComprasAguardandoViagem
+    let cartoes: CartoesApplePay
     let cal: Calendar
     let agora: Date
     let hoje: Date
@@ -27,6 +28,8 @@ struct UsuarioSalvoTests {
         let arquivo = FileManager.default.temporaryDirectory
             .appendingPathComponent("fila-\(UUID().uuidString).json")
         fila = ComprasAguardandoViagem(arquivo: arquivo)
+        cartoes = CartoesApplePay(arquivo: FileManager.default.temporaryDirectory
+            .appendingPathComponent("cartoes-\(UUID().uuidString).json"))
         var c = Calendar(identifier: .gregorian)
         c.timeZone = TimeZone(identifier: "America/Cuiaba")!
         cal = c
@@ -53,7 +56,7 @@ struct UsuarioSalvoTests {
 
         let r = try RegistroApplePay.registrar(valor: "10,00", estabelecimento: "Padaria",
                                                userId: id, em: ctx, fila: fila,
-                                               agora: agora, calendario: cal)
+                                               cartoes: cartoes, agora: agora, calendario: cal)
         guard case .gravado = r else {
             Issue.record("esperava .gravado, veio \(r)")
             return
@@ -66,7 +69,8 @@ struct UsuarioSalvoTests {
 
         let r = try RegistroApplePay.registrar(valor: "10,00", estabelecimento: "Padaria",
                                                userId: UsuarioSalvo.id(defaults: defaults),
-                                               em: ctx, fila: fila, agora: agora, calendario: cal)
+                                               em: ctx, fila: fila, cartoes: cartoes,
+                                               agora: agora, calendario: cal)
         #expect(r == .recusado(.semUsuario))
         #expect(try ctx.fetch(FetchDescriptor<GastosDia>()).isEmpty)
         #expect(fila.todas().isEmpty)
