@@ -86,6 +86,8 @@ final class AssinaturaViewModel: ObservableObject {
 
     /// Transações recusadas (outra conta) nesta sessão: não reenviadas em loop.
     private var recusadas: Set<UInt64> = []
+    private var aceitas: Set<UInt64> = []
+    private var filaDeEnvio: Task<Void, Never>?
     private var tarefaAtualizacoes: Task<Void, Never>?
 
     /// Os padrões são os de produção (App Store, `NetworkManager`, usuário do
@@ -210,9 +212,11 @@ final class AssinaturaViewModel: ObservableObject {
         tarefaAtualizacoes = Task { [weak self] in
             for await transacao in fluxo {
                 guard let self else { return }
-                let resultado = await self.enviar(transacao)
-                if resultado == .aceita {
-                    await self.depoisDeLiberar()
+                await self.emSerie {
+                    guard !self.aceitas.contains(transacao.id) else { return }
+                    if await self.enviar(transacao) == .aceita {
+                        await self.depoisDeLiberar()
+                    }
                 }
             }
         }
@@ -249,17 +253,29 @@ final class AssinaturaViewModel: ObservableObject {
     /// compra feita sem login). Devolve quantas o servidor aceitou.
     @discardableResult
     func reenviarPendentes() async -> Int {
-        guard usuarioLogado() != nil else { return 0 }
-        var aceitas = 0
-        let pendentes = await loja.naoFinalizadas()
-        for transacao in pendentes {
-            if await enviar(transacao) == .aceita { aceitas += 1 }
+        await emSerie {
+            guard self.usuarioLogado() != nil else { return 0 }
+            var aceitasAgora = 0
+            let pendentes = await self.loja.naoFinalizadas()
+            for transacao in pendentes where !self.aceitas.contains(transacao.id) {
+                if await self.enviar(transacao) == .aceita { aceitasAgora += 1 }
+            }
+            if aceitasAgora > 0 {
+                await self.depoisDeLiberar()
+                if self.mensagem == .confirmandoComServidor { self.mensagem = nil }
+            }
+            return aceitasAgora
         }
-        if aceitas > 0 {
-            await depoisDeLiberar()
-            if mensagem == .confirmandoComServidor { mensagem = nil }
+    }
+
+    private func emSerie<T: Sendable>(_ trabalho: @escaping @MainActor () async -> T) async -> T {
+        let anterior = filaDeEnvio
+        let tarefa = Task { @MainActor in
+            await anterior?.value
+            return await trabalho()
         }
-        return aceitas
+        filaDeEnvio = Task { _ = await tarefa.value }
+        return await tarefa.value
     }
 
     // MARK: Planos
@@ -387,6 +403,7 @@ final class AssinaturaViewModel: ObservableObject {
         do {
             estado = try await api.enviarTransacaoAssinatura(jws: transacao.jws)
             await transacao.finalizar()
+            aceitas.insert(transacao.id)
             return .aceita
         } catch APIError.serverError(_, _, let statusCode) where statusCode == 409 {
             recusadas.insert(transacao.id)

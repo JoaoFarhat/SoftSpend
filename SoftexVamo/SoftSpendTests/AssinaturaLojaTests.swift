@@ -169,6 +169,23 @@ struct AssinaturaLojaTests {
         #expect(sessao.sincronizacoes == 1)
     }
 
+    @Test func atualizacaoAtrasadaAteOLoginSobeUmaVezSo() async throws {
+        sessao.userId = nil
+        let transacao = loja.transacao(id: 9, token: FakeAssinaturaAPI.token)
+        loja.pendentes = [transacao]
+        vm.iniciar()
+        loja.emitir(transacao)
+
+        sessao.userId = "usuario-1"
+        api.depoisDeAceitar = assinante()
+        await vm.trocouUsuario()
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        #expect(api.jwsRecebidos == ["jws-9"])
+        #expect(linha.passos == ["enviar:jws-9", "finish:9"])
+        #expect(sessao.sincronizacoes == 1)
+    }
+
     @Test func atualizacaoComLoginEnviaEFinaliza() async throws {
         vm.iniciar()
         api.depoisDeAceitar = assinante()
