@@ -20,7 +20,14 @@ enum Rota: Hashable {
     case perfil
 }
 
+nonisolated private struct ChaveAbrirRota: EnvironmentKey {
+    static var defaultValue: (Rota) -> Void { { _ in } }
+}
+
 extension EnvironmentValues {
     /// Empilha uma rota na `NavigationStack` da aba atual do `MainView` (`.viagens` troca para a aba Viagens).
-    @Entry var abrirRota: (Rota) -> Void = { _ in }
+    var abrirRota: (Rota) -> Void {
+        get { self[ChaveAbrirRota.self] }
+        set { self[ChaveAbrirRota.self] = newValue }
+    }
 }

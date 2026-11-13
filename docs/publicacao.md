@@ -124,7 +124,7 @@ Conferido no código em 12/11.
 | **Ícone** | `AppIcon.appiconset` tem 1024×1024 claro e escuro; o "tinted" está vazio (opcional) | Conferir no Mac que não tem transparência (a Apple recusa) e a aparência no Archive |
 | **Manifesto de privacidade** (`PrivacyInfo.xcprivacy`) | **Não existe** | Criar: sem rastreamento; dados coletados (e-mail, nome, ID de usuário, conteúdo do usuário: gastos e notas, histórico de compra); `UserDefaults` com motivo `CA92.1` (o app usa `UserDefaults`). Rótulo da loja igual ao manifesto |
 | **Criptografia de exportação** | Chave `ITSAppUsesNonExemptEncryption` ausente (o app usa HTTPS e CryptoKit AES-GCM, algoritmos padrão) | Mesma decisão já tomada no Safeel (12/11): `YES` e responder no envio que só usa algoritmos padrão, isentos. A classificação é responsabilidade do dono do produto (U7) |
-| **Versão mínima do iOS** | `IPHONEOS_DEPLOYMENT_TARGET = 26.0` | **Só roda no iOS 26.** Se o objetivo é alcançar mais gente, avaliar baixar (exige conferir o visual e os testes). **Decisão do usuário (U6)** |
+| **Versão mínima do iOS** | `IPHONEOS_DEPLOYMENT_TARGET = 17.0` | **Decidido (13/11, U6): iOS 17**, o mínimo do SwiftData. O `@Entry` (iOS 18) virou `EnvironmentKey`/`EnvironmentValues`. Conferir o visual e os testes no CI |
 | **Identificador do app** | `com.joao.softspend` (nome pessoal) | **Não muda depois de criado na loja.** Decidir o definitivo (ex.: `br.com.softspend.app`) **antes** de criar o app na App Store Connect (U5) |
 | **Configuração só de desenvolvimento em produção** | `Info.plist` tem `NSBonjourServices` e `NSAllowsLocalNetworking`, e o app pede "servidor local em desenvolvimento" | Tirar do build de Release para não gerar pergunta de rede local e questionamento da revisão |
 | **Sign in with Apple** | Não é exigido: o login é próprio (e-mail e senha), sem Google/Facebook | Nada |
@@ -199,5 +199,5 @@ Legenda: **[Você]** = decisão ou ação do usuário; **[Devin]** = código; **
 - Política de Privacidade ausente ou sem citar a IA (Gemini) e o armazenamento das notas.
 - Chave do Gemini em projeto sem faturamento (plano gratuito): o Google pode usar as notas dos clientes para melhorar os modelos (§2.1).
 - Assinatura sem "restaurar compras" ou com tela de planos sem preço, duração, renovação e links.
-- `iOS 26` como mínimo: legal para a Apple, mas reduz muito quem pode instalar.
+- `iOS 17` como mínimo (decidido em 13/11): alcança muito mais aparelhos; vale conferir o visual do app no simulador antes de enviar.
 - Mudar o identificador do app depois de criado na loja: não dá.
