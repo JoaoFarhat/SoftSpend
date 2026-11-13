@@ -541,6 +541,29 @@ def test_gravar_fatura_refaz_busca_em_corrida(ambiente, monkeypatch):
     assert session.query(models.CreditCardTransaction).count() == 1
 
 
+def test_gravar_fatura_segunda_integridade_vira_409(ambiente, monkeypatch):
+    """Se a refaz também esbarra em `IntegrityError` (duas corridas
+    seguidas ou outra restrição), a resposta é 409 — não 500 — e a
+    sessão sai limpa por causa do rollback."""
+    from dtos.fatura import FaturaLida
+    from services import fatura_service
+    from services.fatura_arquivo_service import ErroFatura
+    from sqlalchemy.exc import IntegrityError
+
+    lida = FaturaLida(vencimento=date(2026, 10, 20), compras=[])
+
+    def sempre_integridade(session, user_id, lida):
+        raise IntegrityError("INSERT", {}, Exception("unique"))
+
+    monkeypatch.setattr(
+        fatura_service, "_gravar_fatura_uma_vez", sempre_integridade
+    )
+
+    with pytest.raises(ErroFatura) as exc_info:
+        fatura_service.gravar_fatura(ambiente.session, USER_A, lida)
+    assert exc_info.value.status_code == 409
+
+
 def test_post_faturas_funciona_com_open_finance_desligado(ambiente):
     client = ambiente.como(USER_A)
     detalhe = _gravar(

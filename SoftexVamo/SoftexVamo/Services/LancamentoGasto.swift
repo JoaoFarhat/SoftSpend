@@ -4,15 +4,27 @@ import os
 
 // MARK: - Consentimento
 
-/// Resposta do usuário à leitura automática do comprovante (Google Gemini).
-/// Exigência do `AGENTS.md` (LGPD): sem `true`, a foto nunca sai para leitura.
+/// Resposta do usuário à leitura automática de comprovante ou fatura
+/// (Google Gemini). Exigência do `AGENTS.md` (LGPD): sem `true`, a foto ou o
+/// arquivo nunca sai para leitura.
 enum Consentimento {
     static let chave = "consentimentoLeituraAutomatica"
+    /// §2.8: quem respondeu "sim" antes aceitou só o comprovante, e a fatura
+    /// tem mais dado pessoal — a primeira importação mostra um aviso de uma
+    /// tela, guardado aqui (é informativo, não um segundo interruptor).
+    static let chaveAvisoFatura = "consentimentoAvisoFatura"
 
     /// `nil` = ainda não perguntado; `true` = permitiu; `false` = "Agora não".
     static var leituraAutomatica: Bool? {
         get { leitura(em: .standard) }
         set { gravar(newValue, em: .standard) }
+    }
+
+    /// `true` = o aviso da primeira importação de fatura já foi aceito com
+    /// "Continuar". "Agora não" não grava: o aviso aparece de novo na próxima.
+    static var avisoFatura: Bool {
+        get { avisoFatura(em: .standard) }
+        set { gravarAvisoFatura(newValue, em: .standard) }
     }
 
     static func leitura(em defaults: UserDefaults) -> Bool? {
@@ -25,6 +37,14 @@ enum Consentimento {
         } else {
             defaults.removeObject(forKey: chave)
         }
+    }
+
+    static func avisoFatura(em defaults: UserDefaults) -> Bool {
+        defaults.bool(forKey: chaveAvisoFatura)
+    }
+
+    static func gravarAvisoFatura(_ valor: Bool, em defaults: UserDefaults) {
+        defaults.set(valor, forKey: chaveAvisoFatura)
     }
 }
 
