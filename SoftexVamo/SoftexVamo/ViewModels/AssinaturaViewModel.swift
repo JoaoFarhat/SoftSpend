@@ -121,6 +121,65 @@ final class AssinaturaViewModel: ObservableObject {
         return status == "grace" || status == "billing_retry"
     }
 
+    // MARK: Bloqueios na tela (I2b, §3.5)
+
+    /// Pedido das telas para abrir a de planos: os quatro gatilhos
+    /// (`permiteAbrir`, ler com IA, exportar, importar fatura) e o 403
+    /// direto setam; a `MainView` mostra a `PlanosAssinaturaView` em folha.
+    @Published var planosAbertos = false
+
+    /// Último `tem_acesso` conhecido; `nil` = desconhecido (nunca carregou
+    /// ou sem internet) — e desconhecido deixa passar (§3.5): quem decide
+    /// no envio é o servidor.
+    var temAcesso: Bool? { estado?.temAcesso }
+
+    /// Porta das ações de assinante: `false` = sem acesso, a ação não roda
+    /// e a tela de planos abre. `true` = com acesso ou desconhecido.
+    @discardableResult
+    func exigirAcesso() -> Bool {
+        if estado?.temAcesso == false {
+            planosAbertos = true
+            return false
+        }
+        return true
+    }
+
+    /// "Nova viagem" pede assinatura; as outras rotas passam direto. A
+    /// edição (`NewCicloView(ciclo:)`) não é rota — fica livre (§3.5).
+    func permiteAbrir(_ rota: Rota) -> Bool {
+        rota != .novaViagem || exigirAcesso()
+    }
+
+    /// Toque na faixa de aviso e na ação bloqueada: abre os planos.
+    func pedirPlanos() {
+        planosAbertos = true
+    }
+
+    /// 403 `subscription_required` chegando direto numa ação (§3.5): abre
+    /// os planos e devolve `true` — a tela não mostra "Erro no servidor".
+    /// Qualquer outro erro devolve `false` e segue o tratamento normal.
+    @discardableResult
+    func tratarErroDeAcesso(_ error: Error) -> Bool {
+        guard (error as? APIError)?.assinaturaNecessaria == true else { return false }
+        planosAbertos = true
+        return true
+    }
+
+    /// Texto da faixa de aviso sobre a barra de abas (§3.5): "Seu
+    /// pagamento falhou" em `grace`/`billing_retry`, "Teste grátis até
+    /// DD/MM" em `trial`. `nil` nos outros estados (sem faixa).
+    var textoFaixa: String? {
+        guard let estado else { return nil }
+        if pagamentoFalhando {
+            return "Seu pagamento falhou. Atualize a forma de pagamento."
+        }
+        guard estado.status == "trial" else { return nil }
+        guard let fim = estado.expiraEm else { return "Teste grátis ativo" }
+        let dia = fim.formatted(.dateTime.day(.twoDigits).month(.twoDigits)
+            .locale(Locale(identifier: "pt_BR")))
+        return "Teste grátis até \(dia)"
+    }
+
     var nomeDoPlano: String? {
         guard let produto = estado?.produto,
               let periodo = ProdutoAssinatura.periodo(de: produto) else { return nil }
@@ -157,7 +216,11 @@ final class AssinaturaViewModel: ObservableObject {
                 }
             }
         }
-        Task { await reenviarPendentes() }
+        Task {
+            // O estado é lido na abertura do app (§3.5); sem login não faz nada.
+            await carregarEstado()
+            await reenviarPendentes()
+        }
     }
 
     /// Login, logout ou troca de conta: esquece o estado da conta anterior e,

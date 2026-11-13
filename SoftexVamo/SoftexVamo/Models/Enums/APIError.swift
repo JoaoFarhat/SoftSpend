@@ -33,4 +33,14 @@ nonisolated enum APIError: LocalizedError, Sendable {
             return nil
         }
     }
+
+    /// 403 `subscription_required` do servidor (docs/assinatura.md §3.1), só
+    /// no erro **tipado** — antes de virar `localizedDescription`. Esse 403
+    /// nunca dispara renovação de token nem logout (só o 401 faz isso).
+    var assinaturaNecessaria: Bool {
+        if case .serverError(let message, _, let statusCode) = self {
+            return statusCode == 403 && message == "subscription_required"
+        }
+        return false
+    }
 }

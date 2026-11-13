@@ -231,7 +231,8 @@ struct FecharViagemView: View {
     }
 
     /// Mesma exportação de antes: `exportarCiclo(formato:)` com as fotos
-    /// embutidas (padrão `.imagem`) e a folha de compartilhar.
+    /// embutidas (padrão `.imagem`) e a folha de compartilhar. `nil` = a
+    /// assinatura barrou (§3.5): a tela de planos abriu, nada mais a fazer.
     private func exportar() {
         guard let ciclo, !exportando else { return }
         viewModel.garantirAtual(ciclo)

@@ -133,20 +133,38 @@ enum NotaFiscal {
 enum LeituraComprovante {
     private static let logger = Logger(subsystem: "br.com.softspend", category: "LeituraComprovante")
 
+    /// Aviso mostrado no lançamento quando a assinatura barra a leitura por
+    /// IA (§3.5): a tela de planos abre junto; o preenchimento à mão segue livre.
+    static let avisoAssinatura =
+        "A leitura por IA faz parte da assinatura. Os campos seguem livres para preencher à mão."
+
     /// Leitura no aparelho e depois no servidor (Gemini), aplicando cada
     /// resultado em `aplicar`. Não faz nada sem `Consentimento.leituraAutomatica == true`.
     ///
-    /// - Returns: aviso para mostrar ao usuário quando a leitura do servidor falha;
-    ///   `nil` em sucesso, cancelamento ou sem consentimento.
+    /// `acesso`, `lerLocal` e `extrair` são as costuras de teste: em produção
+    /// são o `AssinaturaViewModel.shared`, o OCR no aparelho e a leitura por
+    /// IA do servidor.
+    ///
+    /// - Returns: aviso para mostrar ao usuário quando a leitura do servidor falha
+    ///   ou a assinatura barra; `nil` em sucesso, cancelamento ou sem consentimento.
     @MainActor
     static func ler(
         _ imagem: UIImage,
+        acesso: AssinaturaViewModel = .shared,
+        lerLocal: (UIImage) async -> GastoLocalExtraido = {
+            await ComprovanteOCRLocal.extrair(de: $0)
+        },
+        extrair: (Data) async throws -> GastoExtraidoResponse = {
+            try await NetworkManager.shared.extrairGastoDeImagem(imageData: $0)
+        },
         aplicar: @MainActor (_ titulo: String?, _ valor: Decimal?, _ categoria: Categoria?) -> Void
     ) async -> String? {
-        guard Consentimento.leituraAutomatica == true,
-              let dadosOCR = NotaFiscal.comprimirParaOCR(imagem) else { return nil }
+        guard Consentimento.leituraAutomatica == true else { return nil }
+        // §3.5: sem acesso conhecido a leitura por IA não roda — abre os planos.
+        guard acesso.exigirAcesso() else { return avisoAssinatura }
+        guard let dadosOCR = NotaFiscal.comprimirParaOCR(imagem) else { return nil }
 
-        let local = await ComprovanteOCRLocal.extrair(de: imagem)
+        let local = await lerLocal(imagem)
         let teveLeituraLocal = local.temAlgoUtil
         if teveLeituraLocal {
             aplicar(local.titulo, local.valor, local.categoria)
@@ -154,12 +172,14 @@ enum LeituraComprovante {
         guard !Task.isCancelled else { return nil }
 
         do {
-            let resultado = try await NetworkManager.shared.extrairGastoDeImagem(imageData: dadosOCR)
+            let resultado = try await extrair(dadosOCR)
             guard !Task.isCancelled else { return nil }
             aplicar(resultado.titulo, resultado.valor, resultado.categoria)
             return nil
         } catch {
             guard !Task.isCancelled else { return nil }
+            // 403 `subscription_required` direto: planos, não "Erro no servidor".
+            if acesso.tratarErroDeAcesso(error) { return avisoAssinatura }
             logger.error("Erro ao extrair gasto: \(error.localizedDescription, privacy: .public)")
             return teveLeituraLocal
                 ? "Leitura feita no aparelho. Confira os valores antes de salvar."
