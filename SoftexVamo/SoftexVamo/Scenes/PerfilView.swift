@@ -140,7 +140,7 @@ struct PerfilView: View {
             Button("Gerenciar assinatura") { mostrarGerenciarAssinatura = true }
             Button("Cancelar", role: .cancel) {}
         } message: {
-            Text("Todos os seus dados, ciclos e gastos serão apagados. Esta ação não pode ser desfeita. Excluir a conta não cancela a assinatura da App Store.")
+            Text("Todos os seus dados, ciclos e gastos serão apagados. Esta ação não pode ser desfeita.\n\nExcluir a conta não cancela uma assinatura da App Store.")
         }
         .gerenciarAssinatura(isPresented: $mostrarGerenciarAssinatura)
     }

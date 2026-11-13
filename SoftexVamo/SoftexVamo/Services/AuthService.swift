@@ -7,6 +7,8 @@
 
 import Foundation
 import Combine
+import SwiftData
+import os
 
 @MainActor
 final class AuthService: ObservableObject {
@@ -19,6 +21,21 @@ final class AuthService: ObservableObject {
     @Published var errorMessage: String?
 
     var errorManager: ErrorManager?
+
+    private static let logger = Logger(subsystem: "br.com.softspend", category: "AuthService")
+
+    /// Costura de teste: o `DELETE /auth/conta`. Em produção é o
+    /// `NetworkManager`; nos testes, uma closure que falha ou retorna.
+    var deletarContaNoServidor: () async throws -> Void = {
+        try await NetworkManager.shared.deleteAccount()
+    }
+
+    /// Costura de teste: a limpeza local depois do DELETE (exigência da Apple,
+    /// docs/publicacao.md §2, "Exclusão de conta"). Em produção roda no
+    /// `mainContext` do `BancoLocal.container`, o mesmo das telas.
+    var apagarDadosLocais: (String) throws -> Void = { userId in
+        try ApagarDadosLocais.apagar(userId: userId, contexto: BancoLocal.container.mainContext)
+    }
 
     private let userKey = "user_data"
 
@@ -77,7 +94,22 @@ final class AuthService: ObservableObject {
         errorMessage = nil
 
         do {
-            try await NetworkManager.shared.deleteAccount()
+            try await deletarContaNoServidor()
+
+            // Só depois do DELETE dar certo: apaga os dados locais da conta —
+            // exigência da Apple (docs/publicacao.md §2). Falha na limpeza só
+            // sai no log: a conta já não existe no servidor, não há o que
+            // desfazer, e o logout acontece do mesmo jeito. O `user_data` é o
+            // fallback para o app que ainda não repovoou `currentUser` (foi
+            // acordado pela ação do Apple Pay com o iPhone trancado).
+            if let userId = currentUser?.id ?? UsuarioSalvo.id() {
+                do {
+                    try apagarDadosLocais(userId)
+                } catch {
+                    Self.logger.error("Falha ao apagar dados locais da conta: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+
             // A conta (e seus refresh tokens, via cascade) ja foi removida no
             // backend, entao nao ha o que revogar.
             logout(revogandoNoServidor: false)
