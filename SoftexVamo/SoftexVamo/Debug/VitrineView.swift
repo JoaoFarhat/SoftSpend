@@ -5,7 +5,7 @@ import SwiftData
 /// Vitrine dos componentes base com a viagem de exemplo, para verificação visual.
 ///
 /// Abre no lugar do app quando lançado com `-vitrine [inicio|estados|pecas]`:
-/// `xcrun simctl launch <udid> com.joao.softspend -vitrine estados`.
+/// `xcrun simctl launch <udid> br.com.softspend.app -vitrine estados`.
 struct VitrineView: View {
     enum Pagina: String {
         case inicio, estados, pecas

@@ -11,8 +11,8 @@ import os
 
 nonisolated struct KeychainManager {
 
-    private static let accessTokenKey = "com.joao.softspend.access_token"
-    private static let refreshTokenKey = "com.joao.softspend.refresh_token"
+    private static let accessTokenKey = "br.com.softspend.app.access_token"
+    private static let refreshTokenKey = "br.com.softspend.app.refresh_token"
     private static let logger = Logger(subsystem: "br.com.softspend", category: "KeychainManager")
 
     // MARK: - Access Token
