@@ -12,6 +12,7 @@ import logging
 import os
 from datetime import datetime, timezone
 
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -138,3 +139,260 @@ def estado(db: Session, user_id: str, agora: datetime | None = None) -> dict:
         "produto": assinatura.produto,
         "app_account_token": assinatura.app_account_token,
     }
+
+
+# ============================================================ AS2: Apple
+#
+# `docs/assinatura.md` §2. `reconciliar` é o único caminho que grava o estado
+# vindo da Apple; `/transacoes`, o webhook e o job diário só a chamam.
+
+
+class AssinaturaDeOutraConta(Exception):
+    """`409`: o token ou a compra pertence a outro usuário do SoftSpend."""
+
+
+# Notificações que só ficam registradas (§2.4: "sem mudança").
+SO_REGISTRA = frozenset(
+    {
+        "TEST",
+        "REFUND_DECLINED",
+        "PRICE_INCREASE",
+        "CONSUMPTION_REQUEST",
+        "ONE_TIME_CHARGE",
+        "EXTERNAL_PURCHASE_TOKEN",
+    }
+)
+
+BUNDLE_PADRAO = "br.com.softspend.app"
+OFERTA_INTRODUTORIA = 1
+TESTE_GRATIS = "FREE_TRIAL"
+
+
+def _eh_teste_gratis(transacao) -> bool:
+    """§2.6: o trial é a oferta introdutória grátis da Apple, nada mais."""
+    return (
+        transacao is not None
+        and transacao.offer_type is not None
+        and int(transacao.offer_type) == OFERTA_INTRODUTORIA
+        and str(transacao.offer_discount_type or "").upper() == TESTE_GRATIS
+    )
+
+
+def traduzir_status(status_apple, transacao, renovacao, agora: datetime) -> str:
+    """Estado do SoftSpend a partir do estado da Apple.
+
+    Com o código de `Get All Subscription Statuses` (§2.4): 1 ativa, 2
+    expirada, 3 nova tentativa de cobrança, 4 carência, 5 revogada. Sem o
+    código (Apple fora do ar, só a notificação), deriva das datas.
+    """
+    agora = _utc_naive(agora)
+    if status_apple is not None:
+        codigo = int(status_apple)
+        if codigo == 1:
+            return TRIAL if _eh_teste_gratis(transacao) else ACTIVE
+        if codigo == 2:
+            return EXPIRED
+        if codigo == 3:
+            return BILLING_RETRY
+        if codigo == 4:
+            return GRACE
+        if codigo == 5:
+            return REVOKED
+        raise ValueError(f"status da Apple desconhecido: {codigo}")
+
+    if transacao.revogada_em is not None:
+        return REVOKED
+    expira_em = _utc_naive(transacao.expira_em)
+    if expira_em is not None and agora < expira_em:
+        return TRIAL if _eh_teste_gratis(transacao) else ACTIVE
+    carencia = _utc_naive(renovacao.carencia_ate) if renovacao else None
+    if carencia is not None and agora < carencia:
+        return GRACE
+    if renovacao is not None and renovacao.em_nova_tentativa:
+        return BILLING_RETRY
+    return EXPIRED
+
+
+def reconciliar(
+    db: Session,
+    assinatura: models.Assinatura,
+    transacao,
+    renovacao,
+    agora: datetime,
+    status_apple: int | None = None,
+    ambiente: str | None = None,
+) -> models.Assinatura:
+    """Grava na linha o estado que a Apple descreve (§2.5).
+
+    Não consulta a Apple nem decide o acesso: só copia os campos e traduz o
+    status. O acesso continua saindo de `calcular_acesso`, que olha as datas
+    (um `active` com `expira_em` no passado já vale `expired`).
+    """
+    agora = _utc_naive(agora)
+    assinatura.original_transaction_id = transacao.original_transaction_id
+    assinatura.produto = transacao.produto
+    if ambiente or transacao.ambiente:
+        assinatura.ambiente = ambiente or transacao.ambiente
+    assinatura.expira_em = _utc_naive(transacao.expira_em)
+    assinatura.carencia_ate = _utc_naive(renovacao.carencia_ate) if renovacao else None
+    if renovacao is not None and renovacao.renovacao_automatica is not None:
+        assinatura.renovacao_automatica = renovacao.renovacao_automatica
+    assinatura.status = traduzir_status(status_apple, transacao, renovacao, agora)
+    assinatura.atualizado_em = agora
+    db.add(assinatura)
+    return assinatura
+
+
+def _por_transacao_original(db: Session, original_transaction_id: str):
+    return (
+        db.query(models.Assinatura)
+        .filter(models.Assinatura.original_transaction_id == original_transaction_id)
+        .first()
+    )
+
+
+def _por_token(db: Session, token: str):
+    return (
+        db.query(models.Assinatura)
+        .filter(func.lower(models.Assinatura.app_account_token) == token.lower())
+        .first()
+    )
+
+
+def registrar_transacao(
+    db: Session, user_id: str, jws: str, agora: datetime | None = None
+) -> dict:
+    """`POST /api/assinatura/transacoes` (§2.3). Devolve o corpo do GET.
+
+    Lança `ComprovanteInvalido` (400), `AssinaturaDeOutraConta` (409),
+    `AppleIndisponivel`/`AppleNaoConfigurada` (503). Nada é gravado antes
+    da resposta da Apple.
+    """
+    from services import apple_service
+
+    agora = agora or agora_utc()
+    transacao, ambiente = apple_service.verificar_transacao(jws)
+
+    bundle = os.getenv("APPLE_BUNDLE_ID", BUNDLE_PADRAO).strip() or BUNDLE_PADRAO
+    if transacao.bundle_id != bundle:
+        raise apple_service.ComprovanteInvalido("bundle")
+    if transacao.tipo != apple_service.TIPO_ASSINATURA:
+        raise apple_service.ComprovanteInvalido("tipo")
+    if transacao.produto not in apple_service.PRODUTOS:
+        raise apple_service.ComprovanteInvalido("produto")
+    original = transacao.original_transaction_id
+    if not original:
+        raise apple_service.ComprovanteInvalido("sem originalTransactionId")
+
+    assinatura = buscar(db, user_id)
+    if transacao.app_account_token:
+        if assinatura is None or (
+            assinatura.app_account_token.lower() != transacao.app_account_token.lower()
+        ):
+            raise AssinaturaDeOutraConta()
+    else:
+        # Restaurar compras de antes do token, ou canal externo (§2.3).
+        logger.info("Transação sem appAccountToken recebida em /transacoes")
+
+    dono = _por_transacao_original(db, original)
+    if dono is not None and dono.user_id != user_id:
+        raise AssinaturaDeOutraConta()
+
+    estado_apple = apple_service.obter_cliente_apple(ambiente).status(original)
+
+    if assinatura is None:
+        assinatura = obter_ou_criar(db, user_id)
+    if estado_apple is not None:
+        reconciliar(
+            db, assinatura, estado_apple.transacao, estado_apple.renovacao, agora,
+            status_apple=estado_apple.status, ambiente=ambiente,
+        )
+    else:
+        reconciliar(db, assinatura, transacao, None, agora, ambiente=ambiente)
+    try:
+        db.commit()
+    except IntegrityError:
+        # Outra conta ligou a mesma compra no mesmo instante.
+        db.rollback()
+        raise AssinaturaDeOutraConta() from None
+    return estado(db, user_id, agora)
+
+
+def processar_notificacao(
+    db: Session, signed_payload: str, agora: datetime | None = None
+) -> str:
+    """`POST /api/webhooks/apple` (§2.3). Devolve o que foi feito, para log.
+
+    A notificação é só gatilho: o estado vem de `Get All Subscription
+    Statuses`. Com a Apple fora do ar, usa a própria notificação só se for
+    mais nova que `atualizado_em`. O `notificationUUID` só é gravado junto
+    com o resultado (no mesmo commit); falha interna não o deixa gravado.
+    """
+    from services import apple_service
+
+    agora = agora or agora_utc()
+    notificacao, ambiente = apple_service.verificar_notificacao(signed_payload)
+    if not notificacao.uuid or not notificacao.tipo:
+        raise apple_service.ComprovanteInvalido("notificação sem uuid ou tipo")
+
+    repetida = (
+        db.query(models.AppleNotificacao)
+        .filter(models.AppleNotificacao.notification_uuid == notificacao.uuid)
+        .first()
+    )
+    if repetida is not None:
+        return "repetida"
+
+    transacao = notificacao.transacao
+    original = transacao.original_transaction_id if transacao else None
+    registro = models.AppleNotificacao(
+        notification_uuid=notificacao.uuid,
+        tipo=notificacao.tipo,
+        subtipo=notificacao.subtipo,
+        original_transaction_id=original or None,
+        recebida_em=agora,
+    )
+
+    resultado = "registrada"
+    assinatura = None
+    if notificacao.tipo not in SO_REGISTRA and transacao is not None:
+        if original:
+            assinatura = _por_transacao_original(db, original)
+        if assinatura is None and transacao.app_account_token:
+            assinatura = _por_token(db, transacao.app_account_token)
+        if assinatura is None:
+            resultado = "desconhecida"
+
+    if assinatura is not None:
+        try:
+            estado_apple = apple_service.obter_cliente_apple(ambiente).status(original)
+        except apple_service.AppleIndisponivel:
+            estado_apple = None
+            assinada = _utc_naive(notificacao.assinada_em)
+            ultima = _utc_naive(assinatura.atualizado_em)
+            if assinada is not None and (ultima is None or assinada > ultima):
+                reconciliar(
+                    db, assinatura, transacao, notificacao.renovacao, agora,
+                    status_apple=notificacao.status, ambiente=ambiente,
+                )
+                resultado = "reconciliada_pela_notificacao"
+            else:
+                resultado = "antiga_ignorada"
+        else:
+            if estado_apple is not None:
+                reconciliar(
+                    db, assinatura, estado_apple.transacao, estado_apple.renovacao,
+                    agora, status_apple=estado_apple.status, ambiente=ambiente,
+                )
+                resultado = "reconciliada"
+            else:
+                resultado = "sem_estado_na_apple"
+
+    db.add(registro)
+    try:
+        db.commit()
+    except IntegrityError:
+        # A mesma notificação chegou duas vezes ao mesmo tempo.
+        db.rollback()
+        return "repetida"
+    return resultado

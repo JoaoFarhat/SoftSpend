@@ -12,13 +12,12 @@ from limiter import limiter
 router = APIRouter()
 
 
-@router.post(
-    "/ciclos",
-    response_model=CicloResponse,
-    dependencies=[Depends(exigir_assinatura)],
-)
+@router.post("/ciclos", response_model=CicloResponse)
 @limiter.limit("20/minute")
 def criar_ciclo(request: Request, ciclo: CicloRequest, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
+    # A assinatura é conferida dentro do service, só depois da busca por
+    # `client_id`: o reenvio de um ciclo que já existe nunca é bloqueado
+    # (`docs/assinatura.md` §3.3).
     return ciclo_service.criar_ciclo(db, ciclo, user_id)
 
 
