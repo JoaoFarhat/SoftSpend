@@ -192,6 +192,21 @@ a falha final do T4), pode existir no servidor (resposta do POST perdida). O
 o `DELETE`. Nunca enviado: nenhuma requisição. Testes em
 `SoftSpendTests/ApagarSemBackendIdTests.swift` (`FakeSyncAPI.perderResposta`).
 
+**Viagem nova sem assinatura (I2a, `docs/assinatura.md` §3.4)**: `403` com
+`error == "subscription_required"` no `POST` de ciclo (`APIError.assinaturaNecessaria`,
+lido no erro tipado) chama `marcarAguardandoAssinatura`: `.pending`,
+`tentativas` inalterado, `proximaTentativaEm = nil`,
+`syncError = SyncActor.erroAssinaturaNecessaria`, sem `mudouDuranteEnvio`, sem
+descarte e sem logout (`deveRenovarToken` só aceita `401`). A viagem não é
+reenviada nas outras passadas do mesmo `sync` (`aguardandoAssinaturaNesteSync`);
+dias e gastos esperam o `backendId` e sobem juntos no `sync(forcar: true)` da
+compra. Outro `403` segue para `marcarFalha`. Com o servidor corrigido (AS2), o
+403 garante que o `client_id` não está lá: o marcador sai de
+`podeTerSidoCriadoNoServidor` e `classificar` devolve `.naoExiste` (apagar a
+viagem bloqueada não faz requisição). Na tela, `EstadoEnvio.aguardandoAssinatura`
+("Assinatura necessária", cadeado, sem cor de falha). Testes em
+`SoftSpendTests/AssinaturaSyncTests.swift`.
+
 **Comprovantes**: `syncComprovantes` filtra por `syncStatusRaw != synced` no
 predicado. Chama `marcarFalha` em falha (backoff) e `marcarSucesso` apenas se
 `comprovanteData == nil && !comprovanteParaRemover`. `syncGastos` também só

@@ -222,7 +222,7 @@ struct DetalheGastoView: View {
         let estado = EstadoEnvio.de(gasto)
         let cor: Color = switch estado {
         case .enviado: Tema.texto
-        case .aguardando: Tema.textoFraco
+        case .aguardando, .aguardandoAssinatura: Tema.textoFraco
         case .falhou, .apagadoEmOutroAparelho: Tema.estouro
         }
         VStack(alignment: .trailing, spacing: 2) {

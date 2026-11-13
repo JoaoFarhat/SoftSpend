@@ -14,11 +14,21 @@ nonisolated enum EstadoEnvio: Equatable, Sendable {
     /// (ou o próprio gasto) foi apagado em outro aparelho. Hoje esse gasto é
     /// descartado no começo do próximo `sync`; o caso só cobre o intervalo até lá.
     case apagadoEmOutroAparelho
+    /// A viagem foi recusada pelo servidor por falta de assinatura (§3.4 de
+    /// `docs/assinatura.md`): o gasto espera na fila, não é falha. Sobe depois
+    /// da compra. Conta como pendente no aviso da `MainView`.
+    case aguardandoAssinatura
 
     static func de(_ gasto: GastosDia) -> EstadoEnvio {
         // O texto fixo do `syncError` é o identificador da falha final por 404.
         if gasto.syncError == SyncActor.erroApagadoEmOutroAparelho {
             return .apagadoEmOutroAparelho
+        }
+        // Gasto ainda não enviado de uma viagem bloqueada pela assinatura: o
+        // marcador fica no ciclo (o gasto nem chega a ser enviado).
+        if gasto.syncStatus != .synced,
+           gasto.dia?.ciclo?.syncError == SyncActor.erroAssinaturaNecessaria {
+            return .aguardandoAssinatura
         }
         switch gasto.syncStatus {
         case .synced: return .enviado
@@ -34,6 +44,7 @@ nonisolated extension EstadoEnvio {
         switch self {
         case .enviado: nil
         case .aguardando: "icloud.slash"
+        case .aguardandoAssinatura: "lock"
         case .falhou, .apagadoEmOutroAparelho: "exclamationmark.triangle"
         }
     }
@@ -43,6 +54,7 @@ nonisolated extension EstadoEnvio {
         switch self {
         case .enviado: nil
         case .aguardando: "Aguardando envio"
+        case .aguardandoAssinatura: "Assinatura necessária"
         case .falhou: "Falha ao enviar"
         case .apagadoEmOutroAparelho: SyncActor.erroApagadoEmOutroAparelho
         }
@@ -53,6 +65,7 @@ nonisolated extension EstadoEnvio {
         switch self {
         case .enviado: "Enviado"
         case .aguardando: "Aguardando envio"
+        case .aguardandoAssinatura: "Assinatura necessária"
         case .falhou: "Falha ao enviar"
         case .apagadoEmOutroAparelho: "Apagado em outro aparelho"
         }
@@ -63,6 +76,7 @@ nonisolated extension EstadoEnvio {
         switch self {
         case .falhou(let erro): erro
         case .apagadoEmOutroAparelho: SyncActor.erroApagadoEmOutroAparelho
+        case .aguardandoAssinatura: SyncActor.erroAssinaturaNecessaria
         case .enviado, .aguardando: nil
         }
     }
@@ -74,7 +88,7 @@ nonisolated func textoAlteracoesAguardando(_ quantidade: Int) -> String {
 }
 
 /// Ícone pequeno que marca o gasto ainda não enviado: `icloud.slash`
-/// aguardando, triângulo nas falhas. Nada quando enviado.
+/// aguardando, cadeado sem assinatura, triângulo nas falhas. Nada quando enviado.
 struct IconeEstadoEnvio: View {
     let estado: EstadoEnvio
 
@@ -89,7 +103,7 @@ struct IconeEstadoEnvio: View {
 
     private var cor: Color {
         switch estado {
-        case .enviado, .aguardando: Tema.textoFraco
+        case .enviado, .aguardando, .aguardandoAssinatura: Tema.textoFraco
         case .falhou, .apagadoEmOutroAparelho: Tema.alertaTexto
         }
     }
