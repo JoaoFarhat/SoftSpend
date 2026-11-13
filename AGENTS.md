@@ -310,6 +310,34 @@ libera recurso.
 - Testes: `SoftSpendTests/AssinaturaLojaTests.swift` com
   `FakeLojaAssinatura`/`FakeAssinaturaAPI`. Compra real só no Mac/TestFlight.
 
+### Bloqueios da assinatura (I2b, §3.5)
+
+Quatro ações pedem acesso: nova viagem, ler comprovante com IA, exportar e
+importar fatura. Ver/editar gastos, lançar manual, editar viagem, sair e
+excluir a conta ficam livres.
+
+- A porta é `AssinaturaViewModel.exigirAcesso()`: `false` só com
+  `tem_acesso == false` conhecido — abre os planos (`planosAbertos`) e a ação
+  não roda. Estado desconhecido (sem internet, rota ainda fora) deixa passar:
+  quem decide no envio é o servidor. `permiteAbrir(_ rota:)` aplica isso a
+  `.novaViagem` no `MainView.abrir`; `tratarErroDeAcesso(_)` reconhece o 403
+  `subscription_required` direto (`APIError.assinaturaNecessaria`) e abre os
+  planos em vez de "Erro no servidor" — sem logout nem retry de token.
+- Cada gatilho recebe o `AssinaturaViewModel` por parâmetro (padrão
+  `.shared`), e a rede por costura injetável (`lerLocal`/`extrair` no
+  `LeituraComprovante.ler`, `exportarRemoto` no `CiclosViewModel`,
+  `api: FaturaAPI` no `ImportarFaturaViewModel`) — os testes provam que sem
+  acesso nenhuma chamada sai.
+- `exportarCiclo` devolve `URL?`: `nil` = bloqueado (planos abriram), não
+  erro. `ler()` da fatura bloqueada volta para `.escolhendo`.
+- `MainView` mostra a faixa (`assinatura.textoFaixa`: "Seu pagamento falhou…"
+  em `grace`/`billing_retry`, "Teste grátis até DD/MM" em `trial`) sobre a
+  barra de abas e apresenta `PlanosAssinaturaView` em folha ligada a
+  `planosAbertos` — abre por cima inclusive das capas de lançar gasto e de
+  importar fatura.
+- Testes: `SoftSpendTests/BloqueiosAssinaturaTests.swift` (`Fabrica` monta o
+  VM com `FakeLojaAssinatura`/`FakeAssinaturaAPI`).
+
 ### Pegadinhas SwiftData / SwiftUI (crashes conhecidos)
 
 Estas armadilhas já causaram crashes em produção e foram corrigidas. Mantenha

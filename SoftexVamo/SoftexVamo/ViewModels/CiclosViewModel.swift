@@ -1205,16 +1205,33 @@ final class CiclosViewModel: ObservableObject {
         }
     }
 
-    func exportarCiclo(formato: ExportFormato, comprovantes: ExportComprovantes = .imagem) async throws -> URL {
+    /// Porta da assinatura (§3.5): produção é o `.shared`; os testes injetam
+    /// um `AssinaturaViewModel` com loja e API falsas.
+    var assinatura: AssinaturaViewModel = .shared
+
+    /// Chamada de exportação, injetável para os testes (produção:
+    /// `NetworkManager.shared`).
+    var exportarRemoto: (_ cicloId: Int, _ formato: ExportFormato,
+                        _ comprovantes: ExportComprovantes) async throws -> Data = {
+        try await NetworkManager.shared.exportarCiclo(cicloId: $0, formato: $1, comprovantes: $2)
+    }
+
+    /// `nil` quando a assinatura barra a exportação (§3.5): a tela de planos
+    /// abre no lugar e nenhum alerta de erro aparece.
+    func exportarCiclo(formato: ExportFormato, comprovantes: ExportComprovantes = .imagem) async throws -> URL? {
+        guard assinatura.exigirAcesso() else { return nil }
         guard let cicloId = atualCiclo.backendId else {
             throw APIError.serverError(message: "Ciclo ainda não sincronizado com o servidor", requestId: "-", statusCode: 400)
         }
 
-        let data = try await NetworkManager.shared.exportarCiclo(
-            cicloId: cicloId,
-            formato: formato,
-            comprovantes: comprovantes
-        )
+        let data: Data
+        do {
+            data = try await exportarRemoto(cicloId, formato, comprovantes)
+        } catch {
+            // 403 `subscription_required` direto: planos, não "Erro no servidor".
+            if assinatura.tratarErroDeAcesso(error) { return nil }
+            throw error
+        }
 
         let nome = "relatorio_\(atualCiclo.titulo.filter { !$0.isWhitespace }).\(formato.extensao)"
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(nome)
