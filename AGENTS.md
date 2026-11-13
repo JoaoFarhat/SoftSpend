@@ -30,11 +30,13 @@ cd Python && SECRET_KEY="..." REFRESH_TOKEN_SECRET_KEY="..." python3 -c "import 
 
 O app usa **SwiftData** como banco local (`CicloSoftex`, `DiaSoftex`, `GastosDia`, `UserModel`).
 
-- O `ModelContainer` é criado em `SoftexVamoApp.createModelContainer()` com o
-  schema versionado (ver "Schema versionado e quarentena" abaixo) e registrado
-  via `.modelContainer(_:)`. O erro cosmético `Failed to create file; code = 2`
-  do Core Data na primeira execução é esperado — o recovery automático cria o
-  diretório e abre o store com sucesso.
+- O `ModelContainer` é criado uma vez em `BancoLocal.container`
+  (`Models/BancoLocal.swift`) — container único usado pelo app e pelo App
+  Intent "Registrar gasto" — com o schema versionado (ver "Schema versionado e
+  quarentena" abaixo) e registrado via `.modelContainer(_:)`. O erro cosmético
+  `Failed to create file; code = 2` do Core Data na primeira execução é
+  esperado — o recovery automático cria o diretório e abre o store com
+  sucesso.
 - O `ModelContext` é acessado pelas views via `@Environment(\.modelContext)` e
   repassado para os ViewModels.
 - Toda ação de escrita (criar, editar, excluir) altera o SwiftData primeiro e
@@ -213,6 +215,36 @@ no Keychain com `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`.
 
 `ComprovanteCrypto` é `nonisolated` porque é acessado de `GastosDia` (que é
 `nonisolated`).
+
+### Apple Pay (atalho "Registrar gasto")
+
+Spec: `docs/cartao-sem-open-finance.md` §1 (parte A implementada; a parte B, o
+aviso da fila no Início, ainda não existe).
+
+- `Intents/RegistrarGastoIntent.swift` — App Intent com
+  `openAppWhenRun = false`; roda `@MainActor` no `mainContext` do
+  `BancoLocal.container` (o mesmo do app) e só chama a regra. Responde com um
+  `IntentDialog` curto que o Atalhos mostra como confirmação.
+- `Intents/SoftSpendAtalhos.swift` — `AppShortcutsProvider` com frases em
+  português contendo `\(.applicationName)` (exigência da Apple).
+- `Services/RegistroApplePay.swift` — regra pura (recebe `ModelContext`,
+  `userId`, `agora`, `calendario`, fila): parse do valor (`ValorDaCompra`),
+  categoria por `InterpretadorComprovante.inferirCategoria`, dia de hoje da
+  viagem aberta (em sobreposição, a de primeiro dia mais recente), duplicata
+  em janela deslizante de 60 s (mesmo valor + estabelecimento normalizado, em
+  gasto vivo **ou** item da fila). Sem viagem/dia de hoje, vai para a fila.
+- `Services/UsuarioSalvo.swift` — `userId` lido do `user_data` do
+  `UserDefaults` **sem Keychain**: a ação pode rodar com o iPhone trancado e o
+  token é `WhenUnlockedThisDeviceOnly`. Sem `user_data`, recusa
+  `.semUsuario`. Se o app acordou travado, o `AuthService` nasce sem token; o
+  `SoftexVamoApp` repete `checkAuthentication()` quando a cena fica `.active`
+  com `isAuthenticated == false` (só lê, nunca apaga).
+- `Services/ComprasAguardandoViagem.swift` — fila "sem viagem" em JSON
+  (`Application Support/compras-apple-pay.json`, escrita atômica, teto de 50
+  por usuário, fora do SwiftData de propósito: nenhum `@Model` novo, sem V2).
+- `Scenes/ComoLigarApplePayView.swift` — tela de ajuda na seção Preferências
+  de `PerfilView` (linha "Apple Pay (atalho)"); a automação é criada pelo
+  usuário no app Atalhos (a Apple não permite criar pelo app).
 
 ### Pegadinhas SwiftData / SwiftUI (crashes conhecidos)
 
