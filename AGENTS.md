@@ -571,6 +571,24 @@ Foram adicionados dois mecanismos:
    - Requisicoes diretas (sem o header) nao sao redirecionadas, permitindo
      health checks locais HTTP.
 
+O `GET /health` consulta o banco (`SELECT 1`), entao tem rate limit em duas
+camadas. No nginx (`deploy/ec2/nginx-softspend.conf`), `limit_req_zone` +
+`location = /health` seguram 30 r/m por IP real (burst 10, responde 429) e
+funcionam mesmo com `TRUST_PROXY=false`. No codigo,
+`@limiter.limit("30/minute")` (mesmo slowapi das rotas), com
+`exempt_when=_healthcheck_local` — IP resolvido loopback (`127.0.0.1`/`::1`)
+nao conta, porque o health check do `deploy.yml` vai direto ao uvicorn
+(`curl 127.0.0.1:8000`, sem passar pelo nginx) e um 429 ali quebraria o
+deploy.
+
+Pegadinha de teste: os fixtures que fazem `sys.modules.pop("main")` +
+`import_module("main")` acumulam uma copia do `Limit` em
+`limiter._route_limits` a cada reimportacao — uma unica requisicao passa a
+custar N hits no mesmo bucket. Por isso os testes de HSTS desligam o limiter
+(`limiter.enabled = False`, padrao dos outros arquivos) e o teste da isencao
+de loopback patcha `get_real_ip` no `__globals__` de cada `exempt_when`
+acumulado.
+
 2. **Config nginx** (`deploy/ec2/nginx-softspend.conf`):
    - Escuta `80` e redireciona tudo para HTTPS.
    - Escuta `443` com SSL, repassa `X-Forwarded-Proto` e adiciona HSTS.

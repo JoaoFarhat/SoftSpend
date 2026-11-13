@@ -155,9 +155,11 @@ def test_refresh_token_rotation_reuse_detection_and_logout(monkeypatch):
         assert registro_logout.revoked_at is not None
 
 
-def test_http_behind_proxy_is_redirected_to_https():
+def test_http_behind_proxy_is_redirected_to_https(monkeypatch):
+    import limiter as limiter_module
     from main import app
 
+    monkeypatch.setattr(limiter_module.limiter, "enabled", False)
     client = TestClient(app)
     response = client.get(
         "/health",
@@ -170,9 +172,11 @@ def test_http_behind_proxy_is_redirected_to_https():
     assert "Strict-Transport-Security" in response.headers
 
 
-def test_https_behind_proxy_includes_hsts_header():
+def test_https_behind_proxy_includes_hsts_header(monkeypatch):
+    import limiter as limiter_module
     from main import app
 
+    monkeypatch.setattr(limiter_module.limiter, "enabled", False)
     client = TestClient(app)
     response = client.get(
         "/health",
@@ -184,6 +188,45 @@ def test_https_behind_proxy_includes_hsts_header():
     # trafegar pelo middleware e incluir o cabecalho HSTS.
     assert response.status_code in (200, 503)
     assert "Strict-Transport-Security" in response.headers
+
+
+def test_health_is_rate_limited_for_remote_clients():
+    import limiter as limiter_module
+    from main import app
+
+    limiter_module.limiter.reset()
+    try:
+        client = TestClient(app)
+        respostas = [client.get("/health").status_code for _ in range(40)]
+        assert respostas[-1] == 429
+    finally:
+        limiter_module.limiter.reset()
+
+
+def test_health_localhost_is_not_rate_limited(monkeypatch):
+    # O health check do deploy vai direto ao uvicorn em 127.0.0.1:8000 e nao
+    # pode levar 429, mesmo acima do teto por IP remoto.
+    import main as main_module
+    import limiter as limiter_module
+
+    # Cada reimportacao de `main` na suite acumula uma copia do Limit de
+    # /health em _route_limits, e a copia antiga aponta para o `get_real_ip`
+    # do modulo que a criou. Patch em todos os __globals__ simula o peer
+    # loopback em qualquer uma delas.
+    for lim in limiter_module.limiter._route_limits["main.health_check"]:
+        monkeypatch.setitem(
+            lim.exempt_when.__globals__,
+            "get_real_ip",
+            lambda request: "127.0.0.1",
+        )
+
+    limiter_module.limiter.reset()
+    try:
+        client = TestClient(main_module.app)
+        respostas = [client.get("/health").status_code for _ in range(40)]
+        assert 429 not in respostas
+    finally:
+        limiter_module.limiter.reset()
 
 
 def test_pluggy_webhook_requires_configured_secret(importar_main, monkeypatch):
