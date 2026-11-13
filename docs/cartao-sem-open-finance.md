@@ -176,7 +176,9 @@ A pessoa pode ter mais de um cartão no Apple Pay. Dois filtros, que se completa
 
 No Perfil, a seção **"Cartões do Apple Pay"** lista esses cartões com uma chave liga/desliga cada; cartão novo nasce **ligado**. Em `RegistroApplePay.registrar`, compra de cartão desligado é ignorada **antes de gravar ou ir para a fila** (resultado `.ignoradoCartaoDesligado`, resposta do atalho `Compra do cartão X ignorada (desligado no SoftSpend)`). **Desligar não apaga os gastos já lançados.**
 
-A chegada marca `vistoEm` (ordena a lista, mais recentes primeiro). Falha ao ler/gravar a lista faz `registrarChegada` lançar — sem a lista não dá para saber se o cartão está ligado, então a ação responde "lance no app" em vez de gravar uma compra que o usuário mandou ignorar.
+A chegada marca `vistoEm` (ordena a lista, mais recentes primeiro). O nome é aparado e cortado em 60 caracteres, e a lista tem no máximo 20 cartões por usuário: ao chegar o 21º, sai o de `vistoEm` mais antigo **que esteja ligado** — um desligado nunca sai, porque ao voltar pela ação entraria ligado de novo, desfazendo a escolha do usuário.
+
+Falha ao **ler** a lista faz `registrarChegada` lançar — sem a lista não dá para saber se o cartão está ligado, então a ação responde "lance no app" em vez de gravar uma compra que o usuário mandou ignorar. Falha ao **gravar** lança só para cartão novo (ele sumiria da lista); para cartão conhecido o `vistoEm` é cosmético — só sai no log e o `ligado` lido é devolvido, sem impedir a compra.
 
 Testes: cartão novo entra e aparece na lista; cartão desligado não grava nem vai para a fila; religar volta a gravar; isolamento por usuário; compra sem nome de cartão. Pronto quando o `xcodebuild test` do CI passa (`.github/workflows/ios.yml`).
 
