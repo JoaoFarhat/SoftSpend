@@ -125,6 +125,29 @@ final class CartoesApplePay {
         }
     }
 
+    /// Tira da lista todos os cartões do usuário — excluir a conta apaga os
+    /// dados locais dela (docs/publicacao.md §2, "Exclusão de conta"). Os de
+    /// outros usuários ficam. Mesmas regras de falha do `definirLigado`: só
+    /// loga e deixa o arquivo como está.
+    func removerTodos(userId: String) {
+        trava.lock()
+        defer { trava.unlock() }
+        var lista: [CartaoApplePay]
+        do {
+            lista = try todosTrancado()
+        } catch {
+            Self.logger.error("Não leu os cartões para remover todos: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        let restantes = lista.filter { $0.userId != userId }
+        guard restantes.count != lista.count else { return }
+        do {
+            try gravar(restantes)
+        } catch {
+            Self.logger.error("Não gravou os cartões depois de remover todos: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     // MARK: - Arquivo (sempre chamado sob `trava`) — mesmas regras da fila
 
     /// Lê o arquivo. Ausente lê como lista vazia. Corrompido (JSON que não

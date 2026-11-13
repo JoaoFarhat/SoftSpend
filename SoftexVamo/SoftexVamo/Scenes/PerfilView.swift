@@ -126,7 +126,7 @@ struct PerfilView: View {
             }
             Button("Cancelar", role: .cancel) {}
         } message: {
-            Text("Todos os seus dados, ciclos e gastos serão apagados. Esta ação não pode ser desfeita.")
+            Text("Todos os seus dados, ciclos e gastos serão apagados. Esta ação não pode ser desfeita.\n\nExcluir a conta não cancela uma assinatura da App Store.")
         }
     }
 

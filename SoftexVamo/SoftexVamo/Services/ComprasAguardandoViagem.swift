@@ -125,6 +125,29 @@ final class ComprasAguardandoViagem {
         }
     }
 
+    /// Tira da fila todos os itens do usuário — excluir a conta apaga os
+    /// dados locais dela (docs/publicacao.md §2, "Exclusão de conta"). Os de
+    /// outros usuários ficam. Mesmas regras de falha do `remover(id:)`: só
+    /// loga e deixa o arquivo como está.
+    func removerTodos(userId: String) {
+        trava.lock()
+        defer { trava.unlock() }
+        var lista: [CompraAguardandoViagem]
+        do {
+            lista = try todasTrancado()
+        } catch {
+            Self.logger.error("Não leu a fila para remover todos: \(error.localizedDescription, privacy: .public)")
+            return
+        }
+        let restantes = lista.filter { $0.userId != userId }
+        guard restantes.count != lista.count else { return }
+        do {
+            try gravar(restantes)
+        } catch {
+            Self.logger.error("Não gravou a fila depois de remover todos: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
     // MARK: - Arquivo (sempre chamado sob `trava`)
 
     /// Lê o arquivo. Ausente lê como lista vazia. Corrompido (JSON que não
