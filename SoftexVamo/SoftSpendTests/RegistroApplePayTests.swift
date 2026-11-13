@@ -343,12 +343,12 @@ struct RegistroApplePayTests {
                                           ciclos: [apagada, deOutro], calendario: cal) == nil)
     }
 
-    @Test func destinoEmSobreposicaoUsaAPrimeiroDiaMaisRecente() throws {
+    @Test func destinoEmSobreposicaoUsaAQueComecouPrimeiro() throws {
         let antiga = viagem(titulo: "Antiga", dias: [dia(10), dia(11), dia(12)])
         let recente = viagem(titulo: "Recente", dias: [dia(11), dia(12)])
         let d = try #require(RegistroApplePay.viagemEDia(para: dia(11), userId: userId,
                                                        ciclos: [antiga, recente], calendario: cal))
-        #expect(d.ciclo === recente)
+        #expect(d.ciclo === antiga)
     }
 
     // MARK: Filtro por cartão (§1.10)
