@@ -1,0 +1,36 @@
+name: Reteste do App iOS
+
+# Quando o GitHub não acha um Mac livre, o job do "App iOS" espera 15 minutos e é
+# cancelado sem rodar nenhum passo ("The job was not acquired by Runner of type
+# hosted"). O código não tem culpa: rodar de novo, mais tarde, passa. Este workflow
+# faz esse "Re-run" sozinho, uma vez só por run. Cancelamento com passos rodados
+# (um merge mais novo na main, por exemplo) e falha de verdade não são retestados.
+on:
+  workflow_run:
+    workflows: ["App iOS"]
+    types: [completed]
+
+# Só pede o reteste: não baixa nem roda código do PR.
+permissions:
+  actions: write
+
+jobs:
+  retestar:
+    if: github.event.workflow_run.conclusion != 'success' && github.event.workflow_run.run_attempt == 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Retestar se faltou Mac
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN: ${{ github.event.workflow_run.id }}
+        run: |
+          sem_mac=$(gh api "repos/$REPO/actions/runs/$RUN/jobs" \
+            --jq '[.jobs[] | select(.conclusion == "cancelled" and (.steps | length) == 0)] | length')
+          if [ "$sem_mac" -gt 0 ]; then
+            echo "O run $RUN não conseguiu um Mac; pedindo para rodar de novo."
+            gh run rerun "$RUN" --repo "$REPO"
+          else
+            echo "O run $RUN rodou e não passou: não é falta de Mac, nada a fazer."
+          fi
