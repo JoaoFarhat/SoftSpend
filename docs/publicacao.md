@@ -65,7 +65,21 @@ O `Safeel.App.Backend/docs/assinatura.md` é o modelo; o princípio é o mesmo: 
 
 **Por que faz sentido.** O que o app faz melhor (viagem com diária por dia, comprovante lido pela IA, relatório do ciclo em PDF) é, na prática, **prestação de contas de viagem a trabalho**: a empresa dá uma diária ou adiantamento, o funcionário gasta, junta as notas e presta contas. É a dor que o HackaTruck já tem, e vender para empresa paga mais por usuário do que o consumidor final.
 
-**Modelo de cobrança (hipótese).** Por **funcionário ativo por mês**, na faixa de **R$ 15 a R$ 25**, com mínimo de assentos e plano anual. A faixa é um palpite: **a conferir** com os preços públicos de concorrentes de reembolso de despesas (por exemplo, Expensify, Pleo e os nacionais, como o Onfly; nomes só como ponto de partida da pesquisa) antes de qualquer proposta. Não cobrar pelo StoreKit: é venda entre empresas, e a Apple permite cobrança fora da loja para contas corporativas se o app não vender o plano dentro dele (conferir a regra vigente das diretrizes antes de desenhar, tema da pergunta E4).
+**Modelo de cobrança (hipótese).** Por **funcionário ativo por mês**, na faixa de **R$ 19 a R$ 29** (proposta recalculada em 13/11, ver a conta abaixo), com mínimo de assentos e plano anual. A faixa é um palpite: **a conferir** com os preços públicos de concorrentes de reembolso de despesas (por exemplo, Expensify, Pleo e os nacionais, como o Onfly; nomes só como ponto de partida da pesquisa) antes de qualquer proposta. Não cobrar pelo StoreKit: é venda entre empresas, e a Apple permite cobrança fora da loja para contas corporativas se o app não vender o plano dentro dele (conferir a regra vigente das diretrizes antes de desenhar, tema da pergunta E4).
+
+**Conta da faixa (13/11, com o preço decidido do consumidor).** Preço de lista: R$ 14,90 por mês e R$ 144,90 por ano (U1). Os números abaixo são arredondados e antes de impostos.
+
+| | Preço de lista | Comissão da Apple (15%) | Sobra para o SoftSpend |
+|---|---|---|---|
+| Consumidor, mensal | R$ 14,90 por mês | R$ 2,24 | **R$ 12,67 por mês** |
+| Consumidor, anual | R$ 144,90 por ano (R$ 12,08 por mês) | R$ 21,74 | **R$ 123,17 por ano (R$ 10,26 por mês)** |
+| Empresa, fora da Apple | A definir | 0% (venda direta; só imposto e a taxa do meio de pagamento) | O preço cobrado, menos imposto e taxa |
+
+- **A faixa antiga (R$ 15 a R$ 25) ficou apertada.** O piso de R$ 15 é praticamente o preço do consumidor mensal (R$ 14,90) e fica **acima** do anual (R$ 12,08 por mês), mas a empresa recebe painel, aprovação, exportação e suporte, então não pode custar quase o mesmo que a pessoa física.
+- **Faixa proposta: R$ 19 a R$ 29 por funcionário por mês**, com ponto de partida em **R$ 19,90** (≈ 33% acima do consumidor mensal, ≈ 65% acima do anual). Para a empresa, 100% do valor entra (sem a Apple), então R$ 19,90 deixa mais que os R$ 12,67 do consumidor mensal, mesmo depois de imposto e taxa do pagamento.
+- **Plano anual para empresa:** desconto parecido com o do consumidor (≈ 17%), ou seja, R$ 19,90 por mês viram ≈ R$ 199 por funcionário por ano.
+- **Piso de negociação:** não vender abaixo de **R$ 15 por funcionário por mês**, nem no piloto, para não sair mais barato que o app individual.
+- **Ainda não conferido:** concorrentes (Expensify, Pleo, Onfly) e o imposto real sobre a venda para empresa (depende do CNPJ e do regime do usuário; falar com o contador). A faixa continua sendo hipótese até lá.
 
 **O que falta no app e no servidor.**
 
@@ -92,7 +106,7 @@ O `Safeel.App.Backend/docs/assinatura.md` é o modelo; o princípio é o mesmo: 
 
 - **E1:** vale tentar empresas depois da loja, ou o foco é só o consumidor?
 - **E2:** o HackaTruck (ou quem decide nele) toparia ser piloto? Quem conversa com ele?
-- **E3:** a faixa de R$ 15 a R$ 25 por funcionário parece razoável para você? (O Claude confere concorrentes quando for a hora.)
+- **E3:** a faixa de **R$ 19 a R$ 29** por funcionário por mês (ponto de partida R$ 19,90), recalculada com o preço de R$ 14,90 e a comissão de 15% da Apple, parece razoável para você? (O Claude confere concorrentes quando for a hora.)
 - **E4:** a conta de desenvolvedor Apple (U4) será de pessoa física ou CNPJ? Para vender a empresas, um CNPJ ajuda na nota fiscal e no contrato.
 
 ## 2. O que a Apple exige e o app ainda não tem
