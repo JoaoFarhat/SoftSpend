@@ -74,7 +74,9 @@ final class FakeLojaAssinatura: LojaAssinaturaProtocolo {
 
     func direitosAtuais() async -> [TransacaoLoja] { direitos }
 
-    func naoFinalizadas() async -> [TransacaoLoja] { pendentes }
+    func naoFinalizadas() async -> [TransacaoLoja] {
+        pendentes.filter { !linha.passos.contains("finish:\($0.id)") }
+    }
 
     func atualizacoes() -> AsyncStream<TransacaoLoja> {
         let (fluxo, continuacao) = AsyncStream.makeStream(of: TransacaoLoja.self)
