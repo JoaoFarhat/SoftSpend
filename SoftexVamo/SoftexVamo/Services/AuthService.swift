@@ -26,6 +26,9 @@ final class AuthService: ObservableObject {
         checkAuthentication()
     }
 
+    /// Só lê, nunca apaga: seguro repetir quando a cena fica `.active` — a
+    /// ação do Apple Pay pode ter acordado o app com o iPhone trancado, quando
+    /// o token do Keychain é ilegível (§1.3 de docs/cartao-sem-open-finance.md).
     func checkAuthentication() {
         if KeychainManager.getAccessToken() != nil,
            let userData = UserDefaults.standard.data(forKey: userKey),

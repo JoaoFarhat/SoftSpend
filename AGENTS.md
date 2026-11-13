@@ -214,6 +214,36 @@ no Keychain com `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`.
 `ComprovanteCrypto` é `nonisolated` porque é acessado de `GastosDia` (que é
 `nonisolated`).
 
+### Apple Pay (atalho "Registrar gasto") — parte A
+
+Spec: `docs/cartao-sem-open-finance.md` §1. A automação "Transação" do app
+Atalhos (criada pelo usuário, a Apple não deixa o app criar) chama a ação
+`RegistrarGastoIntent` (`Intents/`), que roda **sem abrir o app** e com o
+iPhone possivelmente trancado.
+
+- **`Models/BancoLocal.swift`** — o `ModelContainer` único, extraído de
+  `SoftexVamoApp` sem mudança (nome `"softspend"`, `softspend_v1.sqlite`,
+  quarentena). O app e a ação usam `BancoLocal.container`; dois containers no
+  mesmo arquivo é o que se evita.
+- **`Services/UsuarioSalvo.swift`** — lê o `userId` do `user_data` do
+  `UserDefaults` (o mesmo JSON `UserDTO` do `AuthService`), porque o token do
+  Keychain é `WhenUnlockedThisDeviceOnly`, ilegível com o aparelho trancado.
+  Efeito colateral tratado no `SoftexVamoApp`: quando a cena fica `.active`
+  com `isAuthenticated == false`, `checkAuthentication()` roda de novo (só lê).
+- **`Services/RegistroApplePay.swift`** — a regra (`ValorDaCompra` para o
+  texto do valor, categoria via `InterpretadorComprovante.inferirCategoria`,
+  viagem aberta que contém hoje + `DiaSoftex` de hoje, deduplicação em 60 s
+  por `criadoEm`+valor+título contra gastos vivos e contra a fila). Grava como
+  `createNewGasto`, sem passar por ele. `syncStatus` fica `.pending`; quem sobe
+  é o `SyncManager` de sempre.
+- **`Services/ComprasAguardandoViagem.swift`** — fila "sem viagem" em JSON
+  (`Application Support/compras-apple-pay.json`, teto 50 por usuário, fora do
+  SwiftData de propósito para não exigir V2). Sem viagem aberta ou sem dia de
+  hoje, a compra fica na fila (`guardadoSemViagem`). A UI da fila no Início é
+  a parte B (§1.5), ainda não feita.
+- **`Scenes/ComoLigarApplePayView.swift`** — "Como ligar o Apple Pay", aberta
+  pela linha "Apple Pay (atalho)" nas Preferências do `PerfilView`.
+
 ### Pegadinhas SwiftData / SwiftUI (crashes conhecidos)
 
 Estas armadilhas já causaram crashes em produção e foram corrigidas. Mantenha

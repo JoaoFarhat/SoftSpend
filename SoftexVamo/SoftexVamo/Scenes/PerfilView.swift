@@ -50,6 +50,8 @@ struct PerfilView: View {
                     ))
                     divisoria
                     linhaTema
+                    divisoria
+                    linhaDestino("Apple Pay (atalho)") { ComoLigarApplePayView() }
                 }
                 Text("Ligada, a foto do comprovante é enviada para um serviço de leitura (Google Gemini) que preenche valor, local, data e categoria.")
                     .font(.footnote)
@@ -193,6 +195,26 @@ struct PerfilView: View {
         }
         .padding(.horizontal, Espaco.g)
         .frame(minHeight: 50)
+    }
+
+    private func linhaDestino<Destino: View>(_ titulo: String, @ViewBuilder destino: () -> Destino) -> some View {
+        NavigationLink {
+            destino()
+        } label: {
+            HStack(spacing: Espaco.m) {
+                Text(titulo)
+                    .foregroundStyle(Tema.texto)
+                Spacer(minLength: Espaco.p)
+                Image(systemName: "chevron.right")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Tema.textoFraco)
+                    .accessibilityHidden(true)
+            }
+            .font(.body)
+            .padding(.horizontal, Espaco.g)
+            .frame(minHeight: 50)
+            .contentShape(Rectangle())
+        }
     }
 
     #if DEBUG
