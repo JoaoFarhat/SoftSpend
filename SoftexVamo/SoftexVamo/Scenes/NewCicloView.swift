@@ -7,9 +7,16 @@
 
 import SwiftUI
 
+nonisolated private struct ChaveFormularioNovaViagem: EnvironmentKey {
+    static var defaultValue: FormularioViagem? { nil }
+}
+
 extension EnvironmentValues {
     /// Formulário com que "Nova viagem" abre pela rota `.novaViagem` (modo de demonstração).
-    @Entry var formularioNovaViagem: FormularioViagem? = nil
+    var formularioNovaViagem: FormularioViagem? {
+        get { self[ChaveFormularioNovaViagem.self] }
+        set { self[ChaveFormularioNovaViagem.self] = newValue }
+    }
 }
 
 /// Tela 4: Nova viagem (e Editar viagem). Destino, ida, volta e os campos
