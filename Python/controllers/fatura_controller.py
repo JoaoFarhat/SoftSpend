@@ -18,6 +18,7 @@ from services import (
     fatura_arquivo_service,
     fatura_ia_service,
     fatura_service,
+    limite_ia,
     open_finance_reconciliation_service,
 )
 from services.fatura_arquivo_service import ErroFatura
@@ -54,6 +55,8 @@ async def ler_fatura(
             pdf_aberto = await run_in_threadpool(
                 fatura_arquivo_service.desproteger_pdf, conteudo, senha
             )
+            # Só o PDF vai à IA (OFX e CSV não contam no teto diário).
+            limite_ia.contar(user_id, limite_ia.FATURA)
             bruta = await run_in_threadpool(fatura_ia_service.ler_fatura_pdf, pdf_aberto)
         elif tipo == "ofx":
             bruta = fatura_arquivo_service.ler_ofx(conteudo)
