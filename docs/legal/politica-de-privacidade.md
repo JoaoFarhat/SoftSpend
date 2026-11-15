@@ -7,7 +7,7 @@
 O SoftSpend é um aplicativo de controle de gastos por ciclo (viagens e períodos com orçamento diário). Quem trata os seus dados é:
 
 - **Responsável:** [NOME DO TITULAR], inscrito no CNPJ [CNPJ], com endereço em [ENDEREÇO].
-- **Contato para privacidade e direitos:** privacidade@[DOMÍNIO] (a caixa será criada antes da publicação).
+- **Contato para privacidade e direitos:** privacidade@softspend.com.br (a caixa será criada antes da publicação).
 
 ## 2. Quais dados coletamos e para que
 | Dado | Para que serve | De onde vem |
@@ -16,6 +16,7 @@ O SoftSpend é um aplicativo de controle de gastos por ciclo (viagens e período
 | Senha | Confirmar o seu login. Guardamos só uma versão cifrada (hash), nunca a senha em texto | Você informa no cadastro |
 | Ciclos, dias e gastos (título, valor, categoria e data) | Mostrar o seu controle de gastos e o saldo diário | Você lança no app |
 | Foto de comprovante | Ler os dados do gasto com IA, se você pedir | Você fotografa ou escolhe no aparelho |
+| Compra do Apple Pay (estabelecimento, valor e cartão) | Lançar o gasto no ciclo, se você ativou o atalho "Registrar gasto" | O Atalhos do iPhone, por ação sua |
 | Arquivo de fatura de cartão | Lançar as compras da fatura no ciclo, se você pedir | Você escolhe o arquivo |
 | Identificadores da compra na Apple | Saber se a sua assinatura está ativa | Apple, na compra |
 | Registro de sessões (token de renovação, em forma cifrada) | Manter você conectado com segurança e encerrar sessões | Gerado no seu login |
@@ -23,7 +24,7 @@ O SoftSpend é um aplicativo de controle de gastos por ciclo (viagens e período
 Não usamos seus dados para publicidade e não fazemos rastreamento entre apps ou sites de terceiros.
 
 ## 3. Quem recebe os seus dados
-- **Google (modelo de IA Gemini):** recebe a foto ou o texto do comprovante e da fatura, somente para ler os dados do gasto. Isso só acontece com o seu consentimento, pedido no próprio app. [Confirmar: a chave usada em produção está no plano pago do Google, que não usa os dados para melhorar os modelos.]
+- **Google (modelo de IA Gemini):** recebe a foto ou o texto do comprovante e da fatura, somente para ler os dados do gasto. Isso só acontece com o seu consentimento, pedido no próprio app. Usamos o serviço pago do Google (Gemini API): pelos termos do Google, o que enviamos não é usado para melhorar os produtos e modelos do Google. O Google pode guardar esses envios por um período limitado (hoje, 55 dias), só para detectar e impedir uso proibido do serviço, com acesso restrito. O processamento pode ocorrer fora do Brasil.
 - **Amazon Web Services (AWS):** hospeda o servidor e o banco de dados, no Brasil (região de São Paulo).
 - **Apple:** processa a sua assinatura pela App Store.
 
@@ -59,4 +60,4 @@ Se mudarmos esta política, avisaremos no app antes de a mudança valer.
 ### Notas para revisão (não publicar)
 - Se o recurso de Open Finance for religado, esta política precisa ser atualizada antes, porque ele coleta dados de cartão e transações.
 - O aviso de consentimento da fatura (F2) ainda precisa ser escrito, e deve dizer que a fatura vai à IA para leitura.
-- O texto do Google depende de a chave estar no plano pago. Sem isso, a frase do item 3 não pode ser publicada.
+- A frase do Google (item 3) só vale com a chave do Gemini em projeto com faturamento (tarefa G1 do usuário). Conferido nos termos do Google em 15/11/2026 (ai.google.dev/gemini-api/terms e /docs/usage-policies): serviços pagos não treinam modelos; log de 55 dias para abuso. Reconferir antes de publicar.
