@@ -57,6 +57,12 @@ jobs:
             git fetch origin
             git reset --hard origin/main
 
+            # Publica as paginas estaticas (/termos, /privacidade, /suporte) que
+            # o nginx serve direto de /var/www/softspend. Arquivo estatico nao
+            # precisa recarregar o nginx.
+            sudo mkdir -p /var/www/softspend
+            sudo cp deploy/site/*.html /var/www/softspend/
+
             # Garante dependencias de build do Pillow (especialmente em Python 3.14)
             sudo apt-get update
             sudo apt-get install -y \
