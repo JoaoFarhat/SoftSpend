@@ -49,8 +49,14 @@ def contar(user_id: str, tipo: str, hoje: date | None = None) -> None:
     if teto <= 0:
         return
 
-    chave = (user_id, tipo, hoje or _hoje())
+    dia = hoje or _hoje()
+    chave = (user_id, tipo, dia)
     with _lock:
+        # Descarta os dias anteriores para a memória não crescer num
+        # servidor que fica semanas no ar.
+        for k in list(_contadores):
+            if k[2] != dia:
+                del _contadores[k]
         usado = _contadores.get(chave, 0)
         if usado >= teto:
             raise HTTPException(status_code=429, detail="daily_ai_limit")

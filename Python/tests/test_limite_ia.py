@@ -247,6 +247,27 @@ def test_dia_seguinte_zera(client, gemini, monkeypatch):
     limite_ia.contar(USER_A, limite_ia.FATURA, hoje=hoje)
 
 
+def test_virada_do_dia_descarta_contadores_velhos(app_limite, monkeypatch):
+    """Chaves de outra data são apagadas no `contar`: memória não cresce."""
+    monkeypatch.setenv("IA_LIMITE_DIARIO_COMPROVANTE", "2")
+    monkeypatch.setenv("IA_LIMITE_DIARIO_FATURA", "2")
+    hoje = date(2026, 11, 15)
+    amanha = date(2026, 11, 16)
+
+    limite_ia.contar(USER_A, limite_ia.COMPROVANTE, hoje=hoje)
+    limite_ia.contar(USER_B, limite_ia.FATURA, hoje=hoje)
+
+    # O primeiro pedido de D+1 joga fora todas as chaves de D.
+    limite_ia.contar(USER_A, limite_ia.COMPROVANTE, hoje=amanha)
+    assert set(limite_ia._contadores) == {(USER_A, limite_ia.COMPROVANTE, amanha)}
+
+    # O teto de D+1 continua valendo.
+    limite_ia.contar(USER_A, limite_ia.COMPROVANTE, hoje=amanha)
+    with pytest.raises(HTTPException) as erro:
+        limite_ia.contar(USER_A, limite_ia.COMPROVANTE, hoje=amanha)
+    assert erro.value.status_code == 429
+
+
 def test_zero_desliga(client, gemini, monkeypatch):
     monkeypatch.setenv("IA_LIMITE_DIARIO_COMPROVANTE", "0")
     monkeypatch.setenv("IA_LIMITE_DIARIO_FATURA", "0")
