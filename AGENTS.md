@@ -649,6 +649,7 @@ Apple: JWS, webhook e App Store Server API ficam para a AS2.
 | Variável | Default | Descrição |
 | --- | --- | --- |
 | `BILLING_ENFORCEMENT` | `off` | Lida a cada requisição. Só `on` liga o bloqueio; com qualquer outro valor `tem_acesso` é sempre `true` e nada responde `subscription_required` (o `status` real continua no `GET /api/assinatura`) |
+| `ACESSO_LIBERADO_USUARIOS` | vazia | Lida a cada chamada. Ids de `users.id` separados por vírgula com acesso liberado mesmo com `BILLING_ENFORCEMENT=on` — a conta de demonstração da revisão da Apple (`scripts/criar_conta_demo.py`). Não muda `calcular_acesso` nem grava na tabela `assinaturas`: o `status` do `GET /api/assinatura` continua o real, só `tem_acesso` sobe |
 
 No iOS (tarefa A1, §2.1/§2.5/§2.8), o fluxo mora em
 `ViewModels/ImportarFaturaViewModel.swift` (regra, testável sem tela) e
@@ -761,9 +762,25 @@ Assinatura AS2 (`docs/assinatura.md` §2): Apple no servidor.
 - Testes em `tests/test_assinatura_as2.py` (`FakeApple`; nenhum chama a
   Apple).
 
+Conta de demonstração da revisão da Apple (`docs/publicacao.md` §2). Rode de
+dentro de `Python/`:
+
+```bash
+DEMO_SENHA='...' python -m scripts.criar_conta_demo --email demo@softspend.com.br
+```
+
+`scripts/criar_conta_demo.py` cria o usuário pelo `auth_service.registrar`
+(mesmo hash de senha e validações do cadastro; a senha só entra por
+`DEMO_SENHA` e nunca é impressa) e uma viagem de 7 dias terminando hoje, com
+2 a 4 gastos por dia em categorias variadas, sem comprovante. Imprime só o
+`users.id` — é esse id que vai em `ACESSO_LIBERADO_USUARIOS`. Rodar de novo
+com o mesmo e-mail não duplica nada: avisa no stderr e sai sem gravar.
+Testes em `tests/test_conta_demo.py`.
+
 | Variável | Default | Descrição |
 | --- | --- | --- |
 | `BILLING_ENFORCEMENT` | `off` | Lida a cada requisição. Só `on` liga o bloqueio; com qualquer outro valor `tem_acesso` é sempre `true` e nada responde `subscription_required` (o `status` real continua no `GET /api/assinatura`) |
+| `ACESSO_LIBERADO_USUARIOS` | vazia | Lida a cada chamada. Ids de `users.id` separados por vírgula com acesso liberado mesmo com `BILLING_ENFORCEMENT=on` — a conta de demonstração da revisão da Apple (`scripts/criar_conta_demo.py`). Não muda `calcular_acesso` nem grava na tabela `assinaturas`: o `status` do `GET /api/assinatura` continua o real, só `tem_acesso` sobe |
 | `APPLE_BUNDLE_ID` | — | `br.com.softspend.app` |
 | `APPLE_APP_ID` | — | Número do app na App Store Connect (obrigatório em Production) |
 | `APPLE_ISSUER_ID` / `APPLE_KEY_ID` | — | Da chave de In-App Purchase |
