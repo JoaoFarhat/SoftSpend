@@ -2,6 +2,8 @@
 
 Estado: 15/11/2026. Textos prontos para colar no App Store Connect. Só documento: nada aqui muda o app. Origem dos fatos: `docs/publicacao.md` §2, `docs/assinatura.md`, `PrivacyInfo.xcprivacy`, `Debug/DemoInicio.swift`.
 
+Passo a passo até o envio: `docs/roteiro-envio.md`.
+
 Pendente do usuário antes de enviar: a conta Apple paga, as URLs publicadas (tarefa do site) e os dados da empresa em `docs/legal/`.
 
 ## 1. Dados do app
@@ -16,7 +18,7 @@ Pendente do usuário antes de enviar: a conta Apple paga, as URLs publicadas (ta
 | Idioma principal | Português (Brasil) | |
 | Disponibilidade | só Brasil (v1) | |
 | iOS mínimo | 17.0 (como no projeto) | |
-| Dispositivos | iPhone e iPad (`TARGETED_DEVICE_FAMILY = 1,2`) | |
+| Dispositivos | iPhone e iPad (`TARGETED_DEVICE_FAMILY = 1,2`); decisão do usuário em 15/11: **com iPad na v1** | exige capturas de iPad 13" e a Apple testa no iPad |
 | Preço do app | Grátis, com assinatura dentro do app | |
 | URL de suporte | https://softspend.com.br/suporte | obrigatória |
 | URL de privacidade | https://softspend.com.br/privacidade | obrigatória |
@@ -126,6 +128,8 @@ xcrun simctl io <udid> screenshot <arquivo>.png
 
 Tamanhos exigidos: iPhone 6,9" (1320×2868) e iPad 13" (2064×2752), de 3 a 10 imagens cada. Modo claro; uma ou duas em escuro, se quiser.
 
+Como a v1 vai com iPad (decisão de 15/11), as duas séries são obrigatórias, e a Apple abre o app no iPad na revisão: confira antes, no simulador iPad 13", que nenhuma tela dessa lista sai cortada ou esticada (roteiro em `docs/roteiro-envio.md`, passos 11 e 20). Tela ruim no iPad é correção de código, não de ficha. Para o iPad, abra o simulador "iPad Pro 13-inch" e use os mesmos comandos.
+
 Sequência sugerida (a mesma para iPhone e iPad):
 
 | # | Estado `-demo` | Mostra | Legenda sugerida |
@@ -175,7 +179,7 @@ Antes de enviar (checar, nesta ordem):
 1. A conta de demonstração existe na **produção** (`Python/scripts/criar_conta_demo.py`) e o id está em `ACESSO_LIBERADO_USUARIOS`.
 2. `GEMINI_API_KEY` no servidor de produção, com faturamento (tarefa G1).
 3. As três páginas (`/termos`, `/privacidade`, `/suporte`) abrem sem login.
-4. Compra de teste feita no TestFlight (Sandbox) com os dois produtos.
+4. Compra de teste feita no TestFlight (Sandbox) com os dois produtos, no iPhone e conferido o app no iPad.
 5. Se o servidor aceitar Sandbox (`APPLE_ACEITA_SANDBOX`), a revisão da Apple compra em Sandbox: deixar `true` até a aprovação.
 
 ## 9. Respostas prontas para perguntas comuns da revisão

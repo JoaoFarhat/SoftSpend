@@ -41,6 +41,9 @@ jobs:
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    environment:
+      name: producao
+      url: https://softspend.com.br/health
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.0
@@ -63,11 +66,17 @@ jobs:
             sudo mkdir -p /var/www/softspend
             sudo cp deploy/site/*.html /var/www/softspend/
 
-            # Garante dependencias de build do Pillow (especialmente em Python 3.14)
-            sudo apt-get update
-            sudo apt-get install -y \
+            # Garante dependencias de build do Pillow (especialmente em Python 3.14).
+            # Só roda apt-get quando falta algum dos pacotes.
+            dpkg -s \
               python3-venv python3-pil \
-              libjpeg-dev libpng-dev libwebp-dev libtiff-dev zlib1g-dev
+              libjpeg-dev libpng-dev libwebp-dev libtiff-dev zlib1g-dev \
+              >/dev/null 2>&1 || {
+              sudo apt-get update
+              sudo apt-get install -y \
+                python3-venv python3-pil \
+                libjpeg-dev libpng-dev libwebp-dev libtiff-dev zlib1g-dev
+            }
 
             cd Python
 
@@ -95,6 +104,19 @@ jobs:
             # --system-site-packages para acessar o python3-pil do sistema
             # caso nao haja wheel do Pillow 11.x para a plataforma.
             pip install -r requirements.txt
+
+            # Com migration pendente (current != heads), faz backup antes de
+            # migrar. O softspend-backup.service é oneshot: o start espera
+            # terminar e, se falhar, o set -e para o deploy antes da migration.
+            ATUAL="$(alembic -c alembic/alembic.ini current 2>/dev/null | awk '{print $1}')"
+            NOVO="$(alembic -c alembic/alembic.ini heads | awk '{print $1}')"
+            if [ "$ATUAL" != "$NOVO" ]; then
+              if systemctl cat softspend-backup.service >/dev/null 2>&1; then
+                sudo systemctl start softspend-backup.service
+              else
+                echo "backup não instalado, migration sem cópia"
+              fi
+            fi
             alembic -c alembic/alembic.ini upgrade head
             sudo systemctl restart softspend
             # Health check com retry antes de declarar sucesso
