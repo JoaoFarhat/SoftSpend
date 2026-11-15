@@ -137,7 +137,17 @@ struct RegisterView: View {
                 .disabled(authService.isLoading || !isFormValid)
                 .opacity(authService.isLoading || !isFormValid ? 0.5 : 1)
                 .padding(.horizontal, Espaco.g + 4)
-                .padding(.vertical, Espaco.p)
+                .padding(.top, Espaco.p)
+
+                // Aceite exigido pela loja (docs/publicacao.md §2): os links abrem no Safari.
+                Text(textoAceite)
+                    .font(.footnote)
+                    .foregroundStyle(Tema.textoFraco)
+                    .tint(Tema.marcaTexto)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, Espaco.g + 4)
+                    .padding(.vertical, Espaco.p)
             }
             .background(Tema.fundo.ignoresSafeArea())
             .toolbar {
@@ -155,6 +165,15 @@ struct RegisterView: View {
             }
             .tint(Tema.marcaTexto)
         }
+    }
+
+    /// "Ao criar a conta, você concorda com os Termos de Uso e a Política de
+    /// Privacidade." com os dois títulos como links (`LinksLegais`).
+    private var textoAceite: AttributedString {
+        let fonte = "Ao criar a conta, você concorda com os " +
+            "[Termos de Uso](\(LinksLegais.termos.absoluteString)) e a " +
+            "[Política de Privacidade](\(LinksLegais.privacidade.absoluteString))."
+        return (try? AttributedString(markdown: fonte)) ?? AttributedString(fonte)
     }
 
     private func senhaRequisito(_ texto: String, atende: Bool) -> some View {
