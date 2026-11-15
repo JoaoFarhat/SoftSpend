@@ -226,6 +226,16 @@ def test_script_cria_conta_com_viagem_de_7_dias(ambiente, monkeypatch, capsys):
     import models
     from services import auth_service
 
+    # Data fixa: o teste não pode falhar quando a execução cruza a meia-noite.
+    hoje = date(2026, 11, 15)
+
+    class _DataFixa(date):
+        @classmethod
+        def today(cls):
+            return hoje
+
+    monkeypatch.setattr(criar_conta_demo, "date", _DataFixa)
+
     assert _rodar_script(ambiente, monkeypatch) == 0
     saida = capsys.readouterr()
 
@@ -243,8 +253,8 @@ def test_script_cria_conta_com_viagem_de_7_dias(ambiente, monkeypatch, capsys):
     assert len(ciclos) == 1
     dias = sorted(ciclos[0].dias, key=lambda d: d.data)
     assert len(dias) == 7
-    assert dias[-1].data.date() == date.today()
-    assert dias[0].data.date() == date.today() - timedelta(days=6)
+    assert dias[-1].data.date() == hoje
+    assert dias[0].data.date() == hoje - timedelta(days=6)
 
     total_gastos = 0
     for dia in dias:
