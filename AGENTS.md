@@ -936,19 +936,30 @@ chmod +x setup.sh
 ./setup.sh
 ```
 
-O workflow do GitHub Actions pode reiniciar o serviço automaticamente:
+O deploy roda pelo `.github/workflows/deploy.yml` (job `deploy`), só em push na
+`main` depois dos testes. O job usa o environment `producao` do GitHub
+(`url: https://softspend.com.br/health`): com revisor obrigatório configurado em
+Settings > Environments, o deploy fica parado esperando a aprovação antes de
+tocar no servidor.
 
-```yaml
-script: |
-  cd ~/SoftSpend
-  git fetch origin
-  git reset --hard origin/main
-  cd Python
-  source .venv/bin/activate
-  pip install -r requirements.txt
-  alembic upgrade head
-  sudo systemctl restart softspend
-```
+No servidor, o script:
+
+1. `git fetch` + `git reset --hard origin/main` em `~/SoftSpend` (o `.env` é
+   gitignored e sobrevive).
+2. Copia `deploy/site/*.html` para `/var/www/softspend` (páginas `/termos`,
+   `/privacidade`, `/suporte` servidas direto pelo nginx).
+3. Instala os pacotes apt do Pillow **só se faltar algum**
+   (`dpkg -s <pacotes> || { apt-get update && apt-get install -y ...; }`) —
+   deploy repetido não perde tempo com `apt-get update`.
+4. Cria/recria a `.venv` com `--system-site-packages` (usa o `python3-pil` do
+   sistema quando o Pillow não compila) e roda `pip install -r requirements.txt`.
+5. Se `alembic current` difere de `heads` (há migration pendente) e o
+   `softspend-backup.service` está instalado, roda
+   `sudo systemctl start softspend-backup.service` — oneshot, o start espera
+   terminar e, se falhar, o `set -e` para o deploy **antes** da migration. Sem
+   o serviço instalado, só imprime "backup não instalado, migration sem cópia".
+6. `alembic upgrade head`, `systemctl restart softspend` e health check em
+   `http://127.0.0.1:8000/health` com retry (10 tentativas).
 
 Logs ficam em `/var/log/softspend/app.log` e são rotacionados diariamente.
 
