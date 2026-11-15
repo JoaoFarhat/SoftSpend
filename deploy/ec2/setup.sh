@@ -139,6 +139,12 @@ fi
 
 sudo mkdir -p "$ACME_WEBROOT"
 
+# Paginas estaticas (/termos, /privacidade, /suporte), servidas direto pelo
+# nginx de /var/www/softspend, sem passar pelo uvicorn.
+SITE_DIR=/var/www/softspend
+sudo mkdir -p "$SITE_DIR"
+sudo cp "$(dirname "$0")/../site/"*.html "$SITE_DIR/"
+
 # Config minima: serve o desafio ACME e faz proxy da API sobre HTTP. Sem
 # referencia a certificado, entao o nginx sempre sobe.
 sudo tee /etc/nginx/sites-available/softspend > /dev/null <<EOF
