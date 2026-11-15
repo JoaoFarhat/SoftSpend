@@ -5,7 +5,7 @@ import filetype
 from database import get_db
 from dependencies import exigir_assinatura, get_current_user_id
 from dtos.gasto import GastoResponse, GastoRequest, GastoExtraidoResponse
-from services import gasto_service, ocr_service, storage_service
+from services import gasto_service, limite_ia, ocr_service, storage_service
 from limiter import limiter
 
 router = APIRouter()
@@ -109,8 +109,13 @@ async def extrair_gasto_de_imagem(request: Request, imagem: UploadFile = File(..
                 storage_service.pdf_primeira_pagina_para_jpeg, conteudo
             )
 
+        # Teto diário por usuário: depois da validação e da rasterização
+        # (arquivo recusado não gasta cota), antes da chamada ao Gemini.
+        limite_ia.contar(user_id, limite_ia.COMPROVANTE)
         dados = await run_in_threadpool(ocr_service.extrair_gasto_da_imagem, conteudo)
         return dados
+    except HTTPException:
+        raise
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception:

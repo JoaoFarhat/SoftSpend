@@ -497,6 +497,17 @@ OCR de comprovantes com Gemini (`services/ocr_service.py`):
 | `GEMINI_MODEL_NAME` | `gemini-3.5-flash-lite` | Modelo multimodal |
 | `OCR_MAX_IMAGE_SIZE` | `1280` | Maior lado da imagem enviada |
 | `OCR_JPEG_QUALITY` | `80` | Qualidade do recompactamento |
+| `IA_LIMITE_DIARIO_COMPROVANTE` | `60` | Teto diário de leituras de comprovante por usuário; `0` desliga |
+| `IA_LIMITE_DIARIO_FATURA` | `10` | Teto diário de leituras de fatura em PDF por usuário; `0` desliga |
+
+O teto diário (`services/limite_ia.py`, `docs/publicacao.md` §3) é um
+contador em memória por (usuário, tipo, data UTC) protegido por
+`threading.Lock`; o uvicorn roda num processo só e reiniciar zera a
+contagem. O `contar` roda depois do login, da assinatura e da validação do
+arquivo, e antes da chamada ao Gemini — arquivo recusado na validação não
+gasta cota. Em `POST /api/faturas/ler` só o PDF conta (OFX e CSV não vão à
+IA). Estourado, a resposta é `429` com `{"error": "daily_ai_limit"}` e
+`request_id`.
 
 Armazenamento de notas fiscais (`services/storage_service.py`), compatível com
 AWS S3, Cloudflare R2, Supabase Storage e MinIO:
