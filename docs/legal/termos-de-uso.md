@@ -15,9 +15,9 @@ O SoftSpend é um aplicativo para controlar gastos por ciclo: você organiza seu
 - Não compartilhe sua conta com outra pessoa.
 
 ## 4. Assinatura
-- O SoftSpend tem um período grátis de [14] dias. Depois, a assinatura é paga, por mês (R$ 14,90) ou por ano (R$ 144,90), pela App Store.
+- O SoftSpend tem um período grátis de 14 dias. Depois, a assinatura é paga, por mês (R$ 14,90) ou por ano (R$ 144,90), pela App Store.
 - A cobrança, a renovação e o cancelamento são feitos pela Apple, nas configurações da sua conta Apple. Não temos acesso ao seu cartão.
-- Sem assinatura ativa, você continua vendo e exportando seus dados, mas não pode criar novo ciclo nem usar a leitura de comprovante e de fatura com IA.
+- Sem assinatura ativa, você continua vendo e editando seus gastos e lançando gastos à mão, mas não pode criar novo ciclo, exportar, importar fatura nem usar a leitura de comprovante com IA.
 - Reembolsos seguem as regras da Apple.
 
 ## 5. Uso aceitável
@@ -42,7 +42,7 @@ Podemos alterar estes termos. Avisaremos no app antes de a mudança valer. Conti
 Estes termos são regidos pela lei brasileira. Fica eleito o foro da comarca de [CIDADE/UF], para resolver conflitos, sem prejuízo do direito do consumidor de escolher o seu foro.
 
 ## 11. Contato
-[E-MAIL DE SUPORTE], ou suporte@[DOMÍNIO] quando a caixa for criada.
+[E-MAIL DE SUPORTE], ou suporte@softspend.com.br quando a caixa for criada.
 
 ---
 

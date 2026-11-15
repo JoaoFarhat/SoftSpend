@@ -11,14 +11,6 @@
 
 import SwiftUI
 
-/// Endereços dos textos legais exigidos pela loja.
-/// PENDENTE (§6): os textos ainda não estão hospedados (rascunhos em
-/// `docs/legal/`). A tela não vai para a loja antes de essas URLs responderem.
-enum LinksLegais {
-    static let termos = URL(string: "https://softspend.com.br/termos")!
-    static let privacidade = URL(string: "https://softspend.com.br/privacidade")!
-}
-
 struct PlanosAssinaturaView: View {
     @ObservedObject var vm: AssinaturaViewModel
     @State private var mostrarGerenciar = false

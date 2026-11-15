@@ -105,6 +105,27 @@ struct PerfilView: View {
                         .padding(.top, Espaco.p)
                 }
 
+                secao("Sobre")
+                grupo {
+                    Link(destination: LinksLegais.termos) {
+                        linhaLink("Termos de Uso")
+                    }
+                    divisoria
+                    Link(destination: LinksLegais.privacidade) {
+                        linhaLink("Política de Privacidade")
+                    }
+                    divisoria
+                    Link(destination: LinksLegais.suporte) {
+                        linhaLink("Suporte")
+                    }
+                }
+                // As páginas ainda não existem no site; cada linha só abre o Safari.
+                Text("Termos, privacidade e ajuda abrem no Safari.")
+                    .font(.footnote)
+                    .foregroundStyle(Tema.textoFraco)
+                    .padding(.horizontal, Espaco.g)
+                    .padding(.top, Espaco.p)
+
                 #if DEBUG
                 if !CommandLine.arguments.contains("-demo") {
                     secao("Desenvolvimento")
