@@ -6,6 +6,12 @@ Store Server API) só atualiza os campos da linha; quem decide é esta função.
 
 `BILLING_ENFORCEMENT` é lido a cada chamada (padrão `off`): com `off`, todo
 mundo tem acesso e nada bloqueia.
+
+`ACESSO_LIBERADO_USUARIOS` (ids de `users.id` separados por vírgula, lida a
+cada chamada, padrão vazia) libera o acesso de contas específicas — a conta
+de demonstração da revisão da Apple (`scripts/criar_conta_demo.py`). O id
+liberado não muda `calcular_acesso` nem grava nada na tabela `assinaturas`:
+o `status` do `GET /api/assinatura` continua o real, só `tem_acesso` sobe.
 """
 
 import logging
@@ -88,6 +94,22 @@ def cobranca_ligada() -> bool:
     return os.getenv("BILLING_ENFORCEMENT", "off").strip().lower() == "on"
 
 
+def usuarios_liberados() -> frozenset:
+    """Ids com acesso liberado por `ACESSO_LIBERADO_USUARIOS` (conta demo).
+
+    Lida a cada chamada: dá para liberar ou tirar um id sem restart. Sem
+    diferenciação de maiúsculas, para um UUID colado em outra forma funcionar.
+    """
+    bruto = os.getenv("ACESSO_LIBERADO_USUARIOS", "")
+    return frozenset(
+        parte.strip().lower() for parte in bruto.split(",") if parte.strip()
+    )
+
+
+def _liberado(user_id: str) -> bool:
+    return user_id.lower() in usuarios_liberados()
+
+
 def agora_utc() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -121,8 +143,8 @@ def obter_ou_criar(db: Session, user_id: str) -> models.Assinatura:
 
 
 def tem_acesso(db: Session, user_id: str, agora: datetime | None = None) -> bool:
-    """Acesso efetivo: sempre `True` com o interruptor desligado."""
-    if not cobranca_ligada():
+    """Acesso efetivo: `True` com o interruptor desligado ou id liberado."""
+    if not cobranca_ligada() or _liberado(user_id):
         return True
     _, acesso = calcular_acesso(buscar(db, user_id), agora or agora_utc())
     return acesso
@@ -134,7 +156,7 @@ def estado(db: Session, user_id: str, agora: datetime | None = None) -> dict:
     status, acesso = calcular_acesso(assinatura, agora or agora_utc())
     return {
         "status": status,
-        "tem_acesso": acesso or not cobranca_ligada(),
+        "tem_acesso": acesso or not cobranca_ligada() or _liberado(user_id),
         "expira_em": assinatura.expira_em,
         "produto": assinatura.produto,
         "app_account_token": assinatura.app_account_token,
