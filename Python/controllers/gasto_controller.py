@@ -116,6 +116,10 @@ async def extrair_gasto_de_imagem(request: Request, imagem: UploadFile = File(..
         return dados
     except HTTPException:
         raise
+    except ocr_service.SemRespostaGemini as e:
+        # A chamada não teve resposta do Gemini: a vaga do dia volta.
+        limite_ia.devolver(user_id, limite_ia.COMPROVANTE)
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception:

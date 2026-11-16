@@ -22,6 +22,7 @@ from services import (
     open_finance_reconciliation_service,
 )
 from services.fatura_arquivo_service import ErroFatura
+from services.fatura_ia_service import ErroFaturaSemResposta
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["faturas"])
@@ -69,6 +70,10 @@ async def ler_fatura(
                 fatura_service.marcar_previa, db, user_id, ciclo_id, lida
             )
         return lida
+    except ErroFaturaSemResposta as exc:
+        # A chamada não teve resposta do Gemini: a vaga do dia volta.
+        limite_ia.devolver(user_id, limite_ia.FATURA)
+        raise HTTPException(status_code=exc.status_code, detail=exc.detail)
     except ErroFatura as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
     except HTTPException:

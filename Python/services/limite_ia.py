@@ -6,6 +6,9 @@ contagem — aceito por enquanto (o slowapi continua limitando por minuto e
 por IP). Cobre só as rotas que chamam o Gemini: `POST /gastos/extrair`
 (tipo `comprovante`) e `POST /api/faturas/ler` com PDF (tipo `fatura`; OFX
 e CSV não passam por IA e não contam).
+
+`devolver` desfaz uma contagem quando a chamada ao Gemini não teve resposta
+(fora do ar, sem chave): a vaga do dia só fica gasta quando a IA respondeu.
 """
 
 import os
@@ -61,3 +64,20 @@ def contar(user_id: str, tipo: str, hoje: date | None = None) -> None:
         if usado >= teto:
             raise HTTPException(status_code=429, detail="daily_ai_limit")
         _contadores[chave] = usado + 1
+
+
+def devolver(user_id: str, tipo: str, hoje: date | None = None) -> None:
+    """Devolve uma leitura cuja chamada à IA não teve resposta.
+
+    Desce 1 na mesma chave do dia usada pelo `contar`, nunca abaixo de 0.
+    Com o teto desligado (`0`) o `contar` não contou nada, então não há o
+    que devolver.
+    """
+    if _teto(tipo) <= 0:
+        return
+
+    chave = (user_id, tipo, hoje or _hoje())
+    with _lock:
+        usado = _contadores.get(chave, 0)
+        if usado > 0:
+            _contadores[chave] = usado - 1

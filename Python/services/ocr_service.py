@@ -46,6 +46,20 @@ _client = (
 )
 
 
+class SemRespostaGemini(ValueError):
+    """O Gemini não respondeu (sem chave ou fora do ar): a cota é devolvida.
+
+    Subclasse do `ValueError` que o endpoint já traduz hoje; `status_code` e
+    `detail` guardam a resposta que cada caso já devolvia (422 para arquivo
+    recusado/sem chave, 500 para a chamada que não teve resposta).
+    """
+
+    def __init__(self, detail: str, status_code: int = 422):
+        super().__init__(detail)
+        self.status_code = status_code
+        self.detail = detail
+
+
 class GastoExtraido(BaseModel):
     titulo: str
     valor: float
@@ -123,12 +137,13 @@ def _preprocessar_imagem(image_bytes: bytes) -> bytes:
         img.save(buffer, format="JPEG", quality=JPEG_QUALITY, optimize=True)
         return buffer.getvalue()
     except Exception as e:
-        raise ValueError(f"Imagem invalida: {e}")
+        # A imagem nem chega ao Gemini: não gasta a cota do dia.
+        raise SemRespostaGemini(f"Imagem invalida: {e}")
 
 
 def extrair_gasto_da_imagem(image_bytes: bytes) -> dict:
     if not _client:
-        raise ValueError("GEMINI_API_KEY nao configurada no ambiente")
+        raise SemRespostaGemini("GEMINI_API_KEY nao configurada no ambiente")
 
     inicio_preproc = time.perf_counter()
     imagem_otimizada = _preprocessar_imagem(image_bytes)
@@ -138,20 +153,25 @@ def extrair_gasto_da_imagem(image_bytes: bytes) -> dict:
     inicio_gemini = time.perf_counter()
     global _suporta_thinking_minimo
     try:
-        response = _client.models.generate_content(
-            model=GEMINI_MODEL_NAME,
-            contents=[imagem_part],
-            config=_montar_config(thinking_minimo=_suporta_thinking_minimo),
-        )
+        try:
+            response = _client.models.generate_content(
+                model=GEMINI_MODEL_NAME,
+                contents=[imagem_part],
+                config=_montar_config(thinking_minimo=_suporta_thinking_minimo),
+            )
+        except Exception as erro:
+            if not (_suporta_thinking_minimo and _e_rejeicao_de_thinking(erro)):
+                raise
+            _suporta_thinking_minimo = False
+            response = _client.models.generate_content(
+                model=GEMINI_MODEL_NAME,
+                contents=[imagem_part],
+                config=_montar_config(thinking_minimo=False),
+            )
     except Exception as erro:
-        if not (_suporta_thinking_minimo and _e_rejeicao_de_thinking(erro)):
-            raise
-        _suporta_thinking_minimo = False
-        response = _client.models.generate_content(
-            model=GEMINI_MODEL_NAME,
-            contents=[imagem_part],
-            config=_montar_config(thinking_minimo=False),
-        )
+        # Fora do ar / timeout / rede: o pedido não gasta a cota do dia.
+        logger.exception("Gemini sem resposta no OCR")
+        raise SemRespostaGemini("Erro ao processar imagem", status_code=500) from erro
 
     logger.info(
         "OCR %s: recebido %.0fKB -> enviado %.0fKB | preproc %.2fs | gemini %.2fs",

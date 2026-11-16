@@ -15,14 +15,20 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from PIL import Image
 from reportlab.lib.pdfencrypt import StandardEncryption
 from reportlab.pdfgen import canvas
 
+from enums.categoria_enum import Categoria
 from services import fatura_ia_service, limite_ia, ocr_service
 from services.fatura_ia_service import CompraExtraida, FaturaExtraida
 
 USER_A = "user-a"
 USER_B = "user-b"
+
+# A fixture `gemini` troca `extrair_gasto_da_imagem` por um dublê; os testes
+# da devolução de cota restauram a função de verdade e derrubam só o client.
+_extrair_gasto_real = ocr_service.extrair_gasto_da_imagem
 
 
 # ---------------------------------------------------------------- helpers
@@ -51,6 +57,13 @@ def _pdf_com_senha(senha: str = "1234") -> bytes:
 # PNG mínimo: o `filetype` só olha os bytes iniciais.
 _PNG = b"\x89PNG\r\n\x1a\n" + b"\x00\x00\x00\rIHDR" + b"\x00" * 32
 
+
+def _png_valido() -> bytes:
+    """PNG de verdade: passa também pelo `_preprocessar_imagem` do OCR."""
+    buffer = io.BytesIO()
+    Image.new("RGB", (8, 8), "white").save(buffer, format="PNG")
+    return buffer.getvalue()
+
 _OFX = """OFXHEADER:100
 DATA:OFXSGML
 VERSION:102
@@ -68,15 +81,21 @@ _CSV = "Data;Descrição;Valor\n01/10/2026;Supermercado;100,00\n"
 
 
 class _ClienteGeminiFalso:
-    """Imita `_client.models.generate_content` do google-genai."""
+    """Imita `_client.models.generate_content` do google-genai.
 
-    def __init__(self, resposta):
+    `falhas` derruba as primeiras chamadas (Gemini fora do ar)."""
+
+    def __init__(self, resposta, falhas: int = 0):
         self.resposta = resposta
+        self.falhas = falhas
         self.chamadas = []
         self.models = self
 
     def generate_content(self, **kwargs):
         self.chamadas.append(kwargs)
+        if self.falhas:
+            self.falhas -= 1
+            raise RuntimeError("Gemini fora do ar")
         return self.resposta
 
 
@@ -99,10 +118,21 @@ def _resposta_gemini() -> SimpleNamespace:
     )
 
 
-def _comprovante(client: TestClient):
+def _resposta_ocr() -> SimpleNamespace:
+    return SimpleNamespace(
+        parsed=ocr_service.GastoExtraido(
+            titulo="Padaria", valor=10.0, categoria=Categoria.ALIMENTACAO
+        ),
+        text="",
+        candidates=[SimpleNamespace(finish_reason="STOP")],
+        usage_metadata=SimpleNamespace(prompt_token_count=1, candidates_token_count=1),
+    )
+
+
+def _comprovante(client: TestClient, conteudo: bytes = _PNG):
     return client.post(
         "/gastos/extrair",
-        files={"imagem": ("nota.png", _PNG, "image/png")},
+        files={"imagem": ("nota.png", conteudo, "image/png")},
     )
 
 
@@ -327,3 +357,103 @@ def test_arquivo_recusado_na_validacao_nao_conta(client, gemini, monkeypatch):
     )
     assert _fatura_pdf(client).status_code == 200
     assert _fatura_pdf(client).status_code == 429
+
+
+# -------------------------------------------------------- devolução da cota
+
+
+def test_falha_do_gemini_devolve_a_vaga_comprovante(client, gemini, monkeypatch):
+    monkeypatch.setenv("IA_LIMITE_DIARIO_COMPROVANTE", "1")
+    falso = _ClienteGeminiFalso(_resposta_ocr(), falhas=1)
+    monkeypatch.setattr(ocr_service, "_client", falso)
+    monkeypatch.setattr(
+        ocr_service, "extrair_gasto_da_imagem", _extrair_gasto_real
+    )
+
+    # Gemini fora do ar: 500 como antes, mas a vaga volta.
+    assert _comprovante(client, _png_valido()).status_code == 500
+    assert _comprovante(client, _png_valido()).status_code == 200
+    assert _comprovante(client, _png_valido()).status_code == 429
+    assert len(falso.chamadas) == 2
+
+
+def test_falha_do_gemini_devolve_a_vaga_fatura(client, gemini, monkeypatch):
+    monkeypatch.setenv("IA_LIMITE_DIARIO_FATURA", "1")
+    falso = _ClienteGeminiFalso(_resposta_gemini(), falhas=1)
+    monkeypatch.setattr(fatura_ia_service, "_client", falso)
+
+    assert _fatura_pdf(client).status_code == 500
+    assert _fatura_pdf(client).status_code == 200
+    assert _fatura_pdf(client).status_code == 429
+    assert len(falso.chamadas) == 2
+
+
+def test_sem_chave_nao_conta(client, gemini, monkeypatch):
+    monkeypatch.setenv("IA_LIMITE_DIARIO_COMPROVANTE", "1")
+    monkeypatch.setenv("IA_LIMITE_DIARIO_FATURA", "1")
+    monkeypatch.setattr(ocr_service, "_client", None)
+    monkeypatch.setattr(fatura_ia_service, "_client", None)
+    monkeypatch.setattr(
+        ocr_service, "extrair_gasto_da_imagem", _extrair_gasto_real
+    )
+
+    # Mesmos status de antes (422 no comprovante, 503 na fatura), sem gastar vaga.
+    assert _comprovante(client, _png_valido()).status_code == 422
+    assert _fatura_pdf(client).status_code == 503
+
+    monkeypatch.setattr(
+        ocr_service, "_client", _ClienteGeminiFalso(_resposta_ocr())
+    )
+    monkeypatch.setattr(
+        fatura_ia_service, "_client", _ClienteGeminiFalso(_resposta_gemini())
+    )
+    assert _comprovante(client, _png_valido()).status_code == 200
+    assert _fatura_pdf(client).status_code == 200
+    assert _comprovante(client, _png_valido()).status_code == 429
+    assert _fatura_pdf(client).status_code == 429
+
+
+def test_resposta_inesperada_conta(client, gemini, monkeypatch):
+    monkeypatch.setenv("IA_LIMITE_DIARIO_COMPROVANTE", "1")
+    monkeypatch.setenv("IA_LIMITE_DIARIO_FATURA", "1")
+    monkeypatch.setattr(
+        ocr_service, "extrair_gasto_da_imagem", _extrair_gasto_real
+    )
+    lixo = SimpleNamespace(
+        parsed=None, text="isto nao e json", candidates=[], usage_metadata=None
+    )
+    monkeypatch.setattr(ocr_service, "_client", _ClienteGeminiFalso(lixo))
+    monkeypatch.setattr(fatura_ia_service, "_client", _ClienteGeminiFalso(lixo))
+
+    # O Gemini respondeu (mesmo que mal): a cota ficou gasta.
+    assert _comprovante(client, _png_valido()).status_code == 422
+    assert _fatura_pdf(client).status_code == 422
+    assert _comprovante(client, _png_valido()).status_code == 429
+    assert _fatura_pdf(client).status_code == 429
+
+
+def test_devolver_nao_fica_negativo(app_limite, monkeypatch):
+    monkeypatch.setenv("IA_LIMITE_DIARIO_COMPROVANTE", "2")
+    hoje = date(2026, 11, 16)
+    chave = (USER_A, limite_ia.COMPROVANTE, hoje)
+
+    # Sem ter contado, não cria chave nem desce.
+    limite_ia.devolver(USER_A, limite_ia.COMPROVANTE, hoje=hoje)
+    assert chave not in limite_ia._contadores
+
+    limite_ia.contar(USER_A, limite_ia.COMPROVANTE, hoje=hoje)
+    limite_ia.devolver(USER_A, limite_ia.COMPROVANTE, hoje=hoje)
+    limite_ia.devolver(USER_A, limite_ia.COMPROVANTE, hoje=hoje)
+    assert limite_ia._contadores[chave] == 0
+
+    # O par (contar, devolver) não comeu o teto: ainda cabem 2 no dia.
+    limite_ia.contar(USER_A, limite_ia.COMPROVANTE, hoje=hoje)
+    limite_ia.contar(USER_A, limite_ia.COMPROVANTE, hoje=hoje)
+    with pytest.raises(HTTPException) as erro:
+        limite_ia.contar(USER_A, limite_ia.COMPROVANTE, hoje=hoje)
+    assert erro.value.status_code == 429
+
+    # Com o teto desligado o `contar` não conta: `devolver` é no-op.
+    monkeypatch.setenv("IA_LIMITE_DIARIO_COMPROVANTE", "0")
+    limite_ia.devolver(USER_A, limite_ia.COMPROVANTE, hoje=hoje)
+    assert limite_ia._contadores[chave] == 2
