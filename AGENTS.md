@@ -637,7 +637,8 @@ Apple: JWS, webhook e App Store Server API ficam para a AS2.
 - `GET /api/assinatura` (autenticada) devolve `status`, `tem_acesso`,
   `expira_em`, `produto` e `app_account_token`. A primeira chamada cria a
   linha (`status = none`) e as seguintes devolvem o mesmo token; duas
-  primeiras chamadas simultâneas não duplicam (savepoint + releitura).
+  primeiras chamadas simultâneas não duplicam (savepoint + releitura com
+  `FOR UPDATE`, que no REPEATABLE READ do MySQL vê a linha da outra).
 - `dependencies.exigir_assinatura` responde `403` com
   `{"detail": "subscription_required"}` (mais `error` e `request_id`, como
   os outros erros; usa a exceção própria `AssinaturaNecessaria`, porque o
@@ -712,7 +713,8 @@ grátis, sem assinatura bloqueia ciclo novo, IA, importar fatura e exportar).
 - `GET /api/assinatura` (autenticada) devolve `status`, `tem_acesso`,
   `expira_em`, `produto` e `app_account_token`. A primeira chamada cria a
   linha (`status = none`) e as seguintes devolvem o mesmo token; duas
-  primeiras chamadas simultâneas não duplicam (savepoint + releitura).
+  primeiras chamadas simultâneas não duplicam (savepoint + releitura com
+  `FOR UPDATE`, que no REPEATABLE READ do MySQL vê a linha da outra).
 - O bloqueio responde `403` com `{"detail": "subscription_required"}` (mais
   `error` e `request_id`, como os outros erros; exceção própria
   `AssinaturaNecessaria`, porque o handler de `HTTPException` troca `detail`

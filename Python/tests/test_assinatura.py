@@ -310,9 +310,9 @@ def test_obter_ou_criar_tolera_corrida(ambiente):
     original = assinatura_service.buscar
     chamadas = []
 
-    def buscar_atrasado(db, user_id):
-        chamadas.append(user_id)
-        return None if len(chamadas) == 1 else original(db, user_id)
+    def buscar_atrasado(*args, **kwargs):
+        chamadas.append(kwargs.get("para_atualizar", False))
+        return None if len(chamadas) == 1 else original(*args, **kwargs)
 
     assinatura_service.buscar = buscar_atrasado
     try:
@@ -320,6 +320,9 @@ def test_obter_ou_criar_tolera_corrida(ambiente):
     finally:
         assinatura_service.buscar = original
     assert linha.app_account_token == "token-da-outra"
+    # A busca que perdeu a corrida (comum) + a releitura com bloqueio, que no
+    # MySQL (REPEATABLE READ) é a única que vê a linha do outro pedido.
+    assert chamadas == [False, True]
     assert ambiente.session.query(models.Assinatura).count() == 1
 
 
