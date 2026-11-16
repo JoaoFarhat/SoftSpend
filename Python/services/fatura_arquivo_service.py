@@ -219,6 +219,18 @@ def _para_decimal(valor: str | None) -> Decimal | None:
     return d if d.is_finite() else None
 
 
+def _sinal_da_maioria(valores: list[Decimal]) -> int:
+    """Devolve o sinal que representa compra: -1 quando há mais negativos
+    que positivos; +1 no empate ou na maioria positiva (positivo = compra)."""
+    negativos = sum(1 for v in valores if v < 0)
+    return -1 if negativos > len(valores) - negativos else 1
+
+
+def _tipo_por_sinal(valor: Decimal, sinal_compra: int) -> str:
+    """COMPRA quando o sinal do valor é o da maioria; ESTORNO no oposto."""
+    return "COMPRA" if (-1 if valor < 0 else 1) == sinal_compra else "ESTORNO"
+
+
 def ler_ofx(texto: str) -> FaturaBruta:
     """Lê um OFX de fatura de cartão por regex, sem biblioteca nova.
 
@@ -260,9 +272,7 @@ def ler_ofx(texto: str) -> FaturaBruta:
             continue
         transacoes.append((trntype, valor, descricao[:200], data))
 
-    negativas = sum(1 for _, v, _, _ in transacoes if v < 0)
-    positivas = len(transacoes) - negativas
-    sinal_compra = -1 if negativas > positivas else 1
+    sinal_compra = _sinal_da_maioria([v for _, v, _, _ in transacoes])
 
     for trntype, valor, descricao, data in transacoes:
         if trntype == "DEBIT":
@@ -272,8 +282,7 @@ def ler_ofx(texto: str) -> FaturaBruta:
         elif trntype in _TRNTYPES_ENCARGO:
             tipo = "ENCARGO"
         else:
-            sinal = -1 if valor < 0 else 1
-            tipo = "COMPRA" if sinal == sinal_compra else "ESTORNO"
+            tipo = _tipo_por_sinal(valor, sinal_compra)
         fatura.compras.append(
             CompraBruta(data=data, descricao=descricao, valor=abs(valor), tipo=tipo)
         )
@@ -387,13 +396,10 @@ def ler_csv(texto: str) -> FaturaBruta:
             continue
         lancamentos.append((_data_csv(campos[i_data]), descricao[:200], valor))
 
-    negativos = sum(1 for _, _, v in lancamentos if v < 0)
-    positivos = len(lancamentos) - negativos
-    sinal_compra = -1 if negativos > positivos else 1
+    sinal_compra = _sinal_da_maioria([v for _, _, v in lancamentos])
 
     for data, descricao, valor in lancamentos:
-        sinal = -1 if valor < 0 else 1
-        tipo = "COMPRA" if sinal == sinal_compra else "ESTORNO"
+        tipo = _tipo_por_sinal(valor, sinal_compra)
         fatura.compras.append(
             CompraBruta(
                 data=data,
