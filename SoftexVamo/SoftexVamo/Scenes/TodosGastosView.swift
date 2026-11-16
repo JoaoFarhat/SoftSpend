@@ -98,6 +98,7 @@ struct TodosGastosView: View {
                 }
             }
             .padding(.bottom, Espaco.g)
+            .larguraLegivel()
         }
         .scrollDismissesKeyboard(.immediately)
         .background(Tema.fundo.ignoresSafeArea())

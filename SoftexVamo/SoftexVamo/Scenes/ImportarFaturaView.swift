@@ -86,6 +86,7 @@ struct ImportarFaturaView: View {
                 BotaoPrincipal("Escolher arquivo") { escolhendoArquivo = true }
                     .padding(.horizontal, Espaco.g + 2)
                     .padding(.bottom, Espaco.p)
+                    .larguraLegivel()
                     .background(Tema.fundo)
             }
         case .consentindo(.pergunta):
@@ -110,6 +111,7 @@ struct ImportarFaturaView: View {
                 }
                 .padding(.horizontal, Espaco.g + 2)
                 .padding(.bottom, Espaco.p)
+                .larguraLegivel()
                 .background(Tema.fundo)
             }
         case .lendo:
@@ -136,6 +138,7 @@ struct ImportarFaturaView: View {
                 BotaoPrincipal("Fechar") { dismiss() }
                     .padding(.horizontal, Espaco.g + 2)
                     .padding(.bottom, Espaco.p)
+                    .larguraLegivel()
                     .background(Tema.fundo)
             }
         case .erro(let mensagem):
@@ -150,6 +153,7 @@ struct ImportarFaturaView: View {
                 }
                 .padding(.horizontal, Espaco.g + 2)
                 .padding(.bottom, Espaco.p)
+                .larguraLegivel()
                 .background(Tema.fundo)
             }
         }
@@ -178,6 +182,7 @@ struct ImportarFaturaView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 24)
             .padding(.top, 72)
+            .larguraLegivel()
         }
         .scrollBounceBehavior(.basedOnSize)
     }
@@ -203,6 +208,7 @@ struct ImportarFaturaView: View {
                 .foregroundStyle(Tema.textoFraco)
                 .multilineTextAlignment(.center)
         }
+        .larguraLegivel()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(Espaco.g)
     }
@@ -248,6 +254,7 @@ struct ImportarFaturaView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 24)
             .padding(.top, 72)
+            .larguraLegivel()
         }
         .scrollBounceBehavior(.basedOnSize)
         .safeAreaInset(edge: .bottom) {
@@ -255,6 +262,7 @@ struct ImportarFaturaView: View {
                 .disabled(vm.senha.trimmingCharacters(in: .whitespaces).isEmpty)
                 .padding(.horizontal, Espaco.g + 2)
                 .padding(.bottom, Espaco.p)
+                .larguraLegivel()
                 .background(Tema.fundo)
         }
     }
@@ -292,12 +300,14 @@ struct ImportarFaturaView: View {
                 }
             }
             .padding(.bottom, Espaco.g)
+            .larguraLegivel()
         }
         .scrollBounceBehavior(.basedOnSize)
         .safeAreaInset(edge: .bottom) {
             BotaoPrincipal("Importar") { Task { await vm.importar() } }
                 .padding(.horizontal, Espaco.g + 2)
                 .padding(.bottom, Espaco.p)
+                .larguraLegivel()
                 .background(Tema.fundo)
         }
     }

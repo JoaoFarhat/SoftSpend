@@ -74,6 +74,7 @@ struct ViagensView: View {
                 }
             }
             .padding(.bottom, Espaco.g)
+            .larguraLegivel()
         }
         .background(Tema.fundo.ignoresSafeArea())
         .navigationTitle("Viagens")

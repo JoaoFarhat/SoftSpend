@@ -172,6 +172,7 @@ struct ConfirmarGastoView: View {
                 }
                 .padding(.horizontal, Espaco.g + 2)
                 .padding(.bottom, Espaco.g)
+                .larguraLegivel()
             }
             .scrollDismissesKeyboard(.interactively)
         }
@@ -182,6 +183,7 @@ struct ConfirmarGastoView: View {
                 .opacity(rascunho.podeSalvar ? 1 : 0.45)
                 .padding(.horizontal, Espaco.g + 2)
                 .padding(.vertical, Espaco.p)
+                .larguraLegivel()
                 .background(Tema.fundo)
         }
         .escolherComprovante(isPresented: $adicionandoComprovante) { resultado in

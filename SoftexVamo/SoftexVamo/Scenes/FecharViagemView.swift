@@ -53,6 +53,7 @@ struct FecharViagemView: View {
             }
             .padding(.horizontal, Espaco.g + 2)
             .padding(.bottom, Espaco.g)
+            .larguraLegivel()
         }
         .safeAreaInset(edge: .bottom) {
             rodape(pendencias: semFoto)
@@ -227,6 +228,7 @@ struct FecharViagemView: View {
         .padding(.horizontal, Espaco.g + 2)
         .padding(.top, Espaco.p)
         .padding(.bottom, Espaco.p)
+        .larguraLegivel()
         .background(Tema.fundo)
     }
 

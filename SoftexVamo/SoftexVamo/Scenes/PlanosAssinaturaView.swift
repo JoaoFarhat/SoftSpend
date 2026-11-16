@@ -43,6 +43,7 @@ struct PlanosAssinaturaView: View {
             }
             .padding(.horizontal, Espaco.g + 2)
             .padding(.vertical, Espaco.g)
+            .larguraLegivel()
         }
         .background(Tema.fundo.ignoresSafeArea())
         .navigationTitle("Assinatura")

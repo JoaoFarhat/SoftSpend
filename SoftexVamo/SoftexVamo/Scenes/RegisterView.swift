@@ -122,6 +122,7 @@ struct RegisterView: View {
                     }
                     .padding(.horizontal, Espaco.g + 4)
                     .padding(.top, Espaco.p)
+                    .larguraLegivel()
                 }
                 .scrollDismissesKeyboard(.interactively)
 
@@ -138,6 +139,7 @@ struct RegisterView: View {
                 .opacity(authService.isLoading || !isFormValid ? 0.5 : 1)
                 .padding(.horizontal, Espaco.g + 4)
                 .padding(.top, Espaco.p)
+                .larguraLegivel()
 
                 // Aceite exigido pela loja (docs/publicacao.md §2): os links abrem no Safari.
                 Text(textoAceite)
@@ -148,6 +150,7 @@ struct RegisterView: View {
                     .frame(maxWidth: .infinity)
                     .padding(.horizontal, Espaco.g + 4)
                     .padding(.vertical, Espaco.p)
+                    .larguraLegivel()
             }
             .background(Tema.fundo.ignoresSafeArea())
             .toolbar {

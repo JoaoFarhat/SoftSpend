@@ -52,6 +52,7 @@ struct ComoLigarApplePayView: View {
             }
             .padding(.horizontal, Espaco.g + 2)
             .padding(.bottom, Espaco.g + 8)
+            .larguraLegivel()
         }
         .background(Tema.fundo.ignoresSafeArea())
         .navigationTitle("Apple Pay")
