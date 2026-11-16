@@ -348,7 +348,7 @@ struct ConfirmarGastoView: View {
         caixa("Descrição") {
             TextField("Ex.: almoço, táxi", text: Binding(
                 get: { rascunho.titulo },
-                set: { rascunho.titulo = $0; rascunho.marcarEditado(.titulo) }
+                set: { rascunho.titulo = LimiteTexto.cortarTitulo($0); rascunho.marcarEditado(.titulo) }
             ))
             .focused($foco, equals: .descricao)
             .submitLabel(.done)

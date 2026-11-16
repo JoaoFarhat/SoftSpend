@@ -858,7 +858,7 @@ final class CiclosViewModel: ObservableObject {
         let saldo = totalValue / Decimal(safeDayCount)
         let periodo = createPeriodoString(from: startDate, to: endDate)
 
-        let newCiclo = CicloSoftex(userId: currentUser?.id ?? "", valor_total: totalValue, gasto_total: Decimal(0), periodo: periodo, diaria: saldo, titulo: titulo, dias: nil)
+        let newCiclo = CicloSoftex(userId: currentUser?.id ?? "", valor_total: totalValue, gasto_total: Decimal(0), periodo: periodo, diaria: saldo, titulo: LimiteTexto.titulo(titulo), dias: nil)
         let dias: [DiaLoteRequest] = createAllDiasLoteRequest(dayCount: dayCount, startDate: startDate)
         
         try await postToNetwork(newCiclo: newCiclo, dias: dias)
@@ -871,7 +871,7 @@ final class CiclosViewModel: ObservableObject {
         }
 
         viewModelLogger.info("editCiclo: atualizando cicloLocal backendId=\(cicloId, privacy: .public) titulo=\(ciclo.titulo, privacy: .private)")
-        cicloLocal.titulo = ciclo.titulo
+        cicloLocal.titulo = LimiteTexto.titulo(ciclo.titulo)
         cicloLocal.valor_total = ciclo.valor_total
         cicloLocal.diaria = ciclo.diaria
         cicloLocal.periodo = ciclo.periodo
@@ -1048,7 +1048,7 @@ final class CiclosViewModel: ObservableObject {
 
         let novoGasto = GastosDia(
             valor: value,
-            titulo: title,
+            titulo: LimiteTexto.titulo(title),
             categoria: categoria,
             dia: dia,
             backendId: nil,
@@ -1179,7 +1179,7 @@ final class CiclosViewModel: ObservableObject {
         // Editar um gasto pode passar da diária: o saldo do dia fica negativo
         // e a interface mostra quanto passou.
 
-        gastoLocal.titulo = titulo
+        gastoLocal.titulo = LimiteTexto.titulo(titulo)
         gastoLocal.valor = value
         gastoLocal.categoria = categoria
         gastoLocal.syncStatus = .pending

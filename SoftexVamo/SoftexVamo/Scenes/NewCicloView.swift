@@ -126,7 +126,10 @@ struct NewCicloView: View {
 
     private var campoDestino: some View {
         CampoFormulario(rotulo: "Destino") {
-            TextField("Cidade, UF", text: $form.destino)
+            TextField("Cidade, UF", text: Binding(
+                get: { form.destino },
+                set: { form.destino = LimiteTexto.cortarTitulo($0) }
+            ))
                 .font(.body)
                 .foregroundStyle(Tema.texto)
                 .textInputAutocapitalization(.words)

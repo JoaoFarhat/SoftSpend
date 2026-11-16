@@ -366,8 +366,10 @@ actor SyncActor: ModelActor {
 
         let cicloUUID = ciclo.id
         let foto = FotoCiclo(ciclo)
+        // Título cortado só no corpo (itens já gravados com mais de 100 no
+        // aparelho): o model e a FotoCiclo ficam com o título original.
         let updateRequest = CicloUpdateRequest(
-            titulo: ciclo.titulo,
+            titulo: LimiteTexto.titulo(ciclo.titulo),
             valor_total: ciclo.valor_total,
             diaria: ciclo.diaria,
             periodo: ciclo.periodo
@@ -543,7 +545,7 @@ actor SyncActor: ModelActor {
             let foto = FotoCiclo(ciclo)
             let createRequest = CicloCreateRequest(
                 client_id: ciclo.clientId,
-                titulo: ciclo.titulo,
+                titulo: LimiteTexto.titulo(ciclo.titulo),
                 valor_total: ciclo.valor_total,
                 diaria: ciclo.diaria,
                 periodo: ciclo.periodo
@@ -681,7 +683,7 @@ actor SyncActor: ModelActor {
                 let response: GastosDia
                 if let backendId = gasto.backendId {
                     let updateRequest = GastoUpdateRequest(
-                        titulo: gasto.titulo,
+                        titulo: LimiteTexto.titulo(gasto.titulo),
                         valor: gasto.valor,
                         categoria: gasto.categoria,
                         dia_id: diaIdReal
@@ -690,7 +692,7 @@ actor SyncActor: ModelActor {
                 } else {
                     let createRequest = GastoCreateRequest(
                         client_id: gasto.clientId,
-                        titulo: gasto.titulo,
+                        titulo: LimiteTexto.titulo(gasto.titulo),
                         valor: gasto.valor,
                         categoria: gasto.categoria,
                         dia_id: diaIdReal
@@ -857,7 +859,7 @@ actor SyncActor: ModelActor {
         guard gasto.podeTerSidoCriadoNoServidor, let diaId = gasto.dia?.backendId else { return .naoExiste }
         let request = GastoCreateRequest(
             client_id: gasto.clientId,
-            titulo: gasto.titulo,
+            titulo: LimiteTexto.titulo(gasto.titulo),
             valor: gasto.valor,
             categoria: gasto.categoria,
             dia_id: diaId
@@ -888,7 +890,7 @@ actor SyncActor: ModelActor {
         guard ciclo.podeTerSidoCriadoNoServidor else { return .naoExiste }
         let request = CicloCreateRequest(
             client_id: ciclo.clientId,
-            titulo: ciclo.titulo,
+            titulo: LimiteTexto.titulo(ciclo.titulo),
             valor_total: ciclo.valor_total,
             diaria: ciclo.diaria,
             periodo: ciclo.periodo
