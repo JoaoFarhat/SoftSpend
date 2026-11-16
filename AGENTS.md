@@ -150,7 +150,14 @@ na fila (`continue`) para a próxima passada.
 
 **Backoff exponencial**: base 60s, teto 3600s (1h). `marcarFalha` incrementa
 `tentativas` e seta `proximaTentativaEm`. `deveTentar` só retorna `true` se
-`proximaTentativaEm <= agora`.
+`proximaTentativaEm <= agora`. Exceção: `429` do limite por minuto
+(`isLimitePorMinuto`; o `429` `daily_ai_limit`, do teto diário de IA, segue
+como falha) não é falha — `marcarAguardandoLimite` deixa `.pending`, sem
+contar tentativa e com `syncError = nil`, e `proximaTentativaEm = agora + 60
+s`. O primeiro 429 também liga `limiteAtingidoNesteSync` (zerado no começo de
+`sync`): todas as etapas param de chamar a API e as passadas restantes não
+rodam, mesmo com `forcar: true`. Testes em
+`SoftSpendTests/LimitePorMinutoTests.swift`.
 
 **Logging**: `SyncActor` usa `os.Logger` (subsystem `br.com.softspend`,
 category `SyncActor`) para logar falhas de save e dias remotos sem `backendId`.
