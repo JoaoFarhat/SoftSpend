@@ -177,6 +177,11 @@ actor SyncActor: ModelActor {
     /// reenviadas nas passadas seguintes (um POST por viagem bloqueada por `sync`).
     private var aguardandoAssinaturaNesteSync: Set<UUID> = []
 
+    /// Uma resposta 429 (limite por minuto) chegou neste `sync`: as etapas
+    /// param de chamar a API e as passadas seguintes não rodam — insistir só
+    /// toma mais 429. Vale mesmo com `forcar: true`.
+    private var limiteAtingidoNesteSync = false
+
     init(modelContainer: ModelContainer, api: any SyncAPI = NetworkManager.shared) {
         let modelContext = ModelContext(modelContainer)
         self.modelExecutor = DefaultSerialModelExecutor(modelContext: modelContext)
@@ -300,6 +305,7 @@ actor SyncActor: ModelActor {
 
         descartarAntigosApagadosEmOutroAparelho(userId: userId)
         aguardandoAssinaturaNesteSync = []
+        limiteAtingidoNesteSync = false
 
         var pendentesDepois = 0
         for passada in 0..<maxPassadas {
@@ -313,6 +319,10 @@ actor SyncActor: ModelActor {
             await syncDeletions(agora: agora, userId: userId, forcar: forcar)
             pendentesDepois = contarPendentes(agora: agora, userId: userId)
             logger.info("SyncActor: passada \(passada, privacy: .public), pendentesDepois=\(pendentesDepois, privacy: .public), mudouDuranteEnvio=\(self.mudouDuranteEnvio, privacy: .public)")
+            if limiteAtingidoNesteSync {
+                logger.info("SyncActor: limite por minuto (429) atingido, passadas restantes canceladas")
+                break
+            }
             if mudouDuranteEnvio { continue }
             if pendentesDepois == 0 || pendentesDepois >= pendentesAntes { break }
         }
@@ -397,6 +407,14 @@ actor SyncActor: ModelActor {
                 atual.gasto_total = cicloEditado.gasto_total
             }
         } catch {
+            if isLimitePorMinuto(error) {
+                limiteAtingidoNesteSync = true
+                gravarCiclo(cicloUUID, etapa: "sincronizarEdicaoCiclo-limite") { atual, _ in
+                    marcarAguardandoLimite(atual, agora: agora)
+                }
+                logger.info("sincronizarEdicaoCiclo: PUT recusado, limite por minuto")
+                return
+            }
             let erro = error.localizedDescription
             gravarCiclo(cicloUUID, etapa: "sincronizarEdicaoCiclo-catch") { atual, _ in
                 atual.syncError = erro
@@ -505,6 +523,15 @@ actor SyncActor: ModelActor {
         item.syncError = SyncActor.erroAssinaturaNecessaria
     }
 
+    /// 429 do limite por minuto: não é falha. O item fica `.pending`, sem
+    /// contar tentativa e sem mensagem de erro na tela, e tenta de novo daqui
+    /// a 60 s (o `deveTentar` respeita `proximaTentativaEm`; `forcar` ignora).
+    private func marcarAguardandoLimite(_ item: any Syncavel, agora: Date) {
+        item.proximaTentativaEm = agora.addingTimeInterval(60)
+        item.syncStatus = .pending
+        item.syncError = nil
+    }
+
     private func marcarSucesso(_ item: any Syncavel) {
         item.tentativas = 0
         item.proximaTentativaEm = nil
@@ -523,6 +550,7 @@ actor SyncActor: ModelActor {
     }
 
     private func syncCiclos(agora: Date, userId: String, forcar: Bool = false) async {
+        guard !limiteAtingidoNesteSync else { return }
         let contexto = contextoNovo()
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<CicloSoftex>(
@@ -534,6 +562,7 @@ actor SyncActor: ModelActor {
         logger.info("syncCiclos: \(ciclos.count, privacy: .public) ciclo(s) pendente(s) para userId \(userId, privacy: .private)")
 
         for ciclo in ciclos {
+            if limiteAtingidoNesteSync { break }
             if ciclo.backendId != nil {
                 await sincronizarEdicaoCiclo(ciclo, contexto: contexto, agora: agora, forcar: forcar)
                 continue
@@ -575,6 +604,14 @@ actor SyncActor: ModelActor {
                     logger.info("syncCiclos: POST recusado, assinatura necessária")
                     continue
                 }
+                if isLimitePorMinuto(error) {
+                    limiteAtingidoNesteSync = true
+                    gravarCiclo(cicloUUID, etapa: "syncCiclos-limite") { atual, _ in
+                        marcarAguardandoLimite(atual, agora: agora)
+                    }
+                    logger.info("syncCiclos: POST recusado, limite por minuto")
+                    break
+                }
                 let erro = error.localizedDescription
                 gravarCiclo(cicloUUID, etapa: "syncCiclos-catch") { atual, _ in
                     atual.syncError = erro
@@ -586,6 +623,7 @@ actor SyncActor: ModelActor {
     }
 
     private func syncDias(agora: Date, userId: String, forcar: Bool = false) async {
+        guard !limiteAtingidoNesteSync else { return }
         let contexto = contextoNovo()
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<DiaSoftex>(
@@ -600,6 +638,7 @@ actor SyncActor: ModelActor {
         }
 
         for dia in dias {
+            if limiteAtingidoNesteSync { break }
             guard let cicloId = dia.ciclo?.backendId else {
                 // Ciclo pai ainda não sincronizado: deixar como pending para próxima passada
                 continue
@@ -631,6 +670,13 @@ actor SyncActor: ModelActor {
                     }
                 }
             } catch {
+                if isLimitePorMinuto(error) {
+                    limiteAtingidoNesteSync = true
+                    gravarDia(diaUUID, etapa: "syncDias-limite") { atual in
+                        marcarAguardandoLimite(atual, agora: agora)
+                    }
+                    break
+                }
                 if isNotFoundError(error) {
                     // T4: a viagem foi apagada em outro aparelho — o dia (com
                     // os gastos) é descartado no aparelho, sem requisição.
@@ -657,6 +703,7 @@ actor SyncActor: ModelActor {
     }
 
     private func syncGastos(agora: Date, userId: String, forcar: Bool = false) async {
+        guard !limiteAtingidoNesteSync else { return }
         let contexto = contextoNovo()
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<GastosDia>(
@@ -673,6 +720,7 @@ actor SyncActor: ModelActor {
         }
 
         for gasto in gastos {
+            if limiteAtingidoNesteSync { break }
             guard let diaIdReal = gasto.dia?.backendId else {
                 continue
             }
@@ -710,6 +758,13 @@ actor SyncActor: ModelActor {
                     concluirGasto(atual, mudou: FotoGasto(atual) != foto)
                 }
             } catch {
+                if isLimitePorMinuto(error) {
+                    limiteAtingidoNesteSync = true
+                    gravarGasto(gastoUUID, etapa: "syncGastos-limite") { atual in
+                        marcarAguardandoLimite(atual, agora: agora)
+                    }
+                    break
+                }
                 if isNotFoundError(error) {
                     // T4: o dia (POST) ou o gasto (PUT) foi apagado em outro
                     // aparelho — o gasto é descartado no aparelho, sem requisição.
@@ -726,6 +781,7 @@ actor SyncActor: ModelActor {
     }
 
     private func syncComprovantes(agora: Date, userId: String, forcar: Bool = false) async {
+        guard !limiteAtingidoNesteSync else { return }
         let contexto = contextoNovo()
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<GastosDia>(
@@ -748,12 +804,20 @@ actor SyncActor: ModelActor {
         }
 
         for gasto in gastos {
+            if limiteAtingidoNesteSync { break }
             guard let backendId = gasto.backendId else { continue }
             let gastoUUID = gasto.id
             let foto = FotoGasto(gasto)
             do {
                 try await sincronizarComprovante(gasto, backendId: backendId, foto: foto)
             } catch {
+                if isLimitePorMinuto(error) {
+                    limiteAtingidoNesteSync = true
+                    gravarGasto(gastoUUID, etapa: "syncComprovantes-limite") { atual in
+                        marcarAguardandoLimite(atual, agora: agora)
+                    }
+                    break
+                }
                 let erro = error.localizedDescription
                 gravarGasto(gastoUUID, etapa: "syncComprovantes-catch") { atual in
                     atual.syncError = erro
@@ -828,6 +892,23 @@ actor SyncActor: ModelActor {
         (error as? APIError)?.assinaturaNecessaria == true
     }
 
+    /// `429` do limite por minuto (slowapi): esperar 60 s resolve, então não é
+    /// falha. O outro 429 — `daily_ai_limit`, teto diário de leituras por IA —
+    /// não entra aqui: só libera no dia seguinte e segue no caminho de falha.
+    private func isLimitePorMinuto(_ error: Error) -> Bool {
+        if let apiError = error as? APIError {
+            if case .serverError(_, _, let statusCode) = apiError {
+                return statusCode == 429 && !apiError.limiteDiarioIA
+            }
+            return false
+        }
+        let nsError = error as NSError
+        if let statusCode = nsError.userInfo["statusCode"] as? Int {
+            return statusCode == 429
+        }
+        return false
+    }
+
     // MARK: - Apagar item sem backendId (T7)
 
     /// T7 de `docs/revisao-sync-offline-ios.md` (R7): resultado de procurar no
@@ -839,6 +920,8 @@ actor SyncActor: ModelActor {
         /// O item não pode estar no servidor: nunca foi enviado, ou o pai dele
         /// não existe lá (404). Basta apagar no aparelho.
         case naoExiste
+        /// 429 do limite por minuto: não é falha — espera 60 s como os envios.
+        case aguardandoLimite
         /// Não deu para saber agora: fica para a próxima, com backoff.
         case falhou(String)
     }
@@ -848,6 +931,10 @@ actor SyncActor: ModelActor {
     /// que já existe devolveria o item; o 403 garante que ele não está lá.
     private func classificar(_ error: Error) -> Recuperacao {
         if isNotFoundError(error) || isAssinaturaNecessaria(error) { return .naoExiste }
+        if isLimitePorMinuto(error) {
+            limiteAtingidoNesteSync = true
+            return .aguardandoLimite
+        }
         return .falhou(error.localizedDescription)
     }
 
@@ -905,6 +992,7 @@ actor SyncActor: ModelActor {
     }
 
     private func syncDeletions(agora: Date, userId: String, forcar: Bool = false) async {
+        guard !limiteAtingidoNesteSync else { return }
         let modelContext = contextoNovo()
         let synced = SyncStatus.synced.rawValue
 
@@ -919,6 +1007,7 @@ actor SyncActor: ModelActor {
         logger.info("syncDeletions: \(gastos.count, privacy: .public) gasto(s) para deletar")
 
         for gasto in gastos {
+            if limiteAtingidoNesteSync { break }
             let backendId: Int
             if let id = gasto.backendId {
                 backendId = id
@@ -932,6 +1021,9 @@ actor SyncActor: ModelActor {
                 case .naoExiste:
                     marcarSucesso(gasto)
                     continue
+                case .aguardandoLimite:
+                    marcarAguardandoLimite(gasto, agora: agora)
+                    continue
                 case .falhou(let erro):
                     marcarFalha(gasto)
                     gasto.syncError = erro
@@ -942,6 +1034,11 @@ actor SyncActor: ModelActor {
             do {
                 try await api.deleteGasto(gastoId: backendId)
             } catch {
+                if isLimitePorMinuto(error) {
+                    limiteAtingidoNesteSync = true
+                    marcarAguardandoLimite(gasto, agora: agora)
+                    continue
+                }
                 if !isNotFoundError(error) {
                     marcarFalha(gasto)
                     gasto.syncError = error.localizedDescription
@@ -961,6 +1058,7 @@ actor SyncActor: ModelActor {
         logger.info("syncDeletions: \(dias.count, privacy: .public) dia(s) para deletar")
 
         for dia in dias {
+            if limiteAtingidoNesteSync { break }
             let backendId: Int
             if let id = dia.backendId {
                 backendId = id
@@ -973,6 +1071,9 @@ actor SyncActor: ModelActor {
                 case .naoExiste:
                     marcarSucesso(dia)
                     continue
+                case .aguardandoLimite:
+                    marcarAguardandoLimite(dia, agora: agora)
+                    continue
                 case .falhou(let erro):
                     marcarFalha(dia)
                     dia.syncError = erro
@@ -983,6 +1084,11 @@ actor SyncActor: ModelActor {
             do {
                 try await api.deleteDia(diaId: backendId)
             } catch {
+                if isLimitePorMinuto(error) {
+                    limiteAtingidoNesteSync = true
+                    marcarAguardandoLimite(dia, agora: agora)
+                    continue
+                }
                 if !isNotFoundError(error) {
                     marcarFalha(dia)
                     dia.syncError = error.localizedDescription
@@ -1001,6 +1107,7 @@ actor SyncActor: ModelActor {
         logger.info("syncDeletions: \(ciclos.count, privacy: .public) ciclo(s) para deletar")
 
         for ciclo in ciclos {
+            if limiteAtingidoNesteSync { break }
             let backendId: Int
             if let id = ciclo.backendId {
                 backendId = id
@@ -1013,6 +1120,9 @@ actor SyncActor: ModelActor {
                 case .naoExiste:
                     marcarSucesso(ciclo)
                     continue
+                case .aguardandoLimite:
+                    marcarAguardandoLimite(ciclo, agora: agora)
+                    continue
                 case .falhou(let erro):
                     marcarFalha(ciclo)
                     ciclo.syncError = erro
@@ -1023,6 +1133,11 @@ actor SyncActor: ModelActor {
             do {
                 try await api.deleteCiclo(cicloId: backendId)
             } catch {
+                if isLimitePorMinuto(error) {
+                    limiteAtingidoNesteSync = true
+                    marcarAguardandoLimite(ciclo, agora: agora)
+                    continue
+                }
                 if !isNotFoundError(error) {
                     marcarFalha(ciclo)
                     ciclo.syncError = error.localizedDescription
