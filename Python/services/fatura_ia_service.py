@@ -30,8 +30,6 @@ GEMINI_MODEL_NAME = ocr_service.GEMINI_MODEL_NAME
 MAX_OUTPUT_TOKENS = 16384
 TIMEOUT_MS = 60000
 
-_suporta_thinking_minimo = True
-
 _client = (
     genai.Client(
         api_key=ocr_service.GEMINI_API_KEY,
@@ -46,7 +44,7 @@ _client = (
 
 
 class ErroFaturaSemResposta(ErroFatura):
-    """O Gemini não respondeu (sem chave ou fora do ar): a cota é devolvida.
+    """O Gemini não respondeu (sem chave, rede, timeout ou 5xx): a cota é devolvida.
 
     Subclasse do `ErroFatura` que o endpoint já traduz hoje, então status e
     mensagem não mudam — o que muda é a vaga do dia voltar.
@@ -108,13 +106,6 @@ def _thinking_minimo() -> types.ThinkingConfig:
     if GEMINI_MODEL_NAME.startswith("gemini-2"):
         return types.ThinkingConfig(thinking_budget=0)
     return types.ThinkingConfig(thinking_level=types.ThinkingLevel.MINIMAL)
-
-
-def _e_rejeicao_de_thinking(erro: Exception) -> bool:
-    msg = str(erro).lower()
-    return "thinking" in msg and (
-        "invalid" in msg or "not supported" in msg or "unsupported" in msg
-    )
 
 
 def _montar_config(thinking_minimo: bool) -> types.GenerateContentConfig:
@@ -215,27 +206,13 @@ def ler_fatura_pdf(pdf_bytes: bytes) -> FaturaBruta:
     pdf_part = types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
 
     inicio = time.perf_counter()
-    global _suporta_thinking_minimo
-    try:
-        try:
-            response = _client.models.generate_content(
-                model=GEMINI_MODEL_NAME,
-                contents=[pdf_part],
-                config=_montar_config(_suporta_thinking_minimo),
-            )
-        except Exception as erro:
-            if not (_suporta_thinking_minimo and _e_rejeicao_de_thinking(erro)):
-                raise
-            _suporta_thinking_minimo = False
-            response = _client.models.generate_content(
-                model=GEMINI_MODEL_NAME,
-                contents=[pdf_part],
-                config=_montar_config(thinking_minimo=False),
-            )
-    except Exception as erro:
-        # Fora do ar / timeout / rede: o pedido não gasta a cota do dia.
-        logger.exception("Gemini sem resposta na leitura da fatura")
-        raise ErroFaturaSemResposta(500, "Erro ao processar a fatura") from erro
+    response = ocr_service.gerar_conteudo(
+        _client,
+        GEMINI_MODEL_NAME,
+        pdf_part,
+        _montar_config,
+        lambda: ErroFaturaSemResposta(500, "Erro ao processar a fatura"),
+    )
     duracao = time.perf_counter() - inicio
 
     if _cortou_por_tokens(response):

@@ -6,7 +6,7 @@ from io import BytesIO
 
 import httpx
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 from PIL import Image, ImageOps
 from pydantic import BaseModel
 
@@ -47,7 +47,7 @@ _client = (
 
 
 class SemRespostaGemini(ValueError):
-    """O Gemini não respondeu (sem chave ou fora do ar): a cota é devolvida.
+    """O Gemini não respondeu (sem chave, rede, timeout ou 5xx): a cota é devolvida.
 
     Subclasse do `ValueError` que o endpoint já traduz hoje; `status_code` e
     `detail` guardam a resposta que cada caso já devolvia (422 para arquivo
@@ -106,6 +106,55 @@ def _montar_config(thinking_minimo: bool) -> types.GenerateContentConfig:
     )
 
 
+def _sem_resposta(erro: Exception) -> bool:
+    """A chamada ao Gemini não teve resposta: a vaga do dia volta.
+
+    Só erro de conexão/timeout (`httpx.HTTPError`, o `send` da SDK) e 5xx
+    (`ServerError`) não chegaram a resposta. O 4xx (`ClientError`, ex.:
+    arquivo recusado) e qualquer outra falha gastam a cota — devolver a
+    vaga numa recusa deixaria contornar o teto diário à vontade.
+    """
+    return isinstance(erro, (httpx.HTTPError, errors.ServerError))
+
+
+def gerar_conteudo(
+    client, model: str, part: types.Part, montar_config, fabricar_sem_resposta
+):
+    """Chama `generate_content` com o retry de 'thinking' e classifica a falha.
+
+    Modelo que rejeita o thinking mínimo ("thinking ... invalid/not
+    supported") desliga `_suporta_thinking_minimo` para as chamadas
+    seguintes e refaz uma única vez sem a config.
+
+    Erro de conexão, timeout ou 5xx: o Gemini não respondeu — lança
+    `fabricar_sem_resposta()` (a exceção própria de cada serviço, que faz a
+    vaga do dia voltar). 4xx e demais erros sobem crus: a chamada foi
+    atendida e a cota ficou gasta.
+    """
+    global _suporta_thinking_minimo
+    try:
+        try:
+            return client.models.generate_content(
+                model=model,
+                contents=[part],
+                config=montar_config(thinking_minimo=_suporta_thinking_minimo),
+            )
+        except Exception as erro:
+            if not (_suporta_thinking_minimo and _e_rejeicao_de_thinking(erro)):
+                raise
+            _suporta_thinking_minimo = False
+            return client.models.generate_content(
+                model=model,
+                contents=[part],
+                config=montar_config(thinking_minimo=False),
+            )
+    except Exception as erro:
+        if not _sem_resposta(erro):
+            raise
+        logger.exception("Gemini sem resposta")
+        raise fabricar_sem_resposta() from erro
+
+
 def aquecer() -> None:
     if not _client:
         return
@@ -151,27 +200,13 @@ def extrair_gasto_da_imagem(image_bytes: bytes) -> dict:
     imagem_part = types.Part.from_bytes(data=imagem_otimizada, mime_type="image/jpeg")
 
     inicio_gemini = time.perf_counter()
-    global _suporta_thinking_minimo
-    try:
-        try:
-            response = _client.models.generate_content(
-                model=GEMINI_MODEL_NAME,
-                contents=[imagem_part],
-                config=_montar_config(thinking_minimo=_suporta_thinking_minimo),
-            )
-        except Exception as erro:
-            if not (_suporta_thinking_minimo and _e_rejeicao_de_thinking(erro)):
-                raise
-            _suporta_thinking_minimo = False
-            response = _client.models.generate_content(
-                model=GEMINI_MODEL_NAME,
-                contents=[imagem_part],
-                config=_montar_config(thinking_minimo=False),
-            )
-    except Exception as erro:
-        # Fora do ar / timeout / rede: o pedido não gasta a cota do dia.
-        logger.exception("Gemini sem resposta no OCR")
-        raise SemRespostaGemini("Erro ao processar imagem", status_code=500) from erro
+    response = gerar_conteudo(
+        _client,
+        GEMINI_MODEL_NAME,
+        imagem_part,
+        _montar_config,
+        lambda: SemRespostaGemini("Erro ao processar imagem", status_code=500),
+    )
 
     logger.info(
         "OCR %s: recebido %.0fKB -> enviado %.0fKB | preproc %.2fs | gemini %.2fs",

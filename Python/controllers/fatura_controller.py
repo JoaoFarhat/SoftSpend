@@ -49,6 +49,7 @@ async def ler_fatura(
     `ciclo_id`, as compras dentro das datas da viagem ganham
     `dentro_da_viagem`/`dia_id` e a prévia do vínculo (`match`).
     """
+    dia_contado = None
     try:
         tipo, conteudo = await fatura_arquivo_service.ler_upload(arquivo)
 
@@ -57,7 +58,7 @@ async def ler_fatura(
                 fatura_arquivo_service.desproteger_pdf, conteudo, senha
             )
             # Só o PDF vai à IA (OFX e CSV não contam no teto diário).
-            limite_ia.contar(user_id, limite_ia.FATURA)
+            dia_contado = limite_ia.contar(user_id, limite_ia.FATURA)
             bruta = await run_in_threadpool(fatura_ia_service.ler_fatura_pdf, pdf_aberto)
         elif tipo == "ofx":
             bruta = fatura_arquivo_service.ler_ofx(conteudo)
@@ -71,8 +72,9 @@ async def ler_fatura(
             )
         return lida
     except ErroFaturaSemResposta as exc:
-        # A chamada não teve resposta do Gemini: a vaga do dia volta.
-        limite_ia.devolver(user_id, limite_ia.FATURA)
+        # A chamada não teve resposta do Gemini: a vaga volta no mesmo dia
+        # do `contar` (a virada UTC pode ter passado durante a chamada).
+        limite_ia.devolver(user_id, limite_ia.FATURA, hoje=dia_contado)
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
     except ErroFatura as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.detail)
