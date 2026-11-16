@@ -123,6 +123,10 @@ def remover_dia(db: Session, dia_id: int, user_id: str):
 
     gasto_total_dia = sum(gasto.valor for gasto in dia.gastos)
     ciclo_repository.incrementar_gasto_total(db, dia.ciclo_id, -gasto_total_dia)
+    # O UPDATE vai direto ao banco e nao toca o objeto em sessao; sem expirar,
+    # um ciclo que continue vivo (o delete mexe em `ciclo.dias`) entregaria o
+    # `gasto_total` velho para leituras posteriores na mesma sessao.
+    db.expire(dia.ciclo, ["gasto_total"])
 
     dia_repository.remover_dia(db, dia)
 

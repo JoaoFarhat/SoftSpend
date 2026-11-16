@@ -16,7 +16,7 @@ def listar_dias_por_ciclo(db: Session, ciclo_id: int, skip: int, limit: int):
     return (
         db.query(models.Dia)
         .filter(models.Dia.ciclo_id == ciclo_id)
-        .order_by(models.Dia.data)
+        .order_by(models.Dia.data, models.Dia.id)
         .offset(skip)
         .limit(limit)
         .options(joinedload(models.Dia.gastos))
@@ -37,9 +37,12 @@ def criar_dias_lote(db: Session, dias: list[models.Dia]):
     return dias
 
 def incrementar_saldo(db: Session, dia_id: int, valor: Decimal):
+    # "fetch" re-le o dia no banco depois do UPDATE: sem isso, um objeto que
+    # continue vivo na sessao guardaria o saldo velho e o entregaria para
+    # leituras posteriores na mesma sessao.
     db.query(models.Dia).filter(models.Dia.id == dia_id).update(
         {models.Dia.saldo: models.Dia.saldo + valor},
-        synchronize_session=False,
+        synchronize_session="fetch",
     )
 
 def atualizar_dia(db: Session, dia: models.Dia):
