@@ -70,10 +70,19 @@ def incrementar_gasto_total(db: Session, ciclo_id: int, valor: Decimal):
     )
 
 def update_ciclo(db: Session, ciclo: models.Ciclo, ciclo_request):
+    diaria_mudou = ciclo.diaria != ciclo_request.diaria
     ciclo.titulo = ciclo_request.titulo
     ciclo.periodo = ciclo_request.periodo
     ciclo.diaria = ciclo_request.diaria
     ciclo.valor_total = ciclo_request.valor_total
+    if diaria_mudou:
+        # O saldo do dia é a diária menos os gastos dele; diária nova sem
+        # recalcular deixaria o relatório e o app com o saldo velho.
+        for dia in ciclo.dias:
+            dia.saldo = ciclo_request.diaria - sum(
+                (gasto.valor or Decimal(0) for gasto in dia.gastos or []),
+                Decimal(0),
+            )
     db.flush()
     db.refresh(ciclo)
     return ciclo
