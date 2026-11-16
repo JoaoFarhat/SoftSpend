@@ -37,7 +37,7 @@ SUFIXO_META = ".meta.json"
 FORMATO_DATA = "%Y%m%dT%H%M%SZ"
 NOME_RE = re.compile(r"^softspend-(\d{8}T\d{6}Z)\.sql\.gz$")
 
-TAMANHO_MINIMO = 10 * 1024  # 10 KB
+TAMANHO_MINIMO = 2 * 1024  # 2 KB: barra arquivo vazio ou quebrado; o banco antes do lançamento dá ~9 KB (15/11)
 ESPACO_MINIMO = 50 * 1024 * 1024  # 50 MB, quando ainda não há dump anterior
 DESTINOS = ("diario", "pre-migration")
 TABELAS_CONTADAS = ("users", "ciclos", "dias", "gastos_dia")

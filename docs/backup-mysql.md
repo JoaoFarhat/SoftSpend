@@ -49,7 +49,7 @@ Todos os arquivos novos ficam em `deploy/ec2/` (mesmo lugar de
    2. `mysqldump ... | gzip` para `softspend-AAAAMMDDTHHMMSSZ.sql.gz`
       (data em UTC no nome; o nome nunca se repete, então nada é sobrescrito);
    3. valida: `gzip -t` passa, o arquivo termina com a linha
-      `-- Dump completed` do mysqldump e o tamanho é maior que 10 KB;
+      `-- Dump completed` do mysqldump, as tabelas principais estão nele e o tamanho é maior que 2 KB;
    4. grava ao lado um `.meta.json` com a data, a versão do MySQL, o
       `alembic_version` e a contagem de linhas de `users`, `ciclos`, `dias` e
       `gastos_dia` (usado no teste de restauração, §8.2);
