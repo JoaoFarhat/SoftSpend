@@ -61,6 +61,7 @@ struct ComprasSemViagemView: View {
                 }
                 .padding(.horizontal, Espaco.g + 2)
                 .padding(.vertical, Espaco.g)
+                .larguraLegivel()
             }
             .background(Tema.fundo.ignoresSafeArea())
             .navigationTitle("Compras do Apple Pay")

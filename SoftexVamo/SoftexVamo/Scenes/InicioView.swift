@@ -164,6 +164,7 @@ struct InicioView: View {
             }
             .padding(.horizontal, Espaco.g + 2)
         }
+        .larguraLegivel()
         .safeAreaInset(edge: .bottom) {
             rodape { BotaoPrincipal("Nova viagem") { abrirRota(.novaViagem) } }
         }
@@ -206,6 +207,7 @@ struct InicioView: View {
                 }
             }
             .padding(.bottom, Espaco.g)
+            .larguraLegivel()
         }
         .scrollIndicators(.hidden)
         .refreshable { await SyncManager.shared.sync(forcar: true) }
@@ -239,6 +241,7 @@ struct InicioView: View {
             .padding(.horizontal, Espaco.g + 2)
             .padding(.top, Espaco.p)
             .padding(.bottom, Espaco.p)
+            .larguraLegivel()
             .background(Tema.fundo)
     }
 

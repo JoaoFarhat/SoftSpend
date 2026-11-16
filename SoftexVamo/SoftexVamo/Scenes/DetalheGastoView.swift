@@ -75,6 +75,7 @@ struct DetalheGastoView: View {
                     .disabled(apagando)
             }
             .padding(.bottom, Espaco.g)
+            .larguraLegivel()
         }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

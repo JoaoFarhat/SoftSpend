@@ -81,6 +81,7 @@ struct LoginView: View {
             }
             .padding(.horizontal, Espaco.g + 8)
             .padding(.bottom, Espaco.g)
+            .larguraLegivel()
         }
         .scrollDismissesKeyboard(.interactively)
         .background(Tema.fundo.ignoresSafeArea())

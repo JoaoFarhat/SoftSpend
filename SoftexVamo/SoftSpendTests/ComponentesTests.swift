@@ -56,4 +56,8 @@ struct ComponentesTests {
     @Test func cidade() {
         #expect(nomeCidade("Cuiabá, MT") == "Cuiabá")
     }
+
+    @Test func larguraLegivel() {
+        #expect(LarguraLegivel.maxima == 700)
+    }
 }

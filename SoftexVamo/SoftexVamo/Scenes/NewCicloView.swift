@@ -85,6 +85,7 @@ struct NewCicloView: View {
             .padding(.horizontal, Espaco.g + 10)
             .padding(.top, Espaco.p)
             .padding(.bottom, Espaco.g)
+            .larguraLegivel()
         }
         .scrollDismissesKeyboard(.interactively)
         .safeAreaInset(edge: .top) { barraTopo }
@@ -95,6 +96,7 @@ struct NewCicloView: View {
                 .padding(.horizontal, Espaco.g + 2)
                 .padding(.top, Espaco.p)
                 .padding(.bottom, Espaco.p)
+                .larguraLegivel()
                 .background(Tema.fundo.ignoresSafeArea())
         }
         .background(Tema.fundo.ignoresSafeArea())

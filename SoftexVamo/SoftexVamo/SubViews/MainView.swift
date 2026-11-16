@@ -110,6 +110,7 @@ struct MainView: View {
                 }
                 .padding(.horizontal, Espaco.p)
                 .padding(.top, Espaco.p)
+                .larguraLegivel()
                 .background {
                     Tema.superficie.ignoresSafeArea(edges: .bottom)
                 }
