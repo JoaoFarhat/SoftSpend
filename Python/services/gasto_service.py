@@ -1,4 +1,5 @@
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 import models, dtos
 from dtos.gasto import GastoRequest
@@ -34,10 +35,25 @@ def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: str):
         dia_id=dia_id
     )
 
-    dia_repository.incrementar_saldo(db, dia.id, -gasto.valor)
-    ciclo_repository.incrementar_gasto_total(db, dia.ciclo_id, gasto.valor)
+    try:
+        # Insert e incrementos no mesmo savepoint: um reenvio concorrente que
+        # esbarre no unique `uix_gasto_client_id_dia` desfaz os três juntos e
+        # o dinheiro não é contado duas vezes.
+        with db.begin_nested():
+            novo_gasto = gasto_repository.criar_gasto(db, novo_gasto)
+            dia_repository.incrementar_saldo(db, dia.id, -gasto.valor)
+            ciclo_repository.incrementar_gasto_total(db, dia.ciclo_id, gasto.valor)
+    except IntegrityError:
+        existente = (
+            gasto_repository.find_by_client_id(db, gasto.client_id, dia_id)
+            if gasto.client_id
+            else None
+        )
+        if existente is None:
+            raise
+        open_finance_reconciliation_service.conciliar_gasto(db, existente, user_id)
+        return existente
 
-    novo_gasto = gasto_repository.criar_gasto(db, novo_gasto)
     open_finance_reconciliation_service.conciliar_gasto(db, novo_gasto, user_id)
     return novo_gasto
 

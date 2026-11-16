@@ -879,6 +879,13 @@ Para evitar criação duplicada quando o app não recebe a resposta do `POST` (e
 - O iOS gera `clientId` (UUID) ao criar ciclo, dia ou gasto local.
 - O `client_id` é enviado nas requisições de criação.
 - O backend verifica se já existe um registro com o mesmo `client_id` e retorna o existente, em vez de criar um novo.
+- Reenvio enquanto o primeiro pedido ainda grava (a busca não acha nada e o
+  insert esbarra no unique): `criar_ciclo`, `criar_dia` e `criar_gasto` fazem o
+  insert — e, no gasto, os incrementos de `saldo`/`gasto_total` — dentro de
+  `db.begin_nested()`; no `IntegrityError` relêem pelo `find_by_client_id` e
+  devolvem o existente (o gasto passa pelo `conciliar_gasto`), ou relançam se
+  não acharem. Os incrementos nunca ficam fora do savepoint (contaria o
+  dinheiro duas vezes). Testes em `tests/test_client_id_corrida.py`.
 - As tabelas têm unique constraints por `client_id` + entidade pai:
   - `uix_ciclo_client_id_usuario`
   - `uix_dia_client_id_ciclo`
