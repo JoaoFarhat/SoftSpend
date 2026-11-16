@@ -24,6 +24,13 @@ THUMB_QUALIDADE = int(os.getenv("S3_THUMB_QUALIDADE", "75"))
 # Escala de renderizacao do PDF. 2.0 ~ 144 DPI, suficiente para leitura.
 PDF_ESCALA_RENDER = float(os.getenv("S3_PDF_ESCALA_RENDER", "2.0"))
 
+# Teto do lado maior do bitmap rasterizado. Uma pagina de PDF pode declarar
+# um MediaBox de qualquer tamanho; sem o teto, o render alocaria um bitmap
+# gigante na memoria antes mesmo do JPEG existir. O raster so alimenta a
+# miniatura e o OCR, entao a pagina grande nao e recusada — a escala e
+# reduzida para o bitmap caber no teto.
+PDF_MAX_LADO_PX = int(os.getenv("S3_PDF_MAX_LADO_PX", "5000"))
+
 SUFIXO_THUMB = "-thumb.jpg"
 
 EXTENSOES_POR_CONTENT_TYPE = {
@@ -121,7 +128,15 @@ def pdf_primeira_pagina_para_jpeg(conteudo: bytes) -> bytes:
             raise ValueError("PDF nao tem paginas")
 
         pagina = documento[0]
-        imagem = pagina.render(scale=PDF_ESCALA_RENDER).to_pil()
+        largura_pt, altura_pt = pagina.get_size()
+        if largura_pt <= 0 or altura_pt <= 0:
+            raise ValueError("PDF tem pagina sem dimensoes")
+        escala = min(
+            PDF_ESCALA_RENDER,
+            PDF_MAX_LADO_PX / largura_pt,
+            PDF_MAX_LADO_PX / altura_pt,
+        )
+        imagem = pagina.render(scale=escala).to_pil()
     finally:
         documento.close()
 

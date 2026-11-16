@@ -971,3 +971,55 @@ def test_open_finance_manual_sync_uses_authenticated_user(importar_main, monkeyp
         "conciliacoes": 1,
     }
     assert chamadas == [("item-1", "user-1")]
+
+
+def _pdf_com_pagina(pagesize) -> bytes:
+    import io
+
+    from reportlab.pdfgen import canvas
+
+    buffer = io.BytesIO()
+    c = canvas.Canvas(buffer, pagesize=pagesize)
+    c.drawString(72, 72, "PAGINA")
+    c.showPage()
+    c.save()
+    return buffer.getvalue()
+
+
+def _dimensoes_jpeg(jpeg: bytes) -> tuple[int, int]:
+    import io
+
+    from PIL import Image
+
+    imagem = Image.open(io.BytesIO(jpeg))
+    assert imagem.format == "JPEG"
+    return imagem.size
+
+
+def test_pdf_com_pagina_gigante_renderiza_dentro_do_teto(monkeypatch):
+    """MediaBox gigante nao pode alocar um bitmap enorme no render.
+
+    Sem o teto, a pagina de 20.000 x 20.000 pt pediria um bitmap de
+    40.000 x 40.000 px (~6 GB) na escala 2.0 e derrubaria o processo.
+    """
+    from services import storage_service
+
+    monkeypatch.setattr(storage_service, "PDF_MAX_LADO_PX", 300)
+
+    jpeg = storage_service.pdf_primeira_pagina_para_jpeg(
+        _pdf_com_pagina((20000, 20000))
+    )
+    assert max(_dimensoes_jpeg(jpeg)) <= 300
+
+
+def test_pdf_normal_renderiza_na_escala_cheia():
+    """Pagina comum continua na escala 2.0: o teto so corta o exagero."""
+    from reportlab.lib.pagesizes import letter
+
+    from services import storage_service
+
+    jpeg = storage_service.pdf_primeira_pagina_para_jpeg(
+        _pdf_com_pagina(letter)
+    )
+    # letter = 612 x 792 pt -> 1224 x 1584 px em escala 2.0.
+    assert _dimensoes_jpeg(jpeg) == (1224, 1584)
