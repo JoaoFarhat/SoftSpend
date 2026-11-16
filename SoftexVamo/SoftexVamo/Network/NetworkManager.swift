@@ -351,15 +351,6 @@ final class NetworkManager: Sendable {
         return response.map { DiaSoftex(from: $0) }
     }
 
-    nonisolated func syncDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex] {
-        guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)/dias/lote") else {
-            throw URLError(.badURL)
-        }
-        let request = makeRequest(url: url, method: "PUT", body: try encoder.encode(dias))
-        let response = try decoder.decode([DiaSoftexResponse].self, from: try await execute(request))
-        return response.map { DiaSoftex(from: $0) }
-    }
-
     nonisolated func deleteDia(diaId: Int) async throws {
         logger.info("deleteDia: diaId=\(diaId, privacy: .public)")
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/dias/\(diaId)") else {

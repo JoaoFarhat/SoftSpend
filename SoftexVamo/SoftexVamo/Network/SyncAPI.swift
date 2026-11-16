@@ -22,8 +22,6 @@ nonisolated protocol SyncAPI: Sendable {
 
     /// `POST /ciclos/{id}/dias/lote`: só cria (deduplica por `client_id`).
     func postDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex]
-    /// `PUT /ciclos/{id}/dias/lote`: substitui a lista e **remove** os dias que não vierem nela.
-    func syncDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex]
     func deleteDia(diaId: Int) async throws
 
     func postGasto(request: GastoCreateRequest) async throws -> GastosDia

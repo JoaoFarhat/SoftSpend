@@ -234,6 +234,54 @@ def test_reenvio_client_id_dias_em_lote_nao_duplica(ambiente):
     assert len(dias) == 3
 
 
+def test_put_dias_lote_e_put_dia_retornam_405(ambiente):
+    # As duas rotas PUT de dia saíram do ar: a de lote apagava no servidor os
+    # dias fora da lista e a de dia solto não era chamada por ninguém.
+    client = ambiente.como(USER_A)
+    ciclo, dia, _ = _criar_ciclo_dia_gasto(client)
+
+    response_lote = client.put(
+        f"/ciclos/{ciclo['id']}/dias/lote", json=[_dia_payload()]
+    )
+    response_dia = client.put(f"/dias/{dia['id']}", json=_dia_payload())
+
+    assert response_lote.status_code == 405
+    assert response_dia.status_code == 405
+
+
+def test_dias_lote_vazio_ou_com_mais_de_100_dias_retorna_422(ambiente):
+    client = ambiente.como(USER_A)
+    ciclo = _criar_ciclo(client)
+
+    vazio = client.post(f"/ciclos/{ciclo['id']}/dias/lote", json=[])
+    acima_do_teto = client.post(
+        f"/ciclos/{ciclo['id']}/dias/lote",
+        json=[
+            _dia_payload(f"dia-{i}", "2026-11-01T00:00:00Z")
+            for i in range(101)
+        ],
+    )
+
+    assert vazio.status_code == 422
+    assert acima_do_teto.status_code == 422
+
+
+def test_dias_lote_aceita_100_dias(ambiente):
+    client = ambiente.como(USER_A)
+    ciclo = _criar_ciclo(client)
+
+    response = client.post(
+        f"/ciclos/{ciclo['id']}/dias/lote",
+        json=[
+            _dia_payload(f"dia-{i}", "2026-11-01T00:00:00Z")
+            for i in range(100)
+        ],
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 100
+
+
 def test_reenvio_client_id_gasto_devolve_registro_existente(ambiente):
     client = ambiente.como(USER_A)
     ciclo, dia, gasto = _criar_ciclo_dia_gasto(client)
@@ -320,17 +368,6 @@ def test_criar_dia_em_ciclo_alheio_retorna_404(ambiente):
     assert response_lote.status_code == 404
     dias_a = ambiente.como(USER_A).get(f"/ciclos/{ciclo['id']}/dias").json()
     assert len(dias_a) == 1
-
-
-def test_editar_dia_alheio_retorna_404(ambiente):
-    _, dia, _ = _criar_ciclo_dia_gasto(ambiente.como(USER_A))
-
-    client_b = ambiente.como(USER_B)
-    response = client_b.put(
-        f"/dias/{dia['id']}", json=_dia_payload(data="2026-11-05T00:00:00Z")
-    )
-
-    assert response.status_code == 404
 
 
 def test_apagar_dia_alheio_retorna_404(ambiente):
