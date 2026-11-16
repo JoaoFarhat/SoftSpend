@@ -114,19 +114,24 @@ def agora_utc() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
-def buscar(db: Session, user_id: str) -> models.Assinatura | None:
-    return (
-        db.query(models.Assinatura)
-        .filter(models.Assinatura.user_id == user_id)
-        .first()
-    )
+def buscar(
+    db: Session, user_id: str, para_atualizar: bool = False
+) -> models.Assinatura | None:
+    # `para_atualizar`: leitura com bloqueio (SELECT ... FOR UPDATE), que no
+    # MySQL (REPEATABLE READ) enxerga a linha que outro pedido acabou de
+    # gravar; a leitura comum devolveria a foto tirada no início da transação.
+    query = db.query(models.Assinatura).filter(models.Assinatura.user_id == user_id)
+    if para_atualizar:
+        query = query.with_for_update()
+    return query.first()
 
 
 def obter_ou_criar(db: Session, user_id: str) -> models.Assinatura:
     """Linha do usuário, criada com um `app_account_token` novo se faltar.
 
     Duas primeiras chamadas ao mesmo tempo esbarram no unique de `user_id`;
-    a que perde desfaz só o savepoint e lê a linha da outra.
+    a que perde desfaz só o savepoint e lê a linha da outra com bloqueio —
+    sem `FOR UPDATE`, o REPEATABLE READ do MySQL não a enxergaria.
     """
     assinatura = buscar(db, user_id)
     if assinatura is not None:
@@ -136,7 +141,7 @@ def obter_ou_criar(db: Session, user_id: str) -> models.Assinatura:
             assinatura = models.Assinatura(user_id=user_id, status=NONE)
             db.add(assinatura)
     except IntegrityError:
-        assinatura = buscar(db, user_id)
+        assinatura = buscar(db, user_id, para_atualizar=True)
         if assinatura is None:
             raise
     return assinatura
