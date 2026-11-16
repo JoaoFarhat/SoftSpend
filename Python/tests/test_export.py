@@ -10,6 +10,7 @@ Mesmo padrao de `test_core_api.py`: SQLite em `tmp_path` e
 """
 
 import importlib
+import re
 import sys
 from datetime import datetime
 from decimal import Decimal
@@ -156,11 +157,8 @@ def test_export_pdf_com_link_de_comprovante_contendo_e_comercial(ambiente, monke
     gasto_db.comprovante_key = "comprovantes/user-a/1-abcdef.jpg"
     ambiente.session.commit()
 
-    monkeypatch.setattr(
-        storage_service,
-        "url_do_comprovante",
-        lambda key: "https://bucket.example/c?X-Amz-A=1&X-Amz-B=2",
-    )
+    url = "https://bucket.example/c?X-Amz-A=1&X-Amz-B=2"
+    monkeypatch.setattr(storage_service, "url_do_comprovante", lambda key: url)
 
     response = client.get(
         f"/ciclos/{ciclo['id']}/export",
@@ -169,6 +167,12 @@ def test_export_pdf_com_link_de_comprovante_contendo_e_comercial(ambiente, monke
 
     assert response.status_code == 200
     assert response.content.startswith(b"%PDF")
+
+    # A anotacao de link sai como `/URI (url)` numa string literal do PDF;
+    # a URL do teste nao tem `(`, `)` nem `\`, que seriam escapados.
+    uris = re.findall(rb"/URI \((.*?)\)", response.content)
+    assert uris, "o PDF nao tem nenhuma anotacao /URI"
+    assert url.encode() in uris
 
 
 def test_csv_protege_titulo_contra_formula_e_mantem_saldo_negativo(ambiente):
