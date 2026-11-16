@@ -11,6 +11,8 @@ podem repetir um dia e pular outro — e o app apaga localmente o dia que
 "sumiu" da lista completa.
 """
 
+from sqlalchemy import event
+
 from test_core_api import (  # noqa: F401  (`ambiente` e o fixture do core)
     USER_A,
     _ciclo_payload,
@@ -193,30 +195,40 @@ def test_dias_com_mesma_data_paginam_sem_repetir_nem_pular(ambiente):
     client = ambiente.como(USER_A)
     ciclo, _ = _viagem(client, "ciclo-pagina", datas=[])
 
-    dia_1 = client.post(
-        f"/ciclos/{ciclo['id']}/dias",
-        json=_dia_payload("mesma-data-1", DATAS[0]),
-    )
-    dia_2 = client.post(
-        f"/ciclos/{ciclo['id']}/dias",
-        json=_dia_payload("mesma-data-2", DATAS[0]),
-    )
-    assert dia_1.status_code == 200
-    assert dia_2.status_code == 200
-    ids = {dia_1.json()["id"], dia_2.json()["id"]}
+    ids = []
+    for i in range(3):
+        response = client.post(
+            f"/ciclos/{ciclo['id']}/dias",
+            json=_dia_payload(f"mesma-data-{i + 1}", DATAS[0]),
+        )
+        assert response.status_code == 200
+        ids.append(response.json()["id"])
 
-    pagina_1 = client.get(
-        f"/ciclos/{ciclo['id']}/dias", params={"skip": 0, "limit": 1}
-    ).json()
-    pagina_2 = client.get(
-        f"/ciclos/{ciclo['id']}/dias", params={"skip": 1, "limit": 1}
-    ).json()
-    pagina_3 = client.get(
-        f"/ciclos/{ciclo['id']}/dias", params={"skip": 2, "limit": 1}
-    ).json()
+    statements = []
 
-    assert len(pagina_1) == 1
-    assert len(pagina_2) == 1
-    assert pagina_1[0]["id"] != pagina_2[0]["id"]
-    assert {pagina_1[0]["id"], pagina_2[0]["id"]} == ids
-    assert pagina_3 == []
+    def _capturar(orm_execute_state):
+        statements.append(str(orm_execute_state.statement))
+
+    event.listen(ambiente.session, "do_orm_execute", _capturar)
+    try:
+        paginas = [
+            client.get(
+                f"/ciclos/{ciclo['id']}/dias", params={"skip": i, "limit": 1}
+            ).json()
+            for i in range(4)
+        ]
+    finally:
+        event.remove(ambiente.session, "do_orm_execute", _capturar)
+
+    assert paginas[3] == []
+    assert [pagina[0]["id"] for pagina in paginas[:3]] == ids
+
+    # Sem `id` no ORDER BY o SQLite devolve os dias em ordem de rowid e as
+    # paginas acima sairiam iguais: a assercao do SQL emitido e o que faz o
+    # teste falhar de verdade sem o desempate.
+    listagens = [
+        s for s in statements if "FROM dias" in s and "ORDER BY" in s
+    ]
+    assert listagens
+    for listagem in listagens:
+        assert "ORDER BY dias.data, dias.id" in listagem

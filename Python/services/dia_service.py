@@ -95,6 +95,11 @@ def sincronizar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], us
         )
         if gasto_total_removido:
             ciclo_repository.incrementar_gasto_total(db, ciclo_id, -gasto_total_removido)
+            # O UPDATE vai direto ao banco e nao toca o objeto em sessao; o
+            # refresh mais abaixo ja recarrega `gasto_total` hoje, mas expirar
+            # aqui mantem a garantia se o refresh mudar de escopo — a mesma
+            # defesa do `remover_dia`.
+            db.expire(ciclo, ["gasto_total"])
             logger.info(f"Decrementando gasto_total em {gasto_total_removido} pela remocao de {len(dias_para_remover)} dia(s)")
 
         dia_repository.remover_dias(db, dias_para_remover)
