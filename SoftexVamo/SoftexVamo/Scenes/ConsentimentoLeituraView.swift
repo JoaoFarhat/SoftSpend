@@ -38,6 +38,7 @@ struct ConsentimentoLeituraView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 24)
             .padding(.top, 72)
+            .larguraLegivel()
         }
         .scrollBounceBehavior(.basedOnSize)
         .safeAreaInset(edge: .bottom) {
@@ -50,6 +51,7 @@ struct ConsentimentoLeituraView: View {
             }
             .padding(.horizontal, Espaco.g + 2)
             .padding(.bottom, Espaco.p)
+            .larguraLegivel()
             .background(Tema.fundo)
         }
         .background(Tema.fundo.ignoresSafeArea())
