@@ -328,6 +328,23 @@ def test_csv_maioria_negativa_com_cifrao_e_milhar(client):
     ]
 
 
+def test_csv_empate_positivo_vira_compra(client):
+    # Empate 1 negativo x 1 positivo: fica como antes — positivo é compra.
+    csv_empate = (
+        "Data;Descrição;Valor\n"
+        "01/10/2026;Supermercado;100,00\n"
+        "02/10/2026;Estorno loja;-15,00\n"
+    )
+    resposta = _post(client, csv_empate.encode("utf-8"), "fatura.csv", "text/csv")
+
+    assert resposta.status_code == 200
+    compras = resposta.json()["compras"]
+    assert [(c["descricao"], c["valor"], c["tipo"]) for c in compras] == [
+        ("Supermercado", 100.0, "COMPRA"),
+        ("Estorno loja", 15.0, "ESTORNO"),
+    ]
+
+
 def test_csv_desconhecido_da_422(client):
     resposta = _post(
         client, b"foo,bar,baz\n1,2,3\n", "dados.csv", "text/csv"
