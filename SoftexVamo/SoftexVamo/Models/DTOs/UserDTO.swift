@@ -27,11 +27,25 @@ nonisolated struct RegisterRequest: Codable, Sendable {
     let username: String
     let email: String
     let senha: String
+
+    /// A sugestão de e-mail do teclado do iPhone costuma deixar um espaço no
+    /// fim do endereço; o app já manda o e-mail aparado (o servidor também apara).
+    init(nome: String, username: String, email: String, senha: String) {
+        self.nome = nome
+        self.username = username
+        self.email = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.senha = senha
+    }
 }
 
 nonisolated struct LoginRequest: Codable, Sendable {
     let email: String
     let senha: String
+
+    init(email: String, senha: String) {
+        self.email = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.senha = senha
+    }
 }
 
 nonisolated struct RefreshTokenRequest: Codable, Sendable {
