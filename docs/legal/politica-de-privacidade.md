@@ -1,13 +1,13 @@
 # Política de Privacidade do SoftSpend
 
-**Rascunho para revisão. Campos entre colchetes dependem de decisão do responsável.**
-Última atualização: [DATA]
+Última atualização: 15 de novembro de 2026
 
 ## 1. Quem é responsável pelos seus dados
 O SoftSpend é um aplicativo de controle de gastos por ciclo (viagens e períodos com orçamento diário). Quem trata os seus dados é:
 
-- **Responsável:** [NOME DO TITULAR], inscrito no CNPJ [CNPJ], com endereço em [ENDEREÇO].
-- **Contato para privacidade e direitos:** privacidade@softspend.com.br (a caixa será criada antes da publicação).
+- **Responsável:** PURPTECH INOVA SIMPLES (I.S.), inscrita no CNPJ 69.904.033/0001-62, com sede em São Paulo/SP.
+- **Encarregado pelo tratamento de dados (DPO):** João Victor Farhat Calejon.
+- **Contato para privacidade e direitos:** privacidade@softspend.com.br.
 
 ## 2. Quais dados coletamos e para que
 | Dado | Para que serve | De onde vem |
@@ -32,8 +32,8 @@ Não vendemos nem compartilhamos seus dados com outras empresas.
 
 ## 4. Por quanto tempo guardamos os dados
 - **Gastos, ciclos e comprovantes:** enquanto a sua conta existir. Ao apagar um gasto, o comprovante vai junto.
-- **Conta excluída:** apagamos seus dados em até [30] dias, exceto os que a lei nos obriga a guardar.
-- **Registros fiscais de compra:** [5] anos, porque a lei fiscal exige.
+- **Conta excluída:** apagamos seus dados em até 30 dias, exceto os que a lei nos obriga a guardar.
+- **Registros fiscais de compra:** 5 anos, porque a lei fiscal exige.
 
 ## 5. Como você pode exercer seus direitos
 Você pode, a qualquer momento:

@@ -4,7 +4,7 @@ Estado: 15/11/2026. Textos prontos para colar no App Store Connect. Só document
 
 Passo a passo até o envio: `docs/roteiro-envio.md`.
 
-Pendente do usuário antes de enviar: a conta Apple paga, as URLs publicadas (tarefa do site) e os dados da empresa em `docs/legal/`.
+Pendente do usuário antes de enviar: a conta Apple paga, as URLs publicadas no ar, as caixas `suporte@` e `privacidade@` criadas e, nas notas da revisão (§8), o e-mail e a senha da conta de demonstração (a senha nunca vai para o repositório).
 
 ## 1. Dados do app
 
@@ -23,7 +23,7 @@ Pendente do usuário antes de enviar: a conta Apple paga, as URLs publicadas (ta
 | URL de suporte | https://softspend.com.br/suporte | obrigatória |
 | URL de privacidade | https://softspend.com.br/privacidade | obrigatória |
 | URL de marketing | (vazio) | opcional |
-| Direitos autorais | `© 2026 [NOME DO TITULAR]` | preencher com o nome da empresa |
+| Direitos autorais | `© 2026 PURPTECH INOVA SIMPLES (I.S.)` | titular da conta Apple (CNPJ 69.904.033/0001-62) |
 
 Se o nome estiver ocupado na loja, o plano B é "SoftSpend: diária de viagem".
 
@@ -173,7 +173,7 @@ Colar no campo "Notas":
 > • Funciona offline: gastos lançados sem rede sobem quando a conexão volta.
 > • O app não faz pagamentos, não move dinheiro e não acessa o banco do usuário.
 > • Termos e Privacidade: links no cadastro e em Perfil > Sobre. (Conferir que a tarefa dos links no app já entrou na versão enviada.)
-> Contato: [E-MAIL DE SUPORTE]
+> Contato: suporte@softspend.com.br
 
 Antes de enviar (checar, nesta ordem):
 1. A conta de demonstração existe na **produção** (`Python/scripts/criar_conta_demo.py`) e o id está em `ACESSO_LIBERADO_USUARIOS`.

@@ -1,7 +1,8 @@
 # Termos de Uso do SoftSpend
 
-**Rascunho para revisão. Campos entre colchetes dependem de decisão do responsável.**
-Última atualização: [DATA]
+Última atualização: 15 de novembro de 2026
+
+**Responsável pelo app:** PURPTECH INOVA SIMPLES (I.S.), CNPJ 69.904.033/0001-62, São Paulo/SP.
 
 ## 1. Aceitação
 Ao criar uma conta e usar o SoftSpend, você aceita estes termos. Se não concordar, não use o app.
@@ -11,7 +12,7 @@ O SoftSpend é um aplicativo para controlar gastos por ciclo: você organiza seu
 
 ## 3. Sua conta
 - Você é responsável pelas informações que coloca e pela segurança da sua senha.
-- Você deve ter pelo menos [18] anos, ou ser maior de idade para responder pelos atos da conta.
+- Você deve ter pelo menos 18 anos, ou ser maior de idade para responder pelos atos da conta.
 - Não compartilhe sua conta com outra pessoa.
 
 ## 4. Assinatura
@@ -30,7 +31,7 @@ Não use o app para:
 Quando você pede a leitura de um comprovante ou de uma fatura, o arquivo é enviado ao serviço de IA do Google. Você pode recusar, e nesse caso lança os dados à mão. A leitura pode errar: confira sempre os valores antes de salvar.
 
 ## 7. Limitação de responsabilidade
-O SoftSpend ajuda você a organizar seus gastos, mas não substitui a conferência com seu banco ou seu cartão. Não nos responsabilizamos por decisões financeiras tomadas com base nos dados do app, nem por perdas causadas pela indisponibilidade do serviço. [REVISAR: limite de valor, se houver.]
+O SoftSpend ajuda você a organizar seus gastos, mas não substitui a conferência com seu banco ou seu cartão. Não nos responsabilizamos por decisões financeiras tomadas com base nos dados do app, nem por perdas causadas pela indisponibilidade do serviço.
 
 ## 8. Encerramento
 Você pode excluir sua conta a qualquer momento, no app. Podemos suspender contas que violem estes termos.
@@ -39,13 +40,13 @@ Você pode excluir sua conta a qualquer momento, no app. Podemos suspender conta
 Podemos alterar estes termos. Avisaremos no app antes de a mudança valer. Continuar usando o app depois disso significa que você aceita a nova versão.
 
 ## 10. Lei aplicável e foro
-Estes termos são regidos pela lei brasileira. Fica eleito o foro da comarca de [CIDADE/UF], para resolver conflitos, sem prejuízo do direito do consumidor de escolher o seu foro.
+Estes termos são regidos pela lei brasileira. Fica eleito o foro da comarca de São Paulo/SP, para resolver conflitos, sem prejuízo do direito do consumidor de escolher o seu foro.
 
 ## 11. Contato
-[E-MAIL DE SUPORTE], ou suporte@softspend.com.br quando a caixa for criada.
+suporte@softspend.com.br.
 
 ---
 
 ### Notas para revisão (não publicar)
 - O item 7 limita a responsabilidade. Em relação de consumo, o Código de Defesa do Consumidor pode afastar limites que tirem direitos básicos. Por isso o texto evita limite de valor. Confirme se quer manter o trecho.
-- O item 10 precisa do foro do responsável.
+- Foro definido em 15/11/2026: comarca de São Paulo/SP (sede da empresa).
