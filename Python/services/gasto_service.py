@@ -45,7 +45,9 @@ def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: str):
             ciclo_repository.incrementar_gasto_total(db, dia.ciclo_id, gasto.valor)
     except IntegrityError:
         existente = (
-            gasto_repository.find_by_client_id(db, gasto.client_id, dia_id)
+            gasto_repository.find_by_client_id(
+                db, gasto.client_id, dia_id, para_atualizar=True
+            )
             if gasto.client_id
             else None
         )

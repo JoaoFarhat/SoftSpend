@@ -40,7 +40,9 @@ def criar_ciclo(db: Session, ciclo: CicloRequest, user_id: str):
             return ciclo_repository.criar_ciclo(db, novo_ciclo)
     except IntegrityError:
         existente = (
-            ciclo_repository.find_by_client_id(db, ciclo.client_id, user_id)
+            ciclo_repository.find_by_client_id(
+                db, ciclo.client_id, user_id, para_atualizar=True
+            )
             if ciclo.client_id
             else None
         )

@@ -44,7 +44,9 @@ def criar_dia(db: Session, ciclo_id: int, dia: DiaRequest, user_id: str):
             return dia_repository.criar_dia(db, novo_dia)
     except IntegrityError:
         existente = (
-            dia_repository.find_by_client_id(db, dia.client_id, ciclo_id)
+            dia_repository.find_by_client_id(
+                db, dia.client_id, ciclo_id, para_atualizar=True
+            )
             if dia.client_id
             else None
         )

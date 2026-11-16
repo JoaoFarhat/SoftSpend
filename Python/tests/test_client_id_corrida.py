@@ -25,7 +25,7 @@ def _corrida(monkeypatch, repositorio):
     chamadas = []
 
     def falso(*args, **kwargs):
-        chamadas.append(args)
+        chamadas.append(kwargs.get("para_atualizar", False))
         if len(chamadas) == 1:
             return None
         return original(*args, **kwargs)
@@ -69,7 +69,9 @@ def test_reenvio_ciclo_durante_gravacao_devolve_o_existente(
 
     assert resposta.status_code in (200, 201)
     assert resposta.json()["id"] == ciclo["id"]
-    assert len(chamadas) == 2  # a busca que perdeu a corrida + a releitura
+    # A busca que perdeu a corrida (comum) + a releitura com bloqueio, que no
+    # MySQL (REPEATABLE READ) é a única que vê a linha do outro pedido.
+    assert chamadas == [False, True]
     _confere_valores(ambiente, client, ciclo)
 
 
@@ -88,7 +90,7 @@ def test_reenvio_dia_durante_gravacao_devolve_o_existente(
 
     assert resposta.status_code in (200, 201)
     assert resposta.json()["id"] == dia["id"]
-    assert len(chamadas) == 2
+    assert chamadas == [False, True]
     _confere_valores(ambiente, client, ciclo)
 
 
@@ -114,7 +116,7 @@ def test_reenvio_gasto_durante_gravacao_nao_conta_o_dinheiro_duas_vezes(
 
     assert resposta.status_code in (200, 201)
     assert resposta.json()["id"] == gasto["id"]
-    assert len(chamadas) == 2
+    assert chamadas == [False, True]
     # Mesmo caminho do reenvio comum: concilia o gasto existente.
     assert conciliados == [gasto["id"]]
     _confere_valores(ambiente, client, ciclo)

@@ -882,7 +882,9 @@ Para evitar criação duplicada quando o app não recebe a resposta do `POST` (e
 - Reenvio enquanto o primeiro pedido ainda grava (a busca não acha nada e o
   insert esbarra no unique): `criar_ciclo`, `criar_dia` e `criar_gasto` fazem o
   insert — e, no gasto, os incrementos de `saldo`/`gasto_total` — dentro de
-  `db.begin_nested()`; no `IntegrityError` relêem pelo `find_by_client_id` e
+  `db.begin_nested()`; no `IntegrityError` relêem pelo `find_by_client_id`
+  com `para_atualizar=True` (`SELECT ... FOR UPDATE`: no MySQL, em
+  `REPEATABLE READ`, a leitura comum não vê a linha do outro pedido) e
   devolvem o existente (o gasto passa pelo `conciliar_gasto`), ou relançam se
   não acharem. Os incrementos nunca ficam fora do savepoint (contaria o
   dinheiro duas vezes). Testes em `tests/test_client_id_corrida.py`.

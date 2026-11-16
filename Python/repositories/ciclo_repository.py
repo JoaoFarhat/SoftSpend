@@ -55,12 +55,16 @@ def get_user_ciclo_by_id(db: Session, ciclo_id: int, user_id: str):
     )
 
 
-def find_by_client_id(db: Session, client_id: str, user_id: str):
-    return (
-        db.query(models.Ciclo)
-        .filter(models.Ciclo.client_id == client_id, models.Ciclo.id_usuario == user_id)
-        .first()
+def find_by_client_id(db: Session, client_id: str, user_id: str, para_atualizar: bool = False):
+    # `para_atualizar` faz leitura com bloqueio (SELECT ... FOR UPDATE), que no
+    # MySQL (REPEATABLE READ) enxerga a linha que outro pedido acabou de
+    # gravar; a leitura comum devolveria a foto tirada no início da transação.
+    query = db.query(models.Ciclo).filter(
+        models.Ciclo.client_id == client_id, models.Ciclo.id_usuario == user_id
     )
+    if para_atualizar:
+        query = query.with_for_update()
+    return query.first()
 
 
 def incrementar_gasto_total(db: Session, ciclo_id: int, valor: Decimal):
