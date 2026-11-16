@@ -218,8 +218,9 @@ struct LimitePorMinutoTests {
         esperarAguardandoLimite(cicloFinal, desde: agora)
         #expect(cicloFinal.tentativas == 0)
         // O dia pendente nem foi tentado: segue `.pending`, sem hora marcada.
+        let diaNovoId = diaNovo.id
         let diaFinal = try #require(try ctx2.fetch(FetchDescriptor<DiaSoftex>(
-            predicate: #Predicate { $0.id == diaNovo.id })).first)
+            predicate: #Predicate { $0.id == diaNovoId })).first)
         #expect(diaFinal.syncStatus == .pending)
         #expect(diaFinal.proximaTentativaEm == nil)
         #expect(diaFinal.tentativas == 0)
