@@ -651,6 +651,7 @@ actor SyncActor: ModelActor {
             if porCiclo[cicloId] == nil { ordemCiclos.append(cicloId) }
             porCiclo[cicloId, default: []].append(dia)
         }
+        logger.info("syncDias: \(dias.count, privacy: .public) dia(s) pendente(s) em \(ordemCiclos.count, privacy: .public) viagem(ns)")
 
         for cicloId in ordemCiclos {
             if limiteAtingidoNesteSync { break }

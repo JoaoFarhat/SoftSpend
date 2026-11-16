@@ -74,7 +74,8 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
     // MARK: Leitura do estado (para os testes)
 
     var chamadas: [Endpoint] { lock.withLock { _chamadas } }
-    /// O que cada chamada a `postDiasLote` recebeu, na ordem das chamadas.
+    /// O que cada chamada a `postDiasLote` recebeu, na ordem das chamadas
+    /// (inclusive as que falham ou ficam seguradas no `Portao`).
     var lotesDias: [[DiaLoteRequest]] { lock.withLock { _lotesDias } }
     var ciclos: [CicloRemoto] { lock.withLock { _ciclos } }
     var dias: [DiaRemoto] { lock.withLock { _dias } }
@@ -222,9 +223,9 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
     // MARK: SyncAPI — dias
 
     func postDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex] {
+        lock.withLock { _lotesDias.append(dias) }
         try await entrar(.postDiasLote)
         let resposta: [DiaSoftex] = try lock.withLock {
-            _lotesDias.append(dias)
             guard let ciclo = _ciclos.first(where: { $0.id == cicloId }) else { throw Self.naoEncontrado }
             return dias.map { respostaDia(criarOuAcharDia($0, ciclo: ciclo)) }
                 .filter { !omitidosDaResposta.contains($0.clientId) }

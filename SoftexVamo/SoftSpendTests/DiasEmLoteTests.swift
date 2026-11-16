@@ -178,6 +178,37 @@ struct DiasEmLoteTests {
         #expect(falho.backendId == nil)
     }
 
+    /// Erro que não é 404 nem 429 (500, timeout, 422 por um dia ruim): o
+    /// pedido falhou para o lote inteiro — os dias do lote entram juntos no
+    /// backoff (comportamento decidido: isolar o dia ruim pediria um pedido
+    /// por dia de novo justamente quando o servidor já está mal). Com o erro
+    /// resolvido, um sync forçado sobe o lote de uma vez.
+    @Test func erroGenericoFalhaOLoteInteiro() async throws {
+        try criarViagemOffline(dias: 5)
+        api.falhar(.postDiasLote)  // erroSimulado: serverError 500
+
+        #expect(await sync() == 5)
+        #expect(api.chamadas == [.postCiclo, .postDiasLote])
+        #expect(api.dias.isEmpty)
+
+        for dia in try diasLocais() {
+            #expect(dia.syncStatus == .failed)
+            #expect(dia.tentativas == 1)
+            #expect(dia.syncError != nil)
+            #expect(dia.proximaTentativaEm != nil)
+            #expect(dia.backendId == nil)
+        }
+
+        api.pararDeFalhar(.postDiasLote)
+        #expect(await SyncActor(modelContainer: container, api: api).sync(
+            agora: .now, userId: userId, forcar: true) == 0)
+        #expect(api.lotesDias.map(\.count) == [5, 5])
+        for dia in try diasLocais() {
+            #expect(dia.syncStatus == .synced)
+            #expect(dia.backendId != nil)
+        }
+    }
+
     /// 404 no lote (a viagem foi apagada em outro aparelho): os dias do lote
     /// são descartados com os gastos, que saem do `gasto_total`.
     @Test func erro404DescartaOsDiasDoLote() async throws {
