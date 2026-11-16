@@ -343,7 +343,8 @@ final class RascunhoGasto {
 
     private func aplicar(titulo: String?, valor: Decimal?, categoria: Categoria?) {
         if let titulo, !titulo.isEmpty, !camposEditados.contains(.titulo) {
-            self.titulo = titulo
+            // O servidor não corta o título lido pela IA: entra já no limite.
+            self.titulo = LimiteTexto.titulo(titulo)
             leuComprovante = true
         }
         if let valor, valor > 0, !camposEditados.contains(.valor) {
