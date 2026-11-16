@@ -144,10 +144,49 @@ def test_export_pdf_pela_rota_com_titulo_contendo_menor_que(ambiente):
     assert response.content.startswith(b"%PDF")
 
 
+def test_export_pdf_com_link_de_comprovante_contendo_e_comercial(ambiente, monkeypatch):
+    """URL pre-assinada do S3 tem `&`; sem escape o Paragraph quebrava (500)."""
+    import models
+    from services import storage_service
+
+    client = ambiente.como(USER_A)
+    ciclo, _, gasto = _ciclo_dia_gasto(client, "Viagem", "Bar")
+
+    gasto_db = ambiente.session.get(models.Gasto, gasto["id"])
+    gasto_db.comprovante_key = "comprovantes/user-a/1-abcdef.jpg"
+    ambiente.session.commit()
+
+    monkeypatch.setattr(
+        storage_service,
+        "url_do_comprovante",
+        lambda key: "https://bucket.example/c?X-Amz-A=1&X-Amz-B=2",
+    )
+
+    response = client.get(
+        f"/ciclos/{ciclo['id']}/export",
+        params={"formato": "pdf", "comprovantes": "link"},
+    )
+
+    assert response.status_code == 200
+    assert response.content.startswith(b"%PDF")
+
+
 def test_csv_protege_titulo_contra_formula_e_mantem_saldo_negativo(ambiente):
     client = ambiente.como(USER_A)
-    # 110 de gasto numa diaria de 100 deixa o saldo em -10.00.
-    ciclo, _, _ = _ciclo_dia_gasto(client, "Viagem", "=1+1", "110.00")
+    # 113 de gasto numa diaria de 100 deixa o saldo em -13.00.
+    ciclo, dia, _ = _ciclo_dia_gasto(client, "Viagem", "=1+1", "110.00")
+    # Outros inicios que o Excel le como formula ao abrir o CSV.
+    for indice, titulo in enumerate(("+1+1", "@SUM(1)", "\tcmd"), start=2):
+        criado = client.post(
+            f"/dias/{dia['id']}/gastos",
+            json={
+                "client_id": f"gasto-{indice}",
+                "titulo": titulo,
+                "valor": "1.00",
+                "categoria": "OUTROS",
+            },
+        )
+        assert criado.status_code == 200, criado.text
 
     response = client.get(
         f"/ciclos/{ciclo['id']}/export", params={"formato": "csv"}
@@ -155,7 +194,8 @@ def test_csv_protege_titulo_contra_formula_e_mantem_saldo_negativo(ambiente):
 
     assert response.status_code == 200
     texto = response.content.decode("utf-8-sig")
-    assert "'=1+1" in texto
-    assert "-10.00" in texto
+    for titulo in ("=1+1", "+1+1", "@SUM(1)", "\tcmd"):
+        assert f"'{titulo}" in texto
+    assert "-13.00" in texto
     # O titulo do ciclo e os valores numericos nao ganham o prefixo.
     assert "Ciclo;Viagem" in texto

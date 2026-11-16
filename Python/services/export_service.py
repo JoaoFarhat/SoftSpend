@@ -11,7 +11,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from decimal import Decimal
-from xml.sax.saxutils import escape
+from xml.sax.saxutils import escape, quoteattr
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
@@ -163,7 +163,7 @@ def _celula_comprovante(gasto: models.Gasto, thumbs: dict[str, bytes], modo: str
         if not url:
             return Paragraph("-", estilos["celula"])
         rotulo = "Ver PDF" if storage_service.e_pdf(gasto.comprovante_key) else "Ver imagem"
-        return Paragraph(f'<link href="{url}" color="blue">{rotulo}</link>', estilos["celula"])
+        return Paragraph(f'<link href={quoteattr(url)} color="blue">{rotulo}</link>', estilos["celula"])
 
     dados = thumbs.get(gasto.comprovante_key)
     if not dados:
@@ -186,7 +186,7 @@ def _celula_comprovante(gasto: models.Gasto, thumbs: dict[str, bytes], modo: str
 
     # A imagem garante o valor probatorio; o link e conveniencia e expira junto
     # com a URL pre-assinada.
-    return [imagem, Paragraph(f'<link href="{url}" color="blue">original</link>', estilos["mini"])]
+    return [imagem, Paragraph(f'<link href={quoteattr(url)} color="blue">original</link>', estilos["mini"])]
 
 
 def _estilos():
