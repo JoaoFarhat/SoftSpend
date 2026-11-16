@@ -71,7 +71,24 @@ def criar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], user_id:
         novos_dias.append(models.Dia(client_id=dia.client_id, data=dia.data, saldo=ciclo.diaria, ciclo_id=ciclo_id))
 
     if novos_dias:
-        return dia_repository.criar_dias_lote(db, novos_dias)
+        try:
+            # Reenvio concorrente esbarra no unique `uix_dia_client_id_ciclo`:
+            # desfaz só o savepoint e devolve, na ordem pedida, os dias que o
+            # primeiro pedido gravou (mesmo molde do `criar_dia`).
+            with db.begin_nested():
+                return dia_repository.criar_dias_lote(db, novos_dias)
+        except IntegrityError:
+            lidos = [
+                dia_repository.find_by_client_id(
+                    db, dia.client_id, ciclo_id, para_atualizar=True
+                )
+                if dia.client_id
+                else None
+                for dia in dias
+            ]
+            if any(lido is None for lido in lidos):
+                raise
+            return lidos
 
     return ciclo.dias
 
