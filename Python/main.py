@@ -96,7 +96,7 @@ def _healthcheck_local(request: Request) -> bool:
 
 
 @app.get("/health", include_in_schema=False)
-@limiter.limit("30/minute", exempt_when=_healthcheck_local)
+@limiter.limit("30/minute", key_func=get_real_ip, exempt_when=_healthcheck_local)
 def health_check(request: Request, db: Session = Depends(get_db)):
     try:
         db.execute(text("SELECT 1"))
