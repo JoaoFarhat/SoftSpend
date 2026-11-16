@@ -407,8 +407,7 @@ actor SyncActor: ModelActor {
                 atual.gasto_total = cicloEditado.gasto_total
             }
         } catch {
-            if isLimitePorMinuto(error) {
-                limiteAtingidoNesteSync = true
+            if atingiuLimitePorMinuto(error) {
                 gravarCiclo(cicloUUID, etapa: "sincronizarEdicaoCiclo-limite") { atual, _ in
                     marcarAguardandoLimite(atual, agora: agora)
                 }
@@ -604,8 +603,7 @@ actor SyncActor: ModelActor {
                     logger.info("syncCiclos: POST recusado, assinatura necessária")
                     continue
                 }
-                if isLimitePorMinuto(error) {
-                    limiteAtingidoNesteSync = true
+                if atingiuLimitePorMinuto(error) {
                     gravarCiclo(cicloUUID, etapa: "syncCiclos-limite") { atual, _ in
                         marcarAguardandoLimite(atual, agora: agora)
                     }
@@ -670,8 +668,7 @@ actor SyncActor: ModelActor {
                     }
                 }
             } catch {
-                if isLimitePorMinuto(error) {
-                    limiteAtingidoNesteSync = true
+                if atingiuLimitePorMinuto(error) {
                     gravarDia(diaUUID, etapa: "syncDias-limite") { atual in
                         marcarAguardandoLimite(atual, agora: agora)
                     }
@@ -758,8 +755,7 @@ actor SyncActor: ModelActor {
                     concluirGasto(atual, mudou: FotoGasto(atual) != foto)
                 }
             } catch {
-                if isLimitePorMinuto(error) {
-                    limiteAtingidoNesteSync = true
+                if atingiuLimitePorMinuto(error) {
                     gravarGasto(gastoUUID, etapa: "syncGastos-limite") { atual in
                         marcarAguardandoLimite(atual, agora: agora)
                     }
@@ -811,8 +807,7 @@ actor SyncActor: ModelActor {
             do {
                 try await sincronizarComprovante(gasto, backendId: backendId, foto: foto)
             } catch {
-                if isLimitePorMinuto(error) {
-                    limiteAtingidoNesteSync = true
+                if atingiuLimitePorMinuto(error) {
                     gravarGasto(gastoUUID, etapa: "syncComprovantes-limite") { atual in
                         marcarAguardandoLimite(atual, agora: agora)
                     }
@@ -909,6 +904,18 @@ actor SyncActor: ModelActor {
         return false
     }
 
+    /// `error` é o 429 do limite por minuto? Freia este `sync` — liga
+    /// `limiteAtingidoNesteSync` (as etapas param de chamar a API e as
+    /// passadas restantes não rodam) — e devolve `true` para o chamador
+    /// agendar o item com `marcarAguardandoLimite` e interromper o laço
+    /// (`break`/`continue`/`return`). Outros erros devolvem `false` sem
+    /// mudar nada.
+    private func atingiuLimitePorMinuto(_ error: Error) -> Bool {
+        guard isLimitePorMinuto(error) else { return false }
+        limiteAtingidoNesteSync = true
+        return true
+    }
+
     // MARK: - Apagar item sem backendId (T7)
 
     /// T7 de `docs/revisao-sync-offline-ios.md` (R7): resultado de procurar no
@@ -931,10 +938,7 @@ actor SyncActor: ModelActor {
     /// que já existe devolveria o item; o 403 garante que ele não está lá.
     private func classificar(_ error: Error) -> Recuperacao {
         if isNotFoundError(error) || isAssinaturaNecessaria(error) { return .naoExiste }
-        if isLimitePorMinuto(error) {
-            limiteAtingidoNesteSync = true
-            return .aguardandoLimite
-        }
+        if atingiuLimitePorMinuto(error) { return .aguardandoLimite }
         return .falhou(error.localizedDescription)
     }
 
@@ -1034,8 +1038,7 @@ actor SyncActor: ModelActor {
             do {
                 try await api.deleteGasto(gastoId: backendId)
             } catch {
-                if isLimitePorMinuto(error) {
-                    limiteAtingidoNesteSync = true
+                if atingiuLimitePorMinuto(error) {
                     marcarAguardandoLimite(gasto, agora: agora)
                     continue
                 }
@@ -1084,8 +1087,7 @@ actor SyncActor: ModelActor {
             do {
                 try await api.deleteDia(diaId: backendId)
             } catch {
-                if isLimitePorMinuto(error) {
-                    limiteAtingidoNesteSync = true
+                if atingiuLimitePorMinuto(error) {
                     marcarAguardandoLimite(dia, agora: agora)
                     continue
                 }
@@ -1133,8 +1135,7 @@ actor SyncActor: ModelActor {
             do {
                 try await api.deleteCiclo(cicloId: backendId)
             } catch {
-                if isLimitePorMinuto(error) {
-                    limiteAtingidoNesteSync = true
+                if atingiuLimitePorMinuto(error) {
                     marcarAguardandoLimite(ciclo, agora: agora)
                     continue
                 }
