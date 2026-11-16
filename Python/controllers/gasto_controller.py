@@ -101,6 +101,7 @@ async def _ler_arquivo(arquivo: UploadFile, permitir_pdf: bool = False) -> tuple
 async def extrair_gasto_de_imagem(request: Request, imagem: UploadFile = File(...), user_id: str = Depends(get_current_user_id)):
     conteudo, mime = await _ler_arquivo(imagem, permitir_pdf=True)
 
+    dia_contado = None
     try:
         # O OCR so aceita imagem, entao um recibo em PDF entra pela primeira
         # pagina rasterizada.
@@ -111,14 +112,15 @@ async def extrair_gasto_de_imagem(request: Request, imagem: UploadFile = File(..
 
         # Teto diário por usuário: depois da validação e da rasterização
         # (arquivo recusado não gasta cota), antes da chamada ao Gemini.
-        limite_ia.contar(user_id, limite_ia.COMPROVANTE)
+        dia_contado = limite_ia.contar(user_id, limite_ia.COMPROVANTE)
         dados = await run_in_threadpool(ocr_service.extrair_gasto_da_imagem, conteudo)
         return dados
     except HTTPException:
         raise
     except ocr_service.SemRespostaGemini as e:
-        # A chamada não teve resposta do Gemini: a vaga do dia volta.
-        limite_ia.devolver(user_id, limite_ia.COMPROVANTE)
+        # A chamada não teve resposta do Gemini: a vaga volta no mesmo dia
+        # do `contar` (a virada UTC pode ter passado durante a chamada).
+        limite_ia.devolver(user_id, limite_ia.COMPROVANTE, hoje=dia_contado)
         raise HTTPException(status_code=e.status_code, detail=e.detail)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

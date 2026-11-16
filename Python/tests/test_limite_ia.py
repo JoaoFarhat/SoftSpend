@@ -12,9 +12,11 @@ import sys
 from datetime import date
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
+from google.genai import errors as genai_errors
 from PIL import Image
 from reportlab.lib.pdfencrypt import StandardEncryption
 from reportlab.pdfgen import canvas
@@ -83,11 +85,13 @@ _CSV = "Data;Descrição;Valor\n01/10/2026;Supermercado;100,00\n"
 class _ClienteGeminiFalso:
     """Imita `_client.models.generate_content` do google-genai.
 
-    `falhas` derruba as primeiras chamadas (Gemini fora do ar)."""
+    `falhas` derruba as primeiras chamadas com `erro` (padrão: erro de
+    conexão, como se o Gemini estivesse fora do ar)."""
 
-    def __init__(self, resposta, falhas: int = 0):
+    def __init__(self, resposta, falhas: int = 0, erro: Exception | None = None):
         self.resposta = resposta
         self.falhas = falhas
+        self.erro = erro or httpx.ConnectError("Gemini fora do ar")
         self.chamadas = []
         self.models = self
 
@@ -95,7 +99,7 @@ class _ClienteGeminiFalso:
         self.chamadas.append(kwargs)
         if self.falhas:
             self.falhas -= 1
-            raise RuntimeError("Gemini fora do ar")
+            raise self.erro
         return self.resposta
 
 
@@ -362,30 +366,128 @@ def test_arquivo_recusado_na_validacao_nao_conta(client, gemini, monkeypatch):
 # -------------------------------------------------------- devolução da cota
 
 
-def test_falha_do_gemini_devolve_a_vaga_comprovante(client, gemini, monkeypatch):
+# Erros do Gemini por tipo: conexão, timeout e 5xx não chegaram a resposta
+# (a vaga do dia volta); 4xx já é resposta — ex.: arquivo recusado — e
+# gasta a cota, senão dava para contornar o teto diário à vontade.
+_ERROS_GEMINI = [
+    pytest.param(httpx.ConnectError("fora do ar"), True, id="conexao"),
+    pytest.param(httpx.ReadTimeout("estourou"), True, id="timeout"),
+    pytest.param(
+        genai_errors.ServerError(503, {"error": {"message": "sobrecarga"}}),
+        True,
+        id="5xx",
+    ),
+    pytest.param(
+        genai_errors.ClientError(400, {"error": {"message": "pdf recusado"}}),
+        False,
+        id="4xx",
+    ),
+]
+
+
+@pytest.mark.parametrize("erro, devolve_vaga", _ERROS_GEMINI)
+def test_erro_do_gemini_e_a_vaga_comprovante(
+    client, gemini, monkeypatch, erro, devolve_vaga
+):
     monkeypatch.setenv("IA_LIMITE_DIARIO_COMPROVANTE", "1")
+    falso = _ClienteGeminiFalso(_resposta_ocr(), falhas=1, erro=erro)
+    monkeypatch.setattr(ocr_service, "_client", falso)
+    monkeypatch.setattr(
+        ocr_service, "extrair_gasto_da_imagem", _extrair_gasto_real
+    )
+
+    # Sempre 500, como antes; só muda se a vaga do dia volta.
+    assert _comprovante(client, _png_valido()).status_code == 500
+    if devolve_vaga:
+        assert _comprovante(client, _png_valido()).status_code == 200
+        assert _comprovante(client, _png_valido()).status_code == 429
+        assert len(falso.chamadas) == 2
+    else:
+        assert _comprovante(client, _png_valido()).status_code == 429
+        assert len(falso.chamadas) == 1
+
+
+@pytest.mark.parametrize("erro, devolve_vaga", _ERROS_GEMINI)
+def test_erro_do_gemini_e_a_vaga_fatura(
+    client, gemini, monkeypatch, erro, devolve_vaga
+):
+    monkeypatch.setenv("IA_LIMITE_DIARIO_FATURA", "1")
+    falso = _ClienteGeminiFalso(_resposta_gemini(), falhas=1, erro=erro)
+    monkeypatch.setattr(fatura_ia_service, "_client", falso)
+
+    assert _fatura_pdf(client).status_code == 500
+    if devolve_vaga:
+        assert _fatura_pdf(client).status_code == 200
+        assert _fatura_pdf(client).status_code == 429
+        assert len(falso.chamadas) == 2
+    else:
+        assert _fatura_pdf(client).status_code == 429
+        assert len(falso.chamadas) == 1
+
+
+def test_devolucao_na_virada_utc_cai_no_dia_do_contar_comprovante(
+    client, gemini, monkeypatch
+):
+    """Virou meia-noite UTC entre o `contar` e o `devolver`: a vaga volta
+    na chave do dia em que foi contada."""
+    monkeypatch.setenv("IA_LIMITE_DIARIO_COMPROVANTE", "1")
+    hoje, amanha = date(2026, 11, 15), date(2026, 11, 16)
     falso = _ClienteGeminiFalso(_resposta_ocr(), falhas=1)
     monkeypatch.setattr(ocr_service, "_client", falso)
     monkeypatch.setattr(
         ocr_service, "extrair_gasto_da_imagem", _extrair_gasto_real
     )
 
-    # Gemini fora do ar: 500 como antes, mas a vaga volta.
+    # O `contar` vê o dia 15; se o `devolver` perguntasse a data de novo
+    # veria o 16 e a devolução cairia no dia errado.
+    datas = iter([hoje, amanha])
+    monkeypatch.setattr(limite_ia, "_hoje", lambda: next(datas))
     assert _comprovante(client, _png_valido()).status_code == 500
+
+    # A vaga voltou no dia 15: ainda cabe 1 leitura nele.
+    monkeypatch.setattr(limite_ia, "_hoje", lambda: hoje)
     assert _comprovante(client, _png_valido()).status_code == 200
     assert _comprovante(client, _png_valido()).status_code == 429
-    assert len(falso.chamadas) == 2
 
 
-def test_falha_do_gemini_devolve_a_vaga_fatura(client, gemini, monkeypatch):
+def test_devolucao_na_virada_utc_cai_no_dia_do_contar_fatura(
+    client, gemini, monkeypatch
+):
     monkeypatch.setenv("IA_LIMITE_DIARIO_FATURA", "1")
+    hoje, amanha = date(2026, 11, 15), date(2026, 11, 16)
     falso = _ClienteGeminiFalso(_resposta_gemini(), falhas=1)
     monkeypatch.setattr(fatura_ia_service, "_client", falso)
 
+    datas = iter([hoje, amanha])
+    monkeypatch.setattr(limite_ia, "_hoje", lambda: next(datas))
     assert _fatura_pdf(client).status_code == 500
+
+    monkeypatch.setattr(limite_ia, "_hoje", lambda: hoje)
     assert _fatura_pdf(client).status_code == 200
     assert _fatura_pdf(client).status_code == 429
+
+
+def test_rejeicao_de_thinking_refaz_sem_thinking(client, gemini, monkeypatch):
+    """Modelo que recusa o 'thinking' mínimo: refaz sem a config na mesma
+    chamada, atende e a resposta gasta a cota normalmente."""
+    monkeypatch.setenv("IA_LIMITE_DIARIO_COMPROVANTE", "1")
+    monkeypatch.setattr(ocr_service, "_suporta_thinking_minimo", True)
+    rejeicao = genai_errors.ClientError(
+        400, {"error": {"message": "thinking not supported"}}
+    )
+    falso = _ClienteGeminiFalso(_resposta_ocr(), falhas=1, erro=rejeicao)
+    monkeypatch.setattr(ocr_service, "_client", falso)
+    monkeypatch.setattr(
+        ocr_service, "extrair_gasto_da_imagem", _extrair_gasto_real
+    )
+
+    assert _comprovante(client, _png_valido()).status_code == 200
     assert len(falso.chamadas) == 2
+    assert ocr_service._suporta_thinking_minimo is False
+    assert falso.chamadas[1]["config"].thinking_config is None
+
+    # A resposta veio: a cota ficou gasta.
+    assert _comprovante(client, _png_valido()).status_code == 429
 
 
 def test_sem_chave_nao_conta(client, gemini, monkeypatch):

@@ -42,17 +42,21 @@ def _hoje() -> date:
     return datetime.now(timezone.utc).date()
 
 
-def contar(user_id: str, tipo: str, hoje: date | None = None) -> None:
+def contar(user_id: str, tipo: str, hoje: date | None = None) -> date:
     """Conta uma leitura de IA do usuário; estourado, responde 429.
 
     O pedido recusado não gasta cota: o contador só sobe quando ainda há
     vaga. `hoje` existe para o teste injetar outra data UTC.
+
+    Devolve a data UTC usada na chave: quem chama `devolver` repassa essa
+    data para a devolução cair no mesmo dia mesmo se a virada UTC
+    acontecer no meio da chamada.
     """
+    dia = hoje or _hoje()
     teto = _teto(tipo)
     if teto <= 0:
-        return
+        return dia
 
-    dia = hoje or _hoje()
     chave = (user_id, tipo, dia)
     with _lock:
         # Descarta os dias anteriores para a memória não crescer num
@@ -64,6 +68,7 @@ def contar(user_id: str, tipo: str, hoje: date | None = None) -> None:
         if usado >= teto:
             raise HTTPException(status_code=429, detail="daily_ai_limit")
         _contadores[chave] = usado + 1
+    return dia
 
 
 def devolver(user_id: str, tipo: str, hoje: date | None = None) -> None:
