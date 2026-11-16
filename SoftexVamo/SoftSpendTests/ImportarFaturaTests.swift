@@ -455,6 +455,40 @@ struct ImportarFaturaTests {
         #expect(mensagem.localizedCaseInsensitiveContains("indisponível"))
     }
 
+    /// 429 do teto diário (`daily_ai_limit`, limite_ia.py): o aviso diz
+    /// que só volta amanhã — não "espere um minuto".
+    @Test func erro429DiarioViraLimiteDeHoje() async throws {
+        let (ciclo, _) = try viagem()
+        let vm = viewModel(para: ciclo)
+        api.erroAoLer = APIError.serverError(
+            message: "daily_ai_limit", requestId: "-", statusCode: 429
+        )
+        #expect(vm.preparar(dados: Data([1]), tipo: .pdf, nome: "fatura.pdf"))
+        await vm.ler()
+        guard case .erro(let mensagem) = vm.etapa else {
+            Issue.record("Esperava .erro no 429 diário")
+            return
+        }
+        #expect(mensagem == "Você chegou ao limite de leituras de fatura por hoje. Amanhã volta; OFX e CSV não passam pela IA e funcionam agora.")
+    }
+
+    /// Outro 429 (por minuto, slowapi) mantém o aviso de espera curta.
+    @Test func erro429PorMinutoViraEspereUmMinuto() async throws {
+        let (ciclo, _) = try viagem()
+        let vm = viewModel(para: ciclo)
+        api.erroAoLer = APIError.serverError(
+            message: "Rate limit exceeded: 20 per 1 minute",
+            requestId: "-", statusCode: 429
+        )
+        #expect(vm.preparar(dados: Data([1]), tipo: .pdf, nome: "fatura.pdf"))
+        await vm.ler()
+        guard case .erro(let mensagem) = vm.etapa else {
+            Issue.record("Esperava .erro no 429 por minuto")
+            return
+        }
+        #expect(mensagem == "Muitas leituras seguidas. Espere um minuto e tente de novo.")
+    }
+
     @Test func somaConfereFalsoAvvisa() async throws {
         let (ciclo, _) = try viagem()
         let vm = viewModel(para: ciclo)

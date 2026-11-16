@@ -138,6 +138,12 @@ enum LeituraComprovante {
     static let avisoAssinatura =
         "A leitura por IA faz parte da assinatura. Os campos seguem livres para preencher à mão."
 
+    /// Aviso do 429 `daily_ai_limit` (teto diário de leituras por IA,
+    /// `limite_ia.py`): só libera amanhã — diferente do 429 por minuto,
+    /// que pede só uma espera curta.
+    static let avisoLimiteDiarioIA =
+        "Você chegou ao limite de leituras por IA de hoje. Preencha os campos à mão."
+
     /// Leitura no aparelho e depois no servidor (Gemini), aplicando cada
     /// resultado em `aplicar`. Não faz nada sem `Consentimento.leituraAutomatica == true`.
     ///
@@ -180,6 +186,11 @@ enum LeituraComprovante {
             guard !Task.isCancelled else { return nil }
             // 403 `subscription_required` direto: planos, não "Erro no servidor".
             if acesso.tratarErroDeAcesso(error) { return avisoAssinatura }
+            // 429 do teto diário: a leitura do aparelho (se houve) já foi
+            // aplicada acima e fica nos campos.
+            if (error as? APIError)?.limiteDiarioIA == true {
+                return avisoLimiteDiarioIA
+            }
             logger.error("Erro ao extrair gasto: \(error.localizedDescription, privacy: .public)")
             return teveLeituraLocal
                 ? "Leitura feita no aparelho. Confira os valores antes de salvar."

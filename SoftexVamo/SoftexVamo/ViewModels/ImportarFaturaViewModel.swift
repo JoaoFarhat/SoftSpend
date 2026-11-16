@@ -556,6 +556,11 @@ final class ImportarFaturaViewModel: ObservableObject {
     }
 
     private func mensagemDeErro(_ error: Error) -> String {
+        // 429 do teto diário (`daily_ai_limit`, limite_ia.py): só libera
+        // amanhã — aviso próprio, antes do 429 por minuto do slowapi.
+        if (error as? APIError)?.limiteDiarioIA == true {
+            return "Você chegou ao limite de leituras de fatura por hoje. Amanhã volta; OFX e CSV não passam pela IA e funcionam agora."
+        }
         if case APIError.serverError(let message, _, let code) = error {
             if code == 503 {
                 return "Leitura por IA indisponível no momento. Tente de novo mais tarde — OFX e CSV não passam pela IA e podem funcionar."

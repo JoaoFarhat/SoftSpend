@@ -47,4 +47,20 @@ nonisolated enum APIError: LocalizedError, Sendable {
         }
         return false
     }
+
+    /// Código que o servidor manda no corpo do 429 quando acaba a cota
+    /// diária de leituras por IA (`{"error": "daily_ai_limit"}`,
+    /// `services/limite_ia.py`). O outro 429 (por minuto, slowapi) chega
+    /// com a mensagem do rate limit e segue no aviso de "espere um minuto".
+    static let codigoLimiteDiarioIA = "daily_ai_limit"
+
+    /// O servidor recusou porque a cota diária de leituras por IA do usuário
+    /// acabou: `429` com o código `daily_ai_limit` — só libera no dia
+    /// seguinte. Outro 429 (o por minuto) não conta.
+    var limiteDiarioIA: Bool {
+        if case .serverError(let message, _, let statusCode) = self {
+            return statusCode == 429 && message == Self.codigoLimiteDiarioIA
+        }
+        return false
+    }
 }
