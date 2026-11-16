@@ -346,7 +346,12 @@ def _data_csv(valor: str | None) -> date | None:
 
 def ler_csv(texto: str) -> FaturaBruta:
     """Lê um CSV simples (colunas reconhecíveis de data, descrição e valor,
-    separador ',' ou ';', decimal com vírgula ou ponto). Nada vai à IA."""
+    separador ',' ou ';', decimal com vírgula ou ponto). Nada vai à IA.
+
+    O sinal do valor varia por banco: como no OFX, manda o sinal da maioria
+    das linhas — mais negativos que positivos, negativo é compra; empate ou
+    maioria positiva, positivo é compra.
+    """
     achado = _colunas_csv(texto)
     if not achado:
         raise ErroFatura(422, "Formato não reconhecido; envie o PDF")
@@ -367,6 +372,7 @@ def ler_csv(texto: str) -> FaturaBruta:
     fatura = FaturaBruta()
     linhas = [l for l in texto.splitlines() if l.strip()]
     ignoradas = 0
+    lancamentos: list[tuple[date | None, str, Decimal]] = []
     leitor = csv.reader(linhas[1:], delimiter=separador)
     for campos in leitor:
         if len(campos) <= max(i_data, i_desc, i_valor):
@@ -379,11 +385,19 @@ def ler_csv(texto: str) -> FaturaBruta:
         if valor is None:
             ignoradas += 1
             continue
-        tipo = "COMPRA" if valor >= 0 else "ESTORNO"
+        lancamentos.append((_data_csv(campos[i_data]), descricao[:200], valor))
+
+    negativos = sum(1 for _, _, v in lancamentos if v < 0)
+    positivos = len(lancamentos) - negativos
+    sinal_compra = -1 if negativos > positivos else 1
+
+    for data, descricao, valor in lancamentos:
+        sinal = -1 if valor < 0 else 1
+        tipo = "COMPRA" if sinal == sinal_compra else "ESTORNO"
         fatura.compras.append(
             CompraBruta(
-                data=_data_csv(campos[i_data]),
-                descricao=descricao[:200],
+                data=data,
+                descricao=descricao,
                 valor=abs(valor),
                 tipo=tipo,
             )

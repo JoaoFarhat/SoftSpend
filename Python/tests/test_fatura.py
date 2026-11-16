@@ -285,12 +285,47 @@ def test_csv_conhecido(client):
 
     assert resposta.status_code == 200
     corpo = resposta.json()
-    assert [(c["descricao"], c["valor"]) for c in corpo["compras"]] == [
-        ("Supermercado", 100.0),
-        ("Uber", 32.40),
+    assert [(c["descricao"], c["valor"], c["tipo"]) for c in corpo["compras"]] == [
+        ("Supermercado", 100.0, "COMPRA"),
+        ("Uber", 32.40, "COMPRA"),
     ]
     assert corpo["soma_confere"] is None
     assert corpo["total_fatura"] is None
+
+
+def test_csv_maioria_negativa_vira_compra(client):
+    # Como no OFX: a maioria negativa vira compra e o positivo, estorno.
+    csv_negativo = (
+        "Data;Descrição;Valor\n"
+        "01/10/2026;Supermercado;-100,00\n"
+        "02/10/2026;Uber;-32,40\n"
+        "03/10/2026;Estorno loja;15,00\n"
+    )
+    resposta = _post(client, csv_negativo.encode("utf-8"), "fatura.csv", "text/csv")
+
+    assert resposta.status_code == 200
+    compras = resposta.json()["compras"]
+    assert [(c["descricao"], c["valor"], c["tipo"]) for c in compras] == [
+        ("Supermercado", 100.0, "COMPRA"),
+        ("Uber", 32.40, "COMPRA"),
+        ("Estorno loja", 15.0, "ESTORNO"),
+    ]
+
+
+def test_csv_maioria_negativa_com_cifrao_e_milhar(client):
+    csv_negativo = (
+        "Data;Descrição;Valor\n"
+        "01/10/2026;Compra cara;R$ -1.234,56\n"
+        "02/10/2026;Outra compra;-10,00\n"
+    )
+    resposta = _post(client, csv_negativo.encode("utf-8"), "fatura.csv", "text/csv")
+
+    assert resposta.status_code == 200
+    compras = resposta.json()["compras"]
+    assert [(c["descricao"], c["valor"], c["tipo"]) for c in compras] == [
+        ("Compra cara", 1234.56, "COMPRA"),
+        ("Outra compra", 10.0, "COMPRA"),
+    ]
 
 
 def test_csv_desconhecido_da_422(client):
