@@ -5,12 +5,15 @@ import models
 def find_dia(db: Session, dia_id: int):
     return db.query(models.Dia).filter(models.Dia.id == dia_id).first()
 
-def find_by_client_id(db: Session, client_id: str, ciclo_id: int):
-    return (
-        db.query(models.Dia)
-        .filter(models.Dia.client_id == client_id, models.Dia.ciclo_id == ciclo_id)
-        .first()
+def find_by_client_id(db: Session, client_id: str, ciclo_id: int, para_atualizar: bool = False):
+    # `para_atualizar`: leitura com bloqueio, que vê a linha recém-gravada por
+    # outro pedido mesmo em REPEATABLE READ (ver `ciclo_repository`).
+    query = db.query(models.Dia).filter(
+        models.Dia.client_id == client_id, models.Dia.ciclo_id == ciclo_id
     )
+    if para_atualizar:
+        query = query.with_for_update()
+    return query.first()
 
 def listar_dias_por_ciclo(db: Session, ciclo_id: int, skip: int, limit: int):
     return (

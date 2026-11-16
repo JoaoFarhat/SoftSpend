@@ -1,4 +1,5 @@
 import models
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from dtos.ciclo import CicloResponse, CicloRequest
 from repositories import ciclo_repository
@@ -31,7 +32,23 @@ def criar_ciclo(db: Session, ciclo: CicloRequest, user_id: str):
 
     novo_ciclo = montar_ciclo(ciclo)
     novo_ciclo.id_usuario = user_id
-    return ciclo_repository.criar_ciclo(db, novo_ciclo)
+    try:
+        # Reenvio enquanto o primeiro pedido ainda grava esbarra no unique
+        # `uix_ciclo_client_id_usuario`: desfaz só o savepoint e devolve o
+        # ciclo do primeiro pedido, em vez de 500 (que custaria o backoff no app).
+        with db.begin_nested():
+            return ciclo_repository.criar_ciclo(db, novo_ciclo)
+    except IntegrityError:
+        existente = (
+            ciclo_repository.find_by_client_id(
+                db, ciclo.client_id, user_id, para_atualizar=True
+            )
+            if ciclo.client_id
+            else None
+        )
+        if existente is None:
+            raise
+        return existente
 
 
 def get_all_ciclos(db: Session, user_id: str, skip: int = 0, limit: int = 100):

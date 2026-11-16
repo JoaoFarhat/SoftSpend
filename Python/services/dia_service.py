@@ -1,4 +1,5 @@
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List
 import logging
@@ -36,7 +37,22 @@ def criar_dia(db: Session, ciclo_id: int, dia: DiaRequest, user_id: str):
         ciclo_id=ciclo_id
     )
 
-    return dia_repository.criar_dia(db, novo_dia)
+    try:
+        # Reenvio concorrente esbarra no unique `uix_dia_client_id_ciclo`:
+        # desfaz só o savepoint e devolve o dia do primeiro pedido.
+        with db.begin_nested():
+            return dia_repository.criar_dia(db, novo_dia)
+    except IntegrityError:
+        existente = (
+            dia_repository.find_by_client_id(
+                db, dia.client_id, ciclo_id, para_atualizar=True
+            )
+            if dia.client_id
+            else None
+        )
+        if existente is None:
+            raise
+        return existente
 
 
 def criar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], user_id: str):
