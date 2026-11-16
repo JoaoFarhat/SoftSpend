@@ -3,7 +3,8 @@
 A criacao ja e coberta em `test_core_api.py`; aqui entram as operacoes que
 mexem nos incrementos depois: editar o valor de um gasto, mover um gasto
 para outro dia (da mesma viagem ou de outra), apagar gasto, apagar dia com
-gastos e encurtar a viagem pelo `PUT /ciclos/{id}/dias/lote`.
+gastos e encurtar a viagem pelo `DELETE /dias/{id}` (o caminho que o app usa:
+o `PUT /ciclos/{id}/dias/lote`, que apagava os dias fora da lista, saiu do ar).
 
 O ultimo teste cobre o desempate da paginacao de `GET /ciclos/{id}/dias`: o
 POST de dia aceita duas datas iguais e, sem `id` no `ORDER BY`, `skip`/`limit`
@@ -38,6 +39,9 @@ def _viagem(client, client_id, valor_total="300.00", diaria="100.00", datas=DATA
     )
     assert response.status_code == 200
     ciclo = response.json()
+
+    if not datas:
+        return ciclo, []
 
     response = client.post(
         f"/ciclos/{ciclo['id']}/dias/lote",
@@ -173,15 +177,8 @@ def test_encurtar_viagem_remove_do_total_gasto_do_dia_cortado(ambiente):
     _gasto(client, dias[0]["id"], "gasto-fica", valor="10.00")
     _gasto(client, dias[2]["id"], "gasto-sai", valor="30.00")
 
-    response = client.put(
-        f"/ciclos/{ciclo['id']}/dias/lote",
-        json=[
-            _dia_payload("ciclo-encurtar-d1", DATAS[0]),
-            _dia_payload("ciclo-encurtar-d2", DATAS[1]),
-        ],
-    )
-    assert response.status_code == 200
-    assert len(response.json()) == 2
+    response = client.delete(f"/dias/{dias[2]['id']}")
+    assert response.status_code == 204
 
     corpo = client.get(f"/ciclos/{ciclo['id']}").json()
     assert corpo["gasto_total"] == 10.00

@@ -17,7 +17,7 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
 
     nonisolated enum Endpoint: Hashable, Sendable {
         case postCiclo, putCiclo, deleteCiclo
-        case postDiasLote, syncDiasLote, deleteDia
+        case postDiasLote, deleteDia
         case postGasto, putGasto, deleteGasto
         case uploadComprovante, deleteComprovante
     }
@@ -215,17 +215,6 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
             return dias.map { respostaDia(criarOuAcharDia($0, ciclo: ciclo)) }
         }
         return try entregar(resposta, .postDiasLote)
-    }
-
-    func syncDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex] {
-        try await entrar(.syncDiasLote)
-        return try lock.withLock {
-            guard let ciclo = _ciclos.first(where: { $0.id == cicloId }) else { throw Self.naoEncontrado }
-            let mantidos = dias.map { criarOuAcharDia($0, ciclo: ciclo) }
-            let idsMantidos = Set(mantidos.map(\.id))
-            removerDias(Set(_dias.filter { $0.cicloId == cicloId && !idsMantidos.contains($0.id) }.map(\.id)))
-            return mantidos.map { respostaDia($0) }
-        }
     }
 
     func deleteDia(diaId: Int) async throws {
