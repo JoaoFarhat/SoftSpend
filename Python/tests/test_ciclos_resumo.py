@@ -11,6 +11,7 @@ montar a resposta.
 import importlib
 import sys
 from contextlib import contextmanager
+from decimal import Decimal
 
 import pytest
 from fastapi.testclient import TestClient
@@ -173,6 +174,52 @@ def _criar_ciclo_com_dias_e_gastos(
     return ciclo
 
 
+def _criar_match(ambiente, ciclo_id: int):
+    """Cria 1 match de Open Finance num gasto da viagem.
+
+    Sem match, o último nível do `selectinload` do resumo
+    (`ExpenseTransactionMatch.transacao`) nunca carrega nada e o teste de
+    contagem de SELECTs passaria mesmo se aquele `selectinload` sumisse —
+    cada match faria um lazy load da transação na serialização.
+    """
+    import models
+
+    session = Session(ambiente.engine)
+    try:
+        gasto = (
+            session.query(models.Gasto)
+            .join(models.Dia)
+            .filter(models.Dia.ciclo_id == ciclo_id)
+            .first()
+        )
+        cartao = models.CreditCardAccount(
+            user_id=USER_A, account_id=_proximo("acc"), name="Cartão"
+        )
+        session.add(cartao)
+        session.flush()
+        transacao = models.CreditCardTransaction(
+            cartao_id=cartao.id,
+            user_id=USER_A,
+            transaction_id=_proximo("tx"),
+            description="COMPRA",
+            amount=Decimal("10.00"),
+        )
+        session.add(transacao)
+        session.flush()
+        session.add(
+            models.ExpenseTransactionMatch(
+                gasto_id=gasto.id,
+                cartao_transacao_id=transacao.id,
+                status="REVIEW",
+                score=70,
+                method="RULES",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+
 def test_resumo_ordem_estrutura_paginacao_e_isolamento(ambiente):
     # `como` troca o override do app inteiro, então a viagem do usuário B é
     # criada antes de virar A — cliente criado antes não guarda o usuário.
@@ -208,15 +255,33 @@ def test_resumo_ordem_estrutura_paginacao_e_isolamento(ambiente):
 def test_resumo_numero_de_consultas_nao_cresce_com_o_tamanho(ambiente):
     client = ambiente.como(USER_A)
 
-    _criar_ciclo_com_dias_e_gastos(client, "Viagem 1")
+    _criar_match(ambiente, _criar_ciclo_com_dias_e_gastos(client, "Viagem 1")["id"])
     with ambiente.medir_selects() as selects_1:
-        assert client.get("/usuario/ciclos/resumo").status_code == 200
+        resposta_1 = client.get("/usuario/ciclos/resumo")
+        assert resposta_1.status_code == 200
 
-    _criar_ciclo_com_dias_e_gastos(client, "Viagem 2")
-    _criar_ciclo_com_dias_e_gastos(client, "Viagem 3")
+    for titulo in ("Viagem 2", "Viagem 3"):
+        ciclo = _criar_ciclo_com_dias_e_gastos(client, titulo)
+        _criar_match(ambiente, ciclo["id"])
     with ambiente.medir_selects() as selects_3:
-        assert client.get("/usuario/ciclos/resumo").status_code == 200
+        resposta_3 = client.get("/usuario/ciclos/resumo")
+        assert resposta_3.status_code == 200
 
-    # 1 viagem ou 3 viagens de 3 dias e 2 gastos cada: o resumo tem que sair
-    # com o mesmo número de SELECTs (um por nível carregado), sem N+1.
+    # Os matches saem preenchidos na resposta (a serialização lê a transação
+    # do match, o nível mais fundo do selectinload).
+    for resposta in (resposta_1, resposta_3):
+        matches = [
+            gasto["open_finance_match"]
+            for ciclo in resposta.json()
+            for dia in ciclo["dias"]
+            for gasto in dia["gastos"]
+            if gasto["open_finance_match"] is not None
+        ]
+        assert matches and all(
+            match["provider_transaction_id"] is not None for match in matches
+        )
+
+    # 1 viagem ou 3 viagens de 3 dias e 2 gastos cada, com 1 match por
+    # viagem: o resumo tem que sair com o mesmo número de SELECTs (um por
+    # nível carregado), sem N+1.
     assert len(selects_3) == len(selects_1)
