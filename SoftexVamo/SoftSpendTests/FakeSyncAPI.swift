@@ -56,6 +56,7 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
 
     private let lock = NSLock()
     private var _chamadas: [Endpoint] = []
+    private var _lotesDias: [[DiaLoteRequest]] = []
     private var _ciclos: [CicloRemoto] = []
     private var _dias: [DiaRemoto] = []
     private var _gastos: [GastoRemoto] = []
@@ -63,6 +64,7 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
     private var portoes: [Endpoint: Portao] = [:]
     private var falhas: [Endpoint: any Error] = [:]
     private var respostasPerdidas: Set<Endpoint> = []
+    private var omitidosDaResposta: Set<String> = []
 
     /// Erro devolvido quando a resposta "se perde" (ver `perderResposta`).
     static let respostaPerdida = URLError(.timedOut)
@@ -72,6 +74,8 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
     // MARK: Leitura do estado (para os testes)
 
     var chamadas: [Endpoint] { lock.withLock { _chamadas } }
+    /// O que cada chamada a `postDiasLote` recebeu, na ordem das chamadas.
+    var lotesDias: [[DiaLoteRequest]] { lock.withLock { _lotesDias } }
     var ciclos: [CicloRemoto] { lock.withLock { _ciclos } }
     var dias: [DiaRemoto] { lock.withLock { _dias } }
     var gastos: [GastoRemoto] { lock.withLock { _gastos } }
@@ -104,7 +108,16 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
     /// Esquece as chamadas registradas, para o teste conferir só o que o sync
     /// sob avaliação fez (e não o que a montagem do cenário enviou).
     func limparChamadas() {
-        lock.withLock { _chamadas.removeAll() }
+        lock.withLock {
+            _chamadas.removeAll()
+            _lotesDias.removeAll()
+        }
+    }
+
+    /// O `postDiasLote` processa o dia com este `client_id` (ele fica no
+    /// servidor) mas não o devolve na resposta — uma resposta incompleta.
+    func omitirDaResposta(_ clientId: String) {
+        lock.withLock { _ = omitidosDaResposta.insert(clientId) }
     }
 
     // MARK: Infra
@@ -211,8 +224,10 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
     func postDiasLote(cicloId: Int, dias: [DiaLoteRequest]) async throws -> [DiaSoftex] {
         try await entrar(.postDiasLote)
         let resposta: [DiaSoftex] = try lock.withLock {
+            _lotesDias.append(dias)
             guard let ciclo = _ciclos.first(where: { $0.id == cicloId }) else { throw Self.naoEncontrado }
             return dias.map { respostaDia(criarOuAcharDia($0, ciclo: ciclo)) }
+                .filter { !omitidosDaResposta.contains($0.clientId) }
         }
         return try entregar(resposta, .postDiasLote)
     }
