@@ -15,6 +15,8 @@ def get_all_ciclos(db: Session, user_id: str, skip: int = 0, limit: int = 100):
         .options(
             selectinload(models.Ciclo.dias)
             .selectinload(models.Dia.gastos)
+            .selectinload(models.Gasto.open_finance_match)
+            .selectinload(models.ExpenseTransactionMatch.transacao)
         )
         .filter(models.Ciclo.id_usuario == user_id)
         .offset(skip)
@@ -25,6 +27,12 @@ def get_all_ciclos(db: Session, user_id: str, skip: int = 0, limit: int = 100):
 def get_ciclos_resumo(db: Session, user_id: str, skip: int = 0, limit: int = 1000):
     return (
         db.query(models.Ciclo)
+        .options(
+            selectinload(models.Ciclo.dias)
+            .selectinload(models.Dia.gastos)
+            .selectinload(models.Gasto.open_finance_match)
+            .selectinload(models.ExpenseTransactionMatch.transacao)
+        )
         .filter(models.Ciclo.id_usuario == user_id)
         .order_by(models.Ciclo.id.desc())
         .offset(skip)
@@ -49,6 +57,8 @@ def get_user_ciclo_by_id(db: Session, ciclo_id: int, user_id: str):
         .options(
             selectinload(models.Ciclo.dias)
             .selectinload(models.Dia.gastos)
+            .selectinload(models.Gasto.open_finance_match)
+            .selectinload(models.ExpenseTransactionMatch.transacao)
         )
         .filter(models.Ciclo.id == ciclo_id, models.Ciclo.id_usuario == user_id)
         .first()
