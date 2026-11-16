@@ -11,6 +11,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from decimal import Decimal
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.enums import TA_RIGHT
@@ -76,6 +77,17 @@ def _data(valor: datetime | None) -> str:
     return valor.strftime("%d/%m/%Y") if valor else "-"
 
 
+# Primeiro caractere que o Excel interpreta como formula ao abrir o CSV.
+_INICIOS_FORMULA = ("=", "+", "-", "@", "\t", "\r", "\n")
+
+
+def _celula_csv(valor: str | None) -> str:
+    """Prefixa `'` em texto que o Excel leria como formula ao abrir o CSV."""
+    if not valor:
+        return "-"
+    return "'" + valor if valor.startswith(_INICIOS_FORMULA) else valor
+
+
 def _dias_ordenados(ciclo: models.Ciclo) -> list[models.Dia]:
     return sorted(ciclo.dias or [], key=lambda d: (d.data is None, d.data))
 
@@ -101,8 +113,8 @@ def gerar_csv(ciclo: models.Ciclo) -> bytes:
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";", quoting=csv.QUOTE_MINIMAL)
 
-    writer.writerow(["Ciclo", ciclo.titulo or "-"])
-    writer.writerow(["Periodo", ciclo.periodo or "-"])
+    writer.writerow(["Ciclo", _celula_csv(ciclo.titulo)])
+    writer.writerow(["Periodo", _celula_csv(ciclo.periodo)])
     writer.writerow(["Valor total", f"{Decimal(ciclo.valor_total or 0):.2f}"])
     writer.writerow(["Gasto total", f"{Decimal(ciclo.gasto_total or 0):.2f}"])
     writer.writerow(["Diaria", f"{Decimal(ciclo.diaria or 0):.2f}"])
@@ -115,7 +127,7 @@ def gerar_csv(ciclo: models.Ciclo) -> bytes:
             writer.writerow([
                 _data(dia.data),
                 saldo,
-                gasto.titulo or "-",
+                _celula_csv(gasto.titulo),
                 _rotulo_categoria(gasto.categoria),
                 f"{Decimal(gasto.valor or 0):.2f}",
                 "sim" if gasto.comprovante_key else "nao",
@@ -265,7 +277,7 @@ def gerar_pdf(ciclo: models.Ciclo, comprovantes: str = COMPROVANTE_IMAGEM) -> by
             linhas.append([
                 Paragraph(str(indice), estilos["celula"]),
                 Paragraph(_data(dia.data), estilos["celula"]),
-                Paragraph(gasto.titulo or "-", estilos["celulaNegrito"]),
+                Paragraph(escape(gasto.titulo or "-"), estilos["celulaNegrito"]),
                 Paragraph(rotulo, estilos["celula"]),
                 Paragraph(_moeda(gasto.valor), estilos["valor"]),
                 _celula_comprovante(gasto, thumbs, comprovantes, estilos),
@@ -281,7 +293,7 @@ def gerar_pdf(ciclo: models.Ciclo, comprovantes: str = COMPROVANTE_IMAGEM) -> by
     elementos = [
         Paragraph("RELATÓRIO DE GASTOS", estilos["titulo"]),
         Paragraph(
-            f"{ciclo.titulo or '-'} &nbsp;·&nbsp; {ciclo.periodo or '-'} &nbsp;·&nbsp; "
+            f"{escape(ciclo.titulo or '-')} &nbsp;·&nbsp; {escape(ciclo.periodo or '-')} &nbsp;·&nbsp; "
             f"gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}",
             estilos["subtitulo"],
         ),
