@@ -102,7 +102,7 @@ def test_delete_da_viagem_remove_os_comprovantes_em_cascata(ambiente):
     assert _keys_removidas(remover) == {KEY_1, KEY_2}
 
 
-def test_dia_cortado_no_lote_perde_o_comprovante_e_o_dia_que_fica_nao(ambiente):
+def test_delete_do_dia_nao_toca_no_comprovante_do_dia_que_fica(ambiente):
     client = ambiente.como(USER_A)
     ciclo = _criar_ciclo(client)
     dia_1 = _novo_dia(client, ciclo["id"], "dia-1", "2026-11-01T00:00:00Z")
@@ -113,12 +113,8 @@ def test_dia_cortado_no_lote_perde_o_comprovante_e_o_dia_que_fica_nao(ambiente):
     _definir_comprovante(ambiente.session, gasto_2["id"], KEY_2)
 
     with patch(REMOVER) as remover:
-        # A viagem encurta para um dia: o PUT sincroniza e apaga o dia_2.
-        response = client.put(
-            f"/ciclos/{ciclo['id']}/dias/lote",
-            json=[_dia_payload("dia-1", "2026-11-01T00:00:00Z")],
-        )
-        assert response.status_code == 200
+        # A viagem encurta para um dia: o DELETE /dias/{id} apaga o dia_2.
+        assert client.delete(f"/dias/{dia_2['id']}").status_code == 204
         ambiente.session.commit()
 
     remover.assert_called_once_with(KEY_2)

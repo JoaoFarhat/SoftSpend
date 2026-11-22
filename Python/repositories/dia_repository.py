@@ -48,14 +48,5 @@ def incrementar_saldo(db: Session, dia_id: int, valor: Decimal):
         synchronize_session="fetch",
     )
 
-def atualizar_dia(db: Session, dia: models.Dia):
-    db.flush()
-    db.refresh(dia)
-    return dia
-
 def remover_dia(db: Session, dia: models.Dia):
     db.delete(dia)
-
-def remover_dias(db: Session, dias: list[models.Dia]):
-    for dia in dias:
-        db.delete(dia)

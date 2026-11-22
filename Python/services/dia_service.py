@@ -2,12 +2,9 @@ from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List
-import logging
 import models
 from dtos.dia import DiaRequest
 from repositories import dia_repository, ciclo_repository
-
-logger = logging.getLogger(__name__)
 
 
 def listar_dias_por_ciclo(db: Session, ciclo_id: int, user_id: str, skip: int, limit: int):
@@ -90,63 +87,6 @@ def criar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], user_id:
                 raise
             return lidos
 
-    return ciclo.dias
-
-
-def atualizar_dia(db: Session, dia_id: int, dia_request: DiaRequest, user_id: str):
-    dia = dia_repository.find_dia(db, dia_id)
-
-    if not dia:
-        raise HTTPException(status_code=404, detail="Dia não encontrado")
-
-    if dia.ciclo.id_usuario != user_id:
-        raise HTTPException(status_code=404, detail="Dia não encontrado")
-
-    dia.data = dia_request.data
-
-    return dia_repository.atualizar_dia(db, dia)
-
-
-def sincronizar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], user_id: str):
-    ciclo = ciclo_repository.get_user_ciclo_by_id(db, ciclo_id, user_id)
-
-    if not ciclo:
-        raise HTTPException(status_code=404, detail="Ciclo não encontrado")
-
-    novas_datas = {dia.data.date() for dia in dias}
-    dias_existentes = list(ciclo.dias)
-    datas_existentes = {dia_existente.data.date(): dia_existente for dia_existente in dias_existentes}
-
-    dias_para_remover = [
-        dia_existente for dia_existente in dias_existentes
-        if dia_existente.data.date() not in novas_datas
-    ]
-
-    if dias_para_remover:
-        gasto_total_removido = sum(
-            gasto.valor for dia_existente in dias_para_remover for gasto in dia_existente.gastos
-        )
-        if gasto_total_removido:
-            ciclo_repository.incrementar_gasto_total(db, ciclo_id, -gasto_total_removido)
-            # O UPDATE vai direto ao banco e nao toca o objeto em sessao; o
-            # refresh mais abaixo ja recarrega `gasto_total` hoje, mas expirar
-            # aqui mantem a garantia se o refresh mudar de escopo — a mesma
-            # defesa do `remover_dia`.
-            db.expire(ciclo, ["gasto_total"])
-            logger.info(f"Decrementando gasto_total em {gasto_total_removido} pela remocao de {len(dias_para_remover)} dia(s)")
-
-        dia_repository.remover_dias(db, dias_para_remover)
-
-    novos_dias = [
-        models.Dia(data=dia.data, saldo=ciclo.diaria, ciclo_id=ciclo_id, client_id=dia.client_id)
-        for dia in dias
-        if dia.data.date() not in datas_existentes
-    ]
-
-    if novos_dias:
-        dia_repository.criar_dias_lote(db, novos_dias)
-
-    db.refresh(ciclo)
     return ciclo.dias
 
 
