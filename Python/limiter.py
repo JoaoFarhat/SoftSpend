@@ -1,3 +1,20 @@
+"""Rate limiting (slowapi).
+
+A chave padrao da cota e o usuario: `chave_limite` devolve `user:<id>`
+quando o `Authorization: Bearer` e um access token valido (assinatura e
+validade conferidas por `auth_service.decodificar_access_token`, sem
+consultar o banco); sem token ou com token invalido/expirado, cai no IP
+real de `get_real_ip`.
+
+Motivo: no celular varias pessoas saem pelo mesmo IP (CGNAT da operadora)
+e dividiam a cota por IP; e o envio do app depois de dias sem internet
+estoura tetos pensados para uso interativo.
+
+Seguem contados por IP (`key_func=get_real_ip` no decorator), por serem a
+porta de entrada sem login: `/auth/register`, `/auth/login`,
+`/auth/refresh`, `/auth/logout`, `/health` e `/api/webhooks/apple`.
+"""
+
 import ipaddress
 import os
 
@@ -42,4 +59,20 @@ def get_real_ip(request: Request) -> str:
             return candidate
     return candidates[0] if candidates else remote_address
 
-limiter = Limiter(key_func=get_real_ip)
+
+def chave_limite(request: Request) -> str:
+    """`user:<id>` com Bearer valido; sem token ou invalido, o IP real."""
+    authorization = request.headers.get("Authorization", "")
+    if authorization.startswith("Bearer "):
+        # O mesmo modulo que `dependencies.get_current_user` usa para validar:
+        # `from services import auth_service` aqui pode achar outra copia se o
+        # modulo foi reimportado em teste.
+        from dependencies import auth_service
+
+        dados = auth_service.decodificar_access_token(authorization[7:])
+        if dados:
+            return f"user:{dados[0]}"
+    return get_real_ip(request)
+
+
+limiter = Limiter(key_func=chave_limite)

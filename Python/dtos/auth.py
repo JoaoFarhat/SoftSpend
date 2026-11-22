@@ -1,11 +1,22 @@
 from pydantic import BaseModel, EmailStr, field_validator, Field
 
 
+def _aparar_espacos(v):
+    # O teclado do iPhone sugere o e-mail com um espaco no fim; tab e quebra
+    # de linha nem passam pelo EmailStr (422 em vez de cair na busca).
+    return v.strip() if isinstance(v, str) else v
+
+
 class RegisterRequest(BaseModel):
     nome: str = Field(..., min_length=1, max_length=100)
     username: str = Field(..., min_length=3, max_length=50)
     email: EmailStr = Field(..., max_length=255)
     senha: str
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def email_sem_espacos(cls, v):
+        return _aparar_espacos(v)
 
     @field_validator("senha")
     @classmethod
@@ -28,6 +39,11 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     senha: str
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def email_sem_espacos(cls, v):
+        return _aparar_espacos(v)
 
 
 class RefreshRequest(BaseModel):

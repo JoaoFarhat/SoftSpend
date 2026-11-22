@@ -176,11 +176,14 @@ def test_export_pdf_com_link_de_comprovante_contendo_e_comercial(ambiente, monke
 
 
 def test_csv_protege_titulo_contra_formula_e_mantem_saldo_negativo(ambiente):
+    import models
+    from enums.categoria_enum import Categoria
+
     client = ambiente.como(USER_A)
     # 113 de gasto numa diaria de 100 deixa o saldo em -13.00.
     ciclo, dia, _ = _ciclo_dia_gasto(client, "Viagem", "=1+1", "110.00")
     # Outros inicios que o Excel le como formula ao abrir o CSV.
-    for indice, titulo in enumerate(("+1+1", "@SUM(1)", "\tcmd"), start=2):
+    for indice, titulo in enumerate(("+1+1", "@SUM(1)"), start=2):
         criado = client.post(
             f"/dias/{dia['id']}/gastos",
             json={
@@ -191,6 +194,23 @@ def test_csv_protege_titulo_contra_formula_e_mantem_saldo_negativo(ambiente):
             },
         )
         assert criado.status_code == 200, criado.text
+
+    # Registro gravado antes do `GastoRequest.nao_somente_espacos` aparar as
+    # pontas do titulo: tab na frente nao entra mais pela API, so existe no
+    # banco. A protecao do CSV continua valendo para ele.
+    dia_db = ambiente.session.get(models.Dia, dia["id"])
+    ciclo_db = ambiente.session.get(models.Ciclo, ciclo["id"])
+    ambiente.session.add(
+        models.Gasto(
+            titulo="\tcmd",
+            valor=Decimal("1.00"),
+            categoria=Categoria.OUTROS,
+            dia=dia_db,
+        )
+    )
+    dia_db.saldo -= Decimal("1.00")
+    ciclo_db.gasto_total += Decimal("1.00")
+    ambiente.session.commit()
 
     response = client.get(
         f"/ciclos/{ciclo['id']}/export", params={"formato": "csv"}

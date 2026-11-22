@@ -31,6 +31,25 @@ struct LancamentoGastoTests {
         #expect(valor("abc") == 0)
     }
 
+    /// Título só com espaços ou quebra de linha (colado da notificação, por
+    /// exemplo) não libera o Salvar: antes `podeSalvar` aparava só
+    /// `.whitespaces`, o envio aparava com `.whitespacesAndNewlines` e o
+    /// servidor devolvia 422, deixando o gasto retentando com backoff.
+    @Test func tituloSoComEspacosOuQuebraDeLinhaNaoLiberaSalvar() {
+        let r = RascunhoGasto(dia: DiaSoftex(data: .now, saldo: 100))
+        r.valorTexto = "10,00"
+
+        r.titulo = "\n"
+        #expect(r.podeSalvar == false)
+        r.titulo = "  "
+        #expect(r.podeSalvar == false)
+        r.titulo = " \n "
+        #expect(r.podeSalvar == false)
+
+        r.titulo = "Almoço"
+        #expect(r.podeSalvar == true)
+    }
+
     // MARK: - Leitura por IA (costuras lerLocal/extrair)
 
     /// Liga `Consentimento.leituraAutomatica` (chave real de `.standard`) e

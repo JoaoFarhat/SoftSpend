@@ -10,7 +10,7 @@ from dtos.auth import (
     AuthResponse,
 )
 from services import auth_service
-from limiter import limiter
+from limiter import limiter, get_real_ip
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -30,7 +30,7 @@ def _montar_auth_response(usuario, access_token: str, refresh_token: str) -> Aut
 
 
 @router.post("/register", response_model=AuthResponse)
-@limiter.limit("3/minute")
+@limiter.limit("3/minute", key_func=get_real_ip)
 def register(request: Request, dados: RegisterRequest, db: Session = Depends(get_db)):
     try:
         usuario = auth_service.registrar(db, dados)
@@ -41,7 +41,7 @@ def register(request: Request, dados: RegisterRequest, db: Session = Depends(get
 
 
 @router.post("/login", response_model=AuthResponse)
-@limiter.limit("5/minute")
+@limiter.limit("5/minute", key_func=get_real_ip)
 def login(request: Request, dados: LoginRequest, db: Session = Depends(get_db)):
     try:
         usuario, access_token, refresh_token = auth_service.login(db, dados)
@@ -51,7 +51,7 @@ def login(request: Request, dados: LoginRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/refresh", response_model=AuthResponse)
-@limiter.limit("5/minute")
+@limiter.limit("5/minute", key_func=get_real_ip)
 def refresh(
     request: Request, dados: RefreshRequest, db: Session = Depends(get_db)
 ):
@@ -65,7 +65,7 @@ def refresh(
 
 
 @router.post("/logout", status_code=204)
-@limiter.limit("10/minute")
+@limiter.limit("10/minute", key_func=get_real_ip)
 def logout(request: Request, dados: LogoutRequest, db: Session = Depends(get_db)):
     auth_service.logout(db, dados.refresh_token)
     return None

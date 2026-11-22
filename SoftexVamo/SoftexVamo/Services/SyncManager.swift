@@ -620,6 +620,11 @@ actor SyncActor: ModelActor {
         }
     }
 
+    /// Teto do `POST /dias/lote` por pedido: uma viagem de 30 dias criada sem
+    /// internet subia em 30 pedidos seguidos — lento no 4G e perto do limite
+    /// por minuto do servidor. Acima de 60 dias, em partes de 60.
+    nonisolated static let maxDiasPorLote = 60
+
     private func syncDias(agora: Date, userId: String, forcar: Bool = false) async {
         guard !limiteAtingidoNesteSync else { return }
         let contexto = contextoNovo()
@@ -635,55 +640,92 @@ actor SyncActor: ModelActor {
                 && deveTentar($0, agora: agora, forcar: forcar)
         }
 
+        // Um pedido por viagem (em partes de `maxDiasPorLote`). Dia cujo ciclo
+        // ainda não tem backendId espera a próxima passada.
+        var porCiclo: [Int: [DiaSoftex]] = [:]
+        var ordemCiclos: [Int] = []
         for dia in dias {
-            if limiteAtingidoNesteSync { break }
-            guard let cicloId = dia.ciclo?.backendId else {
-                // Ciclo pai ainda não sincronizado: deixar como pending para próxima passada
-                continue
-            }
+            guard let cicloId = dia.ciclo?.backendId else { continue }
+            if porCiclo[cicloId] == nil { ordemCiclos.append(cicloId) }
+            porCiclo[cicloId, default: []].append(dia)
+        }
+        logger.info("syncDias: \(dias.count, privacy: .public) dia(s) pendente(s) em \(ordemCiclos.count, privacy: .public) viagem(ns)")
 
-            let diaUUID = dia.id
-            let foto = FotoDia(dia)
-            let saldoEnviado = dia.saldo
-            let request = DiaLoteRequest(clientId: dia.clientId, data: dia.data)
-            do {
-                let response = try await api.postDiasLote(cicloId: cicloId, dias: [request])
-                gravarDia(diaUUID, etapa: "syncDias") { atual in
-                    guard let primeiro = response.first else {
+        for cicloId in ordemCiclos {
+            if limiteAtingidoNesteSync { break }
+            let lote = porCiclo[cicloId] ?? []
+            for inicio in stride(from: 0, to: lote.count, by: Self.maxDiasPorLote) {
+                if limiteAtingidoNesteSync { break }
+                let parte = Array(lote[inicio..<min(inicio + Self.maxDiasPorLote, lote.count)])
+                await enviarDiasEmLote(parte, cicloId: cicloId, agora: agora)
+            }
+        }
+    }
+
+    /// Envia um pedaço de dias da mesma viagem (até `maxDiasPorLote`) num POST
+    /// só. Cada dia da resposta casa pelo `client_id`, não pela posição: o que
+    /// não voltou falha sozinho, sem derrubar os outros.
+    private func enviarDiasEmLote(_ dias: [DiaSoftex], cicloId: Int, agora: Date) async {
+        /// Foto do que foi enviado de cada dia, tirada antes do `await`.
+        struct Envio {
+            let uuid: UUID
+            let clientId: String
+            let foto: FotoDia
+            let saldoEnviado: Decimal
+        }
+        let envios = dias.map {
+            Envio(uuid: $0.id, clientId: $0.clientId, foto: FotoDia($0), saldoEnviado: $0.saldo)
+        }
+        let pedidos = dias.map { DiaLoteRequest(clientId: $0.clientId, data: $0.data) }
+        do {
+            let resposta = try await api.postDiasLote(cicloId: cicloId, dias: pedidos)
+            var porClientId: [String: DiaSoftex] = [:]
+            for remoto in resposta { porClientId[remoto.clientId] = remoto }
+            for envio in envios {
+                guard let remoto = porClientId[envio.clientId] else {
+                    gravarDia(envio.uuid, etapa: "syncDias-ausente") { atual in
                         atual.syncError = "Falha ao sincronizar dia"
                         marcarFalha(atual)
-                        return
                     }
-                    atual.backendId = primeiro.backendId
+                    continue
+                }
+                gravarDia(envio.uuid, etapa: "syncDias") { atual in
+                    atual.backendId = remoto.backendId
                     // Reconcilia saldo com servidor (backend pode ajustar inicial), a
                     // menos que um gasto local tenha mexido no saldo durante o envio.
-                    if atual.saldo == saldoEnviado {
-                        atual.saldo = primeiro.saldo
+                    if atual.saldo == envio.saldoEnviado {
+                        atual.saldo = remoto.saldo
                     }
                     // diaId dos gastos é derivado de dia?.backendId — não precisa atualizar manualmente
-                    if FotoDia(atual) == foto {
+                    if FotoDia(atual) == envio.foto {
                         marcarSucesso(atual)
                     } else {
                         marcarMudancaDuranteEnvio(atual)
                     }
                 }
-            } catch {
-                if atingiuLimitePorMinuto(error) {
-                    gravarDia(diaUUID, etapa: "syncDias-limite") { atual in
+            }
+        } catch {
+            if atingiuLimitePorMinuto(error) {
+                for envio in envios {
+                    gravarDia(envio.uuid, etapa: "syncDias-limite") { atual in
                         marcarAguardandoLimite(atual, agora: agora)
                     }
-                    break
                 }
-                if isNotFoundError(error) {
-                    // T4: a viagem foi apagada em outro aparelho — o dia (com
-                    // os gastos) é descartado no aparelho, sem requisição.
-                    descartarDia(diaUUID, etapa: "syncDias-404")
-                } else {
-                    let erro = error.localizedDescription
-                    gravarDia(diaUUID, etapa: "syncDias-catch") { atual in
-                        atual.syncError = erro
-                        marcarFalha(atual)
-                    }
+                return
+            }
+            if isNotFoundError(error) {
+                // T4: a viagem foi apagada em outro aparelho — os dias do lote
+                // (com os gastos) são descartados no aparelho, sem requisição.
+                for envio in envios {
+                    descartarDia(envio.uuid, etapa: "syncDias-404")
+                }
+                return
+            }
+            let erro = error.localizedDescription
+            for envio in envios {
+                gravarDia(envio.uuid, etapa: "syncDias-catch") { atual in
+                    atual.syncError = erro
+                    marcarFalha(atual)
                 }
             }
         }

@@ -122,7 +122,7 @@ SyncManager (@MainActor, ObservableObject)
   └─ configure(container:) → SyncActor (@ModelActor, background)
        └─ sync(agora:) → até 5 passadas
             ├─ syncCiclos    (cria/edita ciclos)
-            ├─ syncDias      (cria dias, reconcilia saldo)
+            ├─ syncDias      (cria dias em lote por viagem, reconcilia saldo)
             ├─ syncGastos    (cria/edita gastos, respeita dependência dia)
             ├─ syncComprovantes (upload/delete de comprovantes)
             └─ syncDeletions (delete em cascata: gasto → dia → ciclo)
@@ -147,6 +147,16 @@ falhar sob comando (`falhar`); ver `SyncActorTests.swift`.
 
 Cada stage só processa itens cujo pai já tem `backendId`. Itens órfãos aguardam
 na fila (`continue`) para a próxima passada.
+
+**Dias em lote**: `syncDias` agrupa os dias pendentes por `ciclo.backendId` e
+chama `postDiasLote` uma vez por viagem, em partes de
+`SyncActor.maxDiasPorLote` (60) — antes cada dia era um pedido, e uma viagem de
+30 dias criada sem internet subia em 30 pedidos seguidos. Cada dia da resposta
+casa pelo `client_id` (não pela posição) e segue o mesmo caminho de antes
+(`FotoDia`, `saldoEnviado`, mudança durante o envio); o dia que não volta na
+resposta recebe `marcarFalha` sozinho ("Falha ao sincronizar dia"). 404
+descarta os dias do lote; 429 marca o lote aguardando o limite e para o sync.
+Testes em `SoftSpendTests/DiasEmLoteTests.swift`.
 
 **Backoff exponencial**: base 60s, teto 3600s (1h). `marcarFalha` incrementa
 `tentativas` e seta `proximaTentativaEm`. `deveTentar` só retorna `true` se
@@ -622,43 +632,6 @@ aceitam qualquer objeto com `amount`, `date` (`date` ou `datetime`) e
 `merchant_name`/`description`, sem mudar regra nenhuma — a prévia pontua
 compras ainda não gravadas por um adaptador (`_CompraComoTransacao`).
 
-Assinatura AS1 (`docs/publicacao.md` §1.4; decisões de 13/11: 14 dias
-grátis, sem assinatura bloqueia ciclo novo, IA e exportar). Ainda **sem**
-Apple: JWS, webhook e App Store Server API ficam para a AS2.
-
-- `models/assinatura.py`: `Assinatura` (tabela `assinaturas`, uma linha por
-  usuário: `app_account_token` UUID gerado no servidor,
-  `original_transaction_id`, `produto`, `ambiente`, `status`, `expira_em`,
-  `carencia_ate`, `renovacao_automatica`, `atualizado_em`, datas em UTC sem
-  fuso) e `AppleNotificacao` (tabela `apple_notificacoes`, só usada na AS2).
-  Excluir a conta apaga a linha (cascade no ORM e na FK).
-- `services/assinatura_service.calcular_acesso(assinatura, agora)` é o
-  **único** lugar que decide o acesso (função pura, teste de tabela em
-  `tests/test_assinatura.py`). Devolve `(status, tem_acesso)` com os estados
-  `none`, `trial`, `active`, `grace`, `billing_retry`, `expired`, `revoked`:
-  sem linha ou sem compra é `none`; `expired`/`revoked` gravados valem como
-  estão; antes de `expira_em` (estrito) é `trial`/`active`; depois, antes de
-  `carencia_ate` (estrito), `grace`; depois disso `billing_retry` (se a
-  cobrança vinha falhando) ou `expired`. Acesso só em `trial`, `active` e
-  `grace`.
-- `GET /api/assinatura` (autenticada) devolve `status`, `tem_acesso`,
-  `expira_em`, `produto` e `app_account_token`. A primeira chamada cria a
-  linha (`status = none`) e as seguintes devolvem o mesmo token; duas
-  primeiras chamadas simultâneas não duplicam (savepoint + releitura com
-  `FOR UPDATE`, que no REPEATABLE READ do MySQL vê a linha da outra).
-- `dependencies.exigir_assinatura` responde `403` com
-  `{"detail": "subscription_required"}` (mais `error` e `request_id`, como
-  os outros erros; usa a exceção própria `AssinaturaNecessaria`, porque o
-  handler de `HTTPException` troca `detail` por `error`). Está **só** em
-  `POST /ciclos`, `POST /gastos/extrair`, `POST /api/faturas/ler` e
-  `GET /ciclos/{ciclo_id}/export`. Dias, gastos à mão, sync, login e excluir
-  conta nunca bloqueiam.
-
-| Variável | Default | Descrição |
-| --- | --- | --- |
-| `BILLING_ENFORCEMENT` | `off` | Lida a cada requisição. Só `on` liga o bloqueio; com qualquer outro valor `tem_acesso` é sempre `true` e nada responde `subscription_required` (o `status` real continua no `GET /api/assinatura`) |
-| `ACESSO_LIBERADO_USUARIOS` | vazia | Lida a cada chamada. Ids de `users.id` separados por vírgula com acesso liberado mesmo com `BILLING_ENFORCEMENT=on` — a conta de demonstração da revisão da Apple (`scripts/criar_conta_demo.py`). Não muda `calcular_acesso` nem grava na tabela `assinaturas`: o `status` do `GET /api/assinatura` continua o real, só `tem_acesso` sobe |
-
 No iOS (tarefa A1, §2.1/§2.5/§2.8), o fluxo mora em
 `ViewModels/ImportarFaturaViewModel.swift` (regra, testável sem tela) e
 `Scenes/ImportarFaturaView.swift` (montagem), aberto pelo menu "⋯" da viagem
@@ -706,8 +679,8 @@ grátis, sem assinatura bloqueia ciclo novo, IA, importar fatura e exportar).
   usuário: `app_account_token` UUID gerado no servidor,
   `original_transaction_id` único, `produto`, `ambiente`, `status`,
   `expira_em`, `carencia_ate`, `renovacao_automatica`, `atualizado_em`,
-  datas em UTC sem fuso) e `AppleNotificacao` (tabela `apple_notificacoes`).
-  Excluir a conta apaga a linha (cascade no ORM e na FK).
+  datas em UTC sem fuso) e `AppleNotificacao` (tabela `apple_notificacoes`,
+  só usada na AS2). Excluir a conta apaga a linha (cascade no ORM e na FK).
 - `services/assinatura_service.calcular_acesso(assinatura, agora)` é o
   **único** lugar que decide o acesso (função pura, teste de tabela em
   `tests/test_assinatura.py`). Devolve `(status, tem_acesso)` com os estados

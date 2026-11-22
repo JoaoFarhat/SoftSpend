@@ -16,19 +16,19 @@ TAMANHO_MAXIMO_PDF = 10 * 1024 * 1024
 
 
 @router.post("/dias/{dia_id}/gastos", response_model=GastoResponse)
-@limiter.limit("60/minute")
+@limiter.limit("300/minute")
 def criar_gasto(request: Request, dia_id: int, gasto: GastoRequest, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
     return gasto_service.criar_gasto(db, dia_id, gasto, user_id)
 
 
 @router.put("/gastos/{gasto_id}", response_model=GastoResponse)
-@limiter.limit("60/minute")
+@limiter.limit("300/minute")
 def atualizar_gasto(request: Request, gasto_id: int, gasto: GastoRequest, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
     return gasto_service.atualizar_gasto(db, gasto_id, gasto, user_id)
 
 
 @router.delete("/gastos/{gasto_id}", status_code=204)
-@limiter.limit("20/minute")
+@limiter.limit("120/minute")
 def deletar_gasto(request: Request, gasto_id: int, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
     return gasto_service.remover_gasto(db, gasto_id, user_id)
 
@@ -129,7 +129,7 @@ async def extrair_gasto_de_imagem(request: Request, imagem: UploadFile = File(..
 
 
 @router.post("/gastos/{gasto_id}/comprovante", response_model=GastoResponse)
-@limiter.limit("30/minute")
+@limiter.limit("120/minute")
 async def anexar_comprovante(
     request: Request,
     gasto_id: int,
@@ -145,6 +145,6 @@ async def anexar_comprovante(
 
 
 @router.delete("/gastos/{gasto_id}/comprovante", response_model=GastoResponse)
-@limiter.limit("30/minute")
+@limiter.limit("120/minute")
 def remover_comprovante(request: Request, gasto_id: int, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
     return gasto_service.remover_comprovante(db, gasto_id, user_id)
