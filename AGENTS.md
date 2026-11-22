@@ -122,7 +122,7 @@ SyncManager (@MainActor, ObservableObject)
   └─ configure(container:) → SyncActor (@ModelActor, background)
        └─ sync(agora:) → até 5 passadas
             ├─ syncCiclos    (cria/edita ciclos)
-            ├─ syncDias      (cria dias, reconcilia saldo)
+            ├─ syncDias      (cria dias em lote por viagem, reconcilia saldo)
             ├─ syncGastos    (cria/edita gastos, respeita dependência dia)
             ├─ syncComprovantes (upload/delete de comprovantes)
             └─ syncDeletions (delete em cascata: gasto → dia → ciclo)
@@ -147,6 +147,16 @@ falhar sob comando (`falhar`); ver `SyncActorTests.swift`.
 
 Cada stage só processa itens cujo pai já tem `backendId`. Itens órfãos aguardam
 na fila (`continue`) para a próxima passada.
+
+**Dias em lote**: `syncDias` agrupa os dias pendentes por `ciclo.backendId` e
+chama `postDiasLote` uma vez por viagem, em partes de
+`SyncActor.maxDiasPorLote` (60) — antes cada dia era um pedido, e uma viagem de
+30 dias criada sem internet subia em 30 pedidos seguidos. Cada dia da resposta
+casa pelo `client_id` (não pela posição) e segue o mesmo caminho de antes
+(`FotoDia`, `saldoEnviado`, mudança durante o envio); o dia que não volta na
+resposta recebe `marcarFalha` sozinho ("Falha ao sincronizar dia"). 404
+descarta os dias do lote; 429 marca o lote aguardando o limite e para o sync.
+Testes em `SoftSpendTests/DiasEmLoteTests.swift`.
 
 **Backoff exponencial**: base 60s, teto 3600s (1h). `marcarFalha` incrementa
 `tentativas` e seta `proximaTentativaEm`. `deveTentar` só retorna `true` se
