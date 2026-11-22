@@ -582,7 +582,11 @@ actor SyncActor: ModelActor {
                 let response = try await api.postCiclo(request: createRequest)
                 gravarCiclo(cicloUUID, etapa: "syncCiclos") { atual, _ in
                     atual.backendId = response.backendId
-                    atual.gasto_total = response.gasto_total
+                    // O `gasto_total` local fica: a viagem acabou de nascer no
+                    // servidor, que ainda não tem nenhum gasto dela (os gastos
+                    // só sobem com este `backendId`). Copiar o 0 da resposta
+                    // apagava do total os gastos feitos sem internet, e o
+                    // descarte de um 404 nos dias depois o deixava negativo.
                     if FotoCiclo(atual) == foto {
                         marcarSucesso(atual)
                     } else {
