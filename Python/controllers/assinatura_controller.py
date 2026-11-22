@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import get_current_user_id
 from dtos.assinatura import AssinaturaResponse, TransacaoRequest
-from limiter import limiter
+from limiter import limiter, get_real_ip
 from services import apple_service, assinatura_service
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ def _processar(db: Session, signed_payload: str) -> JSONResponse:
 
 
 @router.post("/api/webhooks/apple", include_in_schema=False)
-@limiter.limit("300/minute")
+@limiter.limit("300/minute", key_func=get_real_ip)
 async def webhook_apple(request: Request, db: Session = Depends(get_db)):
     """App Store Server Notifications V2.
 

@@ -251,7 +251,7 @@ final class RascunhoGasto {
     }
 
     var podeSalvar: Bool {
-        !titulo.trimmingCharacters(in: .whitespaces).isEmpty && valor > 0 && dia != nil && !salvando
+        !titulo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && valor > 0 && dia != nil && !salvando
     }
 
     init(dia: DiaSoftex?) {

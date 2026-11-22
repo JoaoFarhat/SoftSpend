@@ -16,7 +16,7 @@ def criar_dia(request: Request, ciclo_id: int, dia: DiaRequest, db: Session = De
 
 
 @router.post("/ciclos/{ciclo_id}/dias/lote", response_model=List[DiaResponse])
-@limiter.limit("30/minute")
+@limiter.limit("120/minute")
 def criar_dias_lote(request: Request, ciclo_id: int, dias: List[DiaRequest] = Body(min_length=1, max_length=100), db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
     return dia_service.criar_dias_lote(db, ciclo_id, dias, user_id)
 
@@ -35,6 +35,6 @@ def listar_dias(
 
 
 @router.delete("/dias/{dia_id}", status_code=204)
-@limiter.limit("20/minute")
+@limiter.limit("60/minute")
 def remover_dia(request: Request, dia_id: int, db: Session = Depends(get_db), user_id: str = Depends(get_current_user_id)):
     return dia_service.remover_dia(db, dia_id, user_id)
