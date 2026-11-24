@@ -42,14 +42,26 @@ struct DetalheGastoView: View {
     }
 
     private func conteudo(_ gasto: GastosDia, ciclo: CicloSoftex) -> some View {
-        let dadosNota = gasto.comprovanteData
+        // A nota pode não abrir por dois motivos: a chave está inacessível
+        // agora (aparelho bloqueado — a nota pode estar boa e não se oferece
+        // descarte por uma leitura que nem aconteceu) ou os bytes não abrem
+        // de verdade com a chave atual (cifrados por outra chave ou
+        // corrompidos) — aí a saída é descartar a nota.
+        let dadosNota: Data?
+        let notaIlegivel: Bool
+        do {
+            dadosNota = try gasto.abrirComprovante()
+            notaIlegivel = false
+        } catch ComprovanteCryptoError.keyNotAvailable {
+            dadosNota = nil
+            notaIlegivel = false
+        } catch {
+            dadosNota = nil
+            notaIlegivel = true
+        }
         let imagemLocal = dadosNota.flatMap(UIImage.init(data:))
         // Remoção feita offline (pendente de sync) não conta como anexado.
         let temComprovante = temComprovanteValido(gasto)
-        // Bytes guardados que a chave atual não abre (cifrados por outra chave
-        // ou corrompidos): não há foto para mostrar nem bytes para enviar — a
-        // saída é descartar a nota.
-        let notaIlegivel = gasto.comprovanteDataCriptografado != nil && dadosNota == nil
 
         return ScrollView {
             VStack(alignment: .leading, spacing: 0) {

@@ -180,6 +180,9 @@ actor SyncActor: ModelActor {
     nonisolated let modelExecutor: any ModelExecutor
     nonisolated let modelContainer: ModelContainer
     private let api: any SyncAPI
+    /// Cifra das notas, injetável como a `api`: os testes simulam o Keychain
+    /// inacessível com o aparelho bloqueado (`CifradorComprovante`).
+    private let cifrador: any CifradorComprovante
 
     /// Algum item mudou durante o envio nesta passada: vale rodar outra.
     private var mudouDuranteEnvio = false
@@ -193,11 +196,16 @@ actor SyncActor: ModelActor {
     /// toma mais 429. Vale mesmo com `forcar: true`.
     private var limiteAtingidoNesteSync = false
 
-    init(modelContainer: ModelContainer, api: any SyncAPI = NetworkManager.shared) {
+    init(
+        modelContainer: ModelContainer,
+        api: any SyncAPI = NetworkManager.shared,
+        cifrador: any CifradorComprovante = ComprovanteCrypto.shared
+    ) {
         let modelContext = ModelContext(modelContainer)
         self.modelExecutor = DefaultSerialModelExecutor(modelContext: modelContext)
         self.modelContainer = modelContainer
         self.api = api
+        self.cifrador = cifrador
     }
 
     private let logger = Logger(subsystem: "br.com.softspend", category: "SyncActor")
@@ -557,6 +565,17 @@ actor SyncActor: ModelActor {
         item.syncError = nil
     }
 
+    /// Chave do Keychain inacessível agora (aparelho bloqueado — ela é
+    /// `WhenUnlockedThisDeviceOnly`): não é falha. Como o 429 por minuto,
+    /// fica `.pending`, sem contar tentativa e sem `syncError` — "nota não
+    /// abre" aqui induziria "Descartar nota" numa nota que pode estar boa —
+    /// e tenta de novo daqui a 60 s (o `forcar` ignora a espera).
+    private func marcarAguardandoDesbloqueio(_ item: any Syncavel, agora: Date) {
+        item.proximaTentativaEm = agora.addingTimeInterval(60)
+        item.syncStatus = .pending
+        item.syncError = nil
+    }
+
     private func marcarSucesso(_ item: any Syncavel) {
         item.tentativas = 0
         item.proximaTentativaEm = nil
@@ -881,7 +900,7 @@ actor SyncActor: ModelActor {
             let gastoUUID = gasto.id
             let foto = FotoGasto(gasto)
             do {
-                try await sincronizarComprovante(gasto, backendId: backendId, foto: foto)
+                try await sincronizarComprovante(gasto, backendId: backendId, foto: foto, agora: agora)
             } catch {
                 if atingiuLimitePorMinuto(error) {
                     gravarGasto(gastoUUID, etapa: "syncComprovantes-limite") { atual in
@@ -902,13 +921,34 @@ actor SyncActor: ModelActor {
     ///
     /// Só limpa o comprovante local se ele ainda é o que foi enviado: uma foto
     /// nova anexada durante o upload fica para a próxima passada.
-    private func sincronizarComprovante(_ gasto: GastosDia, backendId: Int, foto: FotoGasto) async throws {
+    private func sincronizarComprovante(_ gasto: GastosDia, backendId: Int, foto: FotoGasto, agora: Date) async throws {
         let gastoUUID = gasto.id
 
-        if let comprovanteData = gasto.comprovanteData {
+        // A nota pode não abrir por dois motivos: `keyNotAvailable` — a chave
+        // está inacessível agora (aparelho bloqueado, sync em segundo plano) e
+        // a nota pode estar boa — ou os bytes não abrem de verdade com a chave
+        // atual. Os dois são tratados separados lá embaixo.
+        let dadosNota: Data?
+        var notaAguardandoChave = false
+        var notaIlegivel = false
+        if let bytes = gasto.comprovanteDataCriptografado {
+            do {
+                dadosNota = try cifrador.descriptografar(bytes)
+            } catch ComprovanteCryptoError.keyNotAvailable {
+                dadosNota = nil
+                notaAguardandoChave = true
+            } catch {
+                dadosNota = nil
+                notaIlegivel = true
+            }
+        } else {
+            dadosNota = nil
+        }
+
+        if let dadosNota {
             let atualizado = try await api.uploadComprovante(
                 gastoId: backendId,
-                imageData: comprovanteData,
+                imageData: dadosNota,
                 mime: gasto.comprovanteMime
             )
             gravarGasto(gastoUUID, etapa: "syncComprovantes-upload") { atual in
@@ -937,7 +977,18 @@ actor SyncActor: ModelActor {
                 atual.comprovanteParaRemover = false
                 concluirGasto(atual, mudou: mudou)
             }
-        } else {
+        } else if notaAguardandoChave {
+            // Chave inacessível agora (aparelho bloqueado): espera sem falhar
+            // — a nota pode estar boa e "nota não abre" aqui induziria o
+            // descarte de uma nota válida.
+            gravarGasto(gastoUUID, etapa: "syncComprovantes-bloqueado") { atual in
+                if FotoGasto(atual) != foto {
+                    marcarMudancaDuranteEnvio(atual)
+                } else {
+                    marcarAguardandoDesbloqueio(atual, agora: agora)
+                }
+            }
+        } else if notaIlegivel {
             // Bytes guardados que a chave atual não abre: não há o que enviar
             // nem o que apagar. Falha com o motivo na tela e backoff, em vez
             // de concluir sem registro nem tentar a cada passada — os bytes
@@ -950,6 +1001,12 @@ actor SyncActor: ModelActor {
                     atual.syncError = SyncActor.erroNotaNaoAbre
                     marcarFalha(atual)
                 }
+            }
+        } else {
+            // Os bytes saíram entre a listagem e aqui (remoção no meio): não
+            // há o que enviar nem apagar — a releitura decide o estado.
+            gravarGasto(gastoUUID, etapa: "syncComprovantes") { atual in
+                concluirGasto(atual, mudou: FotoGasto(atual) != foto)
             }
         }
     }

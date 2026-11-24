@@ -30,12 +30,28 @@ nonisolated final class GastosDia {
 
     @Transient
     var comprovanteData: Data? {
+        try? abrirComprovante()
+    }
+
+    /// Abre a nota guardada; `nil` quando não há nota.
+    ///
+    /// O erro separa os dois "não abre":
+    /// - `ComprovanteCryptoError.keyNotAvailable`: a chave não está acessível
+    ///   agora — típico do sync em segundo plano com o aparelho bloqueado (a
+    ///   chave é `WhenUnlockedThisDeviceOnly`). A nota pode estar boa: quem
+    ///   chama deve tentar de novo, sem marcar falha nem oferecer "Descartar
+    ///   nota" por uma leitura que nem aconteceu.
+    /// - qualquer outro erro: os bytes não abrem com a chave atual (cifrados
+    ///   por outra chave ou corrompidos) — aí vale o `SyncActor.erroNotaNaoAbre`.
+    func abrirComprovante() throws -> Data? {
         guard let comprovanteDataCriptografado else { return nil }
         do {
             return try ComprovanteCrypto.shared.descriptografar(comprovanteDataCriptografado)
+        } catch ComprovanteCryptoError.keyNotAvailable {
+            throw ComprovanteCryptoError.keyNotAvailable
         } catch {
             GastosDia.logger.error("ComprovanteCrypto: falha ao descriptografar comprovante: \(error.localizedDescription, privacy: .public)")
-            return nil
+            throw error
         }
     }
 

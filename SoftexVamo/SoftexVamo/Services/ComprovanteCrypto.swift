@@ -15,6 +15,17 @@ enum ComprovanteCryptoError: Error {
     case invalidKeySize
 }
 
+/// Cifra e decifra a nota do comprovante.
+///
+/// Existe para o `SyncActor` receber a cifra injetada (como o `SyncAPI`):
+/// em produção é o `ComprovanteCrypto.shared`; nos testes, uma implementação
+/// em memória (`FakeCifrador`) lança `ComprovanteCryptoError.keyNotAvailable`
+/// e simula o Keychain inacessível com o aparelho bloqueado.
+nonisolated protocol CifradorComprovante: Sendable {
+    func criptografar(_ dados: Data) throws -> Data
+    func descriptografar(_ dados: Data) throws -> Data
+}
+
 nonisolated struct ComprovanteCrypto {
     static let shared = ComprovanteCrypto()
     private let keyTag = "br.com.softspend.comprovantekey".data(using: .utf8)!
@@ -39,17 +50,36 @@ nonisolated struct ComprovanteCrypto {
     }
     
     private func obterOuCriarChave() throws -> SymmetricKey {
-        if let data = buscarChaveNoKeychain() {
+        switch buscarChaveNoKeychain() {
+        case .encontrada(let data):
             return SymmetricKey(data: data)
+        case .inacessivel(let status):
+            logger.debug("ComprovanteCrypto: chave inacessível no Keychain (status \(status, privacy: .public))")
+            throw ComprovanteCryptoError.keyNotAvailable
+        case .naoExiste:
+            break
         }
-        
+
         let novaChave = SymmetricKey(size: .bits256)
         let data = novaChave.withUnsafeBytes { Data($0) }
         try salvarChaveNoKeychain(data)
         return novaChave
     }
-    
-    private func buscarChaveNoKeychain() -> Data? {
+
+    /// O `errSecItemNotFound` ("não existe", pode criar) fica separado dos
+    /// demais erros. Com o aparelho bloqueado o Keychain responde
+    /// `errSecInteractionNotAllowed` — a chave é `WhenUnlockedThisDeviceOnly`
+    /// — e tratar isso como "não existe" faria o `SecItemDelete` apagar a
+    /// chave boa na tentativa de criar outra (o `SecItemAdd` falharia do
+    /// mesmo jeito): uma leitura com o iPhone trancado destruiria a chave e
+    /// todas as notas guardadas.
+    private enum BuscaChave {
+        case encontrada(Data)
+        case naoExiste
+        case inacessivel(OSStatus)
+    }
+
+    private func buscarChaveNoKeychain() -> BuscaChave {
         let query: [String: Any] = [
             kSecClass as String: kSecClassKey,
             kSecAttrApplicationTag as String: keyTag,
@@ -58,8 +88,15 @@ nonisolated struct ComprovanteCrypto {
         ]
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
-        guard status == errSecSuccess, let data = result as? Data else { return nil }
-        return data
+        switch status {
+        case errSecSuccess:
+            if let data = result as? Data { return .encontrada(data) }
+            return .inacessivel(status)
+        case errSecItemNotFound:
+            return .naoExiste
+        default:
+            return .inacessivel(status)
+        }
     }
     
     private func salvarChaveNoKeychain(_ data: Data) throws {
@@ -81,3 +118,5 @@ nonisolated struct ComprovanteCrypto {
         }
     }
 }
+
+nonisolated extension ComprovanteCrypto: CifradorComprovante {}

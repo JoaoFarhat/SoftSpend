@@ -262,6 +262,21 @@ e a nota não abre): chama `removerComprovante`, que limpa os bytes e sobe a
 remoção — o gasto destrava na passada seguinte. Testes em
 `SoftSpendTests/DescartarNotaIlegivelTests.swift`.
 
+**Chave inacessível ≠ nota que não abre**: a decifra do `sincronizarComprovante`
+passa pelo `CifradorComprovante` injetado no `init(modelContainer:api:cifrador:)`
+(padrão `ComprovanteCrypto.shared`), como o `SyncAPI`. Quando a decifra lança
+`ComprovanteCryptoError.keyNotAvailable` — Keychain inacessível, típico do
+sync em segundo plano com o iPhone trancado (`WhenUnlockedThisDeviceOnly`) —
+não é falha: `marcarAguardandoDesbloqueio` deixa `.pending`, sem contar
+tentativa e sem `syncError`, com `proximaTentativaEm = agora + 60 s`. Antes
+disso o `nil` ambíguo mandava a nota boa para `erroNotaNaoAbre` + backoff de
+1 h e a tela oferecia "Descartar nota". A remoção (`comprovanteParaRemover`)
+não precisa dos bytes nem da chave: segue para o DELETE mesmo bloqueado. O
+`DetalheGastoView` distingue do mesmo jeito via `GastosDia.abrirComprovante()`
+— "não abre" e "Descartar nota" só aparecem quando a falha é de decifra, não
+de acesso à chave. Testes em `SoftSpendTests/ChaveInacessivelTests.swift`
+(`FakeCifrador`).
+
 **Exclusão vinda do servidor (T5)**: no `CiclosViewModel`, com a lista completa
 de dias (`listaCompleta`), `removerSumidos` apaga gasto `.synced` com `backendId`
 que não veio em nenhum dia da lista e dia ausente cujos gastos todos saíram. Com
@@ -286,13 +301,25 @@ criptografados ficam em `comprovanteDataCriptografado`. A chave simétrica de
 256 bits é armazenada no Keychain com
 `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`.
 
+`GastosDia.abrirComprovante()` é a versão que lança erro: separa
+`ComprovanteCryptoError.keyNotAvailable` (chave inacessível agora, ex.:
+aparelho bloqueado — a nota pode estar boa, tente de novo) dos erros de
+decifra (bytes que a chave atual não abre de verdade). `comprovanteData` é
+`try? abrirComprovante()` para quem não precisa da distinção.
+
 A escrita passa por métodos, não por setter: `gravarComprovante(_:)` lança
 `ComprovanteCryptoError` quando a chave não está acessível (quem chama avisa a
 tela — o setter antigo apagava a nota guardada e só logava) e
 `removerComprovante()` limpa o campo sem passar pela cifra.
 
 `ComprovanteCrypto` é `nonisolated` porque é acessado de `GastosDia` (que é
-`nonisolated`).
+`nonisolated`). A busca da chave só cria uma nova quando o Keychain responde
+`errSecItemNotFound`: qualquer outro status (ex.: `errSecInteractionNotAllowed`
+com o aparelho bloqueado) lança `keyNotAvailable` **sem** rodar o
+`SecItemDelete`/`SecItemAdd` — criar chave sobre uma leitura bloqueada podia
+apagar a chave boa e tornar todas as notas ilegíveis. Para os testes, o
+protocolo `CifradorComprovante` (mesmo arquivo) é o que o `SyncActor` recebe
+injetado; `FakeCifrador` simula a chave inacessível.
 
 ### Apple Pay (atalho "Registrar gasto")
 
