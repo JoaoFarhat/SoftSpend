@@ -248,9 +248,16 @@ viagem bloqueada não faz requisição). Na tela, `EstadoEnvio.aguardandoAssinat
 
 **Comprovantes**: `syncComprovantes` filtra por `syncStatusRaw != synced` no
 predicado. Chama `marcarFalha` em falha (backoff) e `marcarSucesso` apenas se
-`comprovanteData == nil && !comprovanteParaRemover`. `syncGastos` também só
-marca `.synced` se não há comprovante pendente — o gasto permanece `.pending`
-até o comprovante ser processado.
+`comprovanteDataCriptografado == nil && !comprovanteParaRemover` — a checagem
+olha o campo cifrado, não `comprovanteData`, cujo getter devolve `nil` também
+quando a nota não abre com a chave atual (ela virava `.synced` e ficava presa
+no aparelho sem registro). `syncGastos` também só marca `.synced` se não há
+comprovante pendente — o gasto permanece `.pending` até o comprovante ser
+processado. Nota que a chave atual não abre (`sincronizarComprovante`, ramo
+sem bytes legíveis): `syncError = SyncActor.erroNotaNaoAbre` +
+`marcarFalha` — a tela mostra o motivo e o backoff impede tentar a cada
+passada, com os bytes preservados. Testes em
+`SoftSpendTests/NotaIlegivelSyncTests.swift`.
 
 **Exclusão vinda do servidor (T5)**: no `CiclosViewModel`, com a lista completa
 de dias (`listaCompleta`), `removerSumidos` apaga gasto `.synced` com `backendId`

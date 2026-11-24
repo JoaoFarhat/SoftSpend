@@ -533,6 +533,11 @@ actor SyncActor: ModelActor {
     /// e sobe sozinha depois da compra.
     nonisolated static let erroAssinaturaNecessaria = "Assinatura necessária para enviar esta viagem"
 
+    /// `syncError` da nota guardada no aparelho que a chave atual não abre
+    /// (`sincronizarComprovante`): falha comum, com backoff — os bytes ficam
+    /// guardados e a tela mostra o motivo.
+    nonisolated static let erroNotaNaoAbre = "Nota não abre com a chave atual"
+
     /// Viagem nova recusada por falta de assinatura: fica `.pending`, sem
     /// contar tentativa nem backoff (o `sync(forcar: true)` depois da compra a
     /// sobe) e **sem** `mudouDuranteEnvio` (outra passada só repetiria o 403).
@@ -757,10 +762,14 @@ actor SyncActor: ModelActor {
 
     /// Depois de um envio do gasto que deu certo: `.synced` só se nada mudou
     /// desde a foto e não há comprovante pendente (o `syncComprovantes` resolve).
+    /// A checagem olha o campo cifrado, não `comprovanteData`: decifrar a nota
+    /// inteira só para ver se ela existe era custoso e, quando ela não abre
+    /// com a chave atual, o getter devolve `nil` — o gasto virava `.synced`
+    /// e a nota ficava presa no aparelho sem nenhum registro.
     private func concluirGasto(_ atual: GastosDia, mudou: Bool) {
         if mudou {
             marcarMudancaDuranteEnvio(atual)
-        } else if atual.comprovanteData == nil && !atual.comprovanteParaRemover {
+        } else if atual.comprovanteDataCriptografado == nil && !atual.comprovanteParaRemover {
             marcarSucesso(atual)
         }
     }
@@ -928,9 +937,18 @@ actor SyncActor: ModelActor {
                 concluirGasto(atual, mudou: mudou)
             }
         } else {
-            // Bytes que não descriptografam: nada a enviar.
+            // Bytes guardados que a chave atual não abre: não há o que enviar
+            // nem o que apagar. Falha com o motivo na tela e backoff, em vez
+            // de concluir sem registro nem tentar a cada passada — os bytes
+            // ficam (a nota pode voltar a abrir quando a chave estiver
+            // acessível de novo).
             gravarGasto(gastoUUID, etapa: "syncComprovantes") { atual in
-                concluirGasto(atual, mudou: FotoGasto(atual) != foto)
+                if FotoGasto(atual) != foto {
+                    marcarMudancaDuranteEnvio(atual)
+                } else {
+                    atual.syncError = SyncActor.erroNotaNaoAbre
+                    marcarFalha(atual)
+                }
             }
         }
     }
