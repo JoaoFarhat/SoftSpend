@@ -20,6 +20,8 @@ from sqlalchemy.orm import Session
 import models
 from test_editar_diaria import (  # noqa: F401  (`ambiente` é o fixture)
     USER_A,
+    USER_B,
+    _ciclo_payload,
     _viagem_dois_dias_um_gasto,
     ambiente,
 )
@@ -61,7 +63,8 @@ def test_delete_do_dia_le_o_dia_com_bloqueio(ambiente, monkeypatch):  # noqa: F8
     response = client.delete(f"/dias/{dia_id}")
 
     assert response.status_code == 204
-    assert chamadas == [True]
+    # Leitura sem trava (dono e ciclo) e, depois do ciclo, a com trava.
+    assert chamadas == [False, True]
 
 
 def test_criar_gasto_le_o_dia_com_bloqueio(ambiente, monkeypatch):  # noqa: F811
@@ -81,7 +84,7 @@ def test_criar_gasto_le_o_dia_com_bloqueio(ambiente, monkeypatch):  # noqa: F811
     )
 
     assert response.status_code == 200
-    assert chamadas == [True]
+    assert chamadas == [False, True]
 
 
 def test_mover_gasto_le_o_dia_novo_com_bloqueio(ambiente, monkeypatch):  # noqa: F811
@@ -102,8 +105,9 @@ def test_mover_gasto_le_o_dia_novo_com_bloqueio(ambiente, monkeypatch):  # noqa:
     )
 
     assert response.status_code == 200
-    # O dia atual e o novo, os dois com trava (ver `_travar_gasto`).
-    assert chamadas == [True, True]
+    # O dia novo conferido sem trava; depois o atual e o novo, com trava
+    # (ver `_travar_gasto`).
+    assert chamadas == [False, True, True]
     ambiente.session.expire_all()
     assert ambiente.session.get(models.Gasto, gasto_id).dia_id == dia_2["id"]
 
@@ -123,10 +127,11 @@ def test_gasto_gravado_durante_o_delete_sai_do_total_e_do_banco(
 
     def com_corrida(db, *args, **kwargs):
         dia = original(db, *args, **kwargs)
-        # O dia e os gastos dele já estão na sessão do DELETE; o gasto novo
-        # chega por outra sessão antes da soma.
-        assert len(dia.gastos) == 1
-        _gasto_de_outro_aparelho(engine, dia_id, ciclo["id"], "20.00")
+        if kwargs.get("para_atualizar"):
+            # O dia e os gastos dele já estão na sessão do DELETE; o gasto
+            # novo chega por outra sessão antes da soma.
+            assert len(dia.gastos) == 1
+            _gasto_de_outro_aparelho(engine, dia_id, ciclo["id"], "20.00")
         return dia
 
     monkeypatch.setattr(dia_repository, "find_dia", com_corrida)
@@ -170,20 +175,41 @@ def test_delete_repetido_desconta_uma_vez_so(ambiente):  # noqa: F811
     assert _gasto_total(ambiente, ciclo["id"]) == Decimal("15.00")
 
 
-# --- Ordem das travas ao apagar/editar um gasto: dia(s) por id → gasto ------
+# --- Ordem das travas: ciclo → dia(s) por id → gasto -------------------------
 #
 # `DELETE /gastos/X` travava o gasto e depois o dia, e `DELETE /dias/{dia de X}`
 # trava o dia e depois os gastos: os dois ao mesmo tempo travavam um ao outro.
-# Mover A→B junto com B→A também cruzava as travas dos dois dias.
+# Mover A→B junto com B→A também cruzava as travas dos dois dias. E o
+# `PUT /ciclos` (diária) trava o ciclo e depois todos os dias, enquanto apagar
+# um dia ou lançar um gasto travava o dia e só no fim o ciclo (pelo UPDATE do
+# `gasto_total`): agora toda escrita trava o ciclo primeiro.
 
 
 def _espiar_travas(monkeypatch) -> list:
-    """Registra, em ordem, as leituras com trava: ("dia", id) e ("gasto", id)."""
-    from repositories import dia_repository, gasto_repository
+    """Registra, em ordem, as leituras com trava.
+
+    ("ciclo", id), ("dia", id) e ("gasto", id); o `delete_ciclo` do
+    repositório entra como ("apagar ciclo", id).
+    """
+    from repositories import ciclo_repository, dia_repository, gasto_repository
 
     find_dia = dia_repository.find_dia
     find_gasto_for_update = gasto_repository.find_gasto_for_update
+    get_ciclo = ciclo_repository.get_user_ciclo_by_id
+    delete_ciclo = ciclo_repository.delete_ciclo
     travas = []
+
+    def espia_ciclo(db, ciclo_id, *args, **kwargs):
+        if kwargs.get("para_atualizar"):
+            travas.append(("ciclo", ciclo_id))
+        return get_ciclo(db, ciclo_id, *args, **kwargs)
+
+    def espia_delete_ciclo(db, ciclo):
+        travas.append(("apagar ciclo", ciclo.id))
+        return delete_ciclo(db, ciclo)
+
+    monkeypatch.setattr(ciclo_repository, "get_user_ciclo_by_id", espia_ciclo)
+    monkeypatch.setattr(ciclo_repository, "delete_ciclo", espia_delete_ciclo)
 
     def espia_dia(db, dia_id, *args, **kwargs):
         if kwargs.get("para_atualizar"):
@@ -236,7 +262,11 @@ def test_delete_do_gasto_trava_o_dia_antes_do_gasto(ambiente, monkeypatch):  # n
     response = client.delete(f"/gastos/{gasto_id}")
 
     assert response.status_code == 204
-    assert travas == [("dia", dia_1["id"]), ("gasto", gasto_id)]
+    assert travas == [
+        ("ciclo", ciclo["id"]),
+        ("dia", dia_1["id"]),
+        ("gasto", gasto_id),
+    ]
 
 
 def test_editar_gasto_sem_mover_trava_o_dia_antes_do_gasto(
@@ -251,7 +281,11 @@ def test_editar_gasto_sem_mover_trava_o_dia_antes_do_gasto(
     response = _put_gasto(client, gasto_id, "40.00")
 
     assert response.status_code == 200
-    assert travas == [("dia", dia_1["id"]), ("gasto", gasto_id)]
+    assert travas == [
+        ("ciclo", ciclo["id"]),
+        ("dia", dia_1["id"]),
+        ("gasto", gasto_id),
+    ]
 
 
 def test_mover_gasto_trava_os_dois_dias_antes_do_gasto(ambiente, monkeypatch):  # noqa: F811
@@ -264,7 +298,12 @@ def test_mover_gasto_trava_os_dois_dias_antes_do_gasto(ambiente, monkeypatch):  
     response = _put_gasto(client, gasto_id, "30.00", dia_id=dia_2["id"])
 
     assert response.status_code == 200
-    assert travas == [("dia", dia_1["id"]), ("dia", dia_2["id"]), ("gasto", gasto_id)]
+    assert travas == [
+        ("ciclo", ciclo["id"]),
+        ("dia", dia_1["id"]),
+        ("dia", dia_2["id"]),
+        ("gasto", gasto_id),
+    ]
 
 
 def test_mover_para_dia_de_id_menor_trava_em_ordem_crescente(
@@ -280,7 +319,12 @@ def test_mover_para_dia_de_id_menor_trava_em_ordem_crescente(
     response = _put_gasto(client, gasto_id, "15.00", dia_id=dia_1["id"])
 
     assert response.status_code == 200
-    assert travas == [("dia", dia_1["id"]), ("dia", dia_2["id"]), ("gasto", gasto_id)]
+    assert travas == [
+        ("ciclo", ciclo["id"]),
+        ("dia", dia_1["id"]),
+        ("dia", dia_2["id"]),
+        ("gasto", gasto_id),
+    ]
 
 
 def _mover_em_outra_sessao(engine, gasto_id, de_dia, para_dia, valor):
@@ -330,7 +374,9 @@ def test_gasto_movido_por_outro_pedido_antes_da_trava_usa_o_dia_novo(
 
     assert response.status_code == 200
     assert leituras == [dia_1["id"], dia_2["id"]]
+    # O ciclo é travado uma vez só: a segunda volta já o tem.
     assert travas == [
+        ("ciclo", ciclo["id"]),
         ("dia", dia_1["id"]),
         ("gasto", gasto_id),
         ("dia", dia_2["id"]),
@@ -381,6 +427,108 @@ def test_gasto_que_muda_de_dia_duas_vezes_responde_409(
         Decimal("100.00"),
     ]
     assert _gasto_total(ambiente, ciclo["id"]) == Decimal("30.00")
+
+
+def test_delete_do_dia_trava_o_ciclo_antes_do_dia(ambiente, monkeypatch):  # noqa: F811
+    client = ambiente.como(USER_A)
+    ciclo = _viagem_dois_dias_um_gasto(client)
+    dia_1, _ = _dias_por_data(client, ciclo["id"])
+    travas = _espiar_travas(monkeypatch)
+
+    response = client.delete(f"/dias/{dia_1['id']}")
+
+    assert response.status_code == 204
+    assert travas == [("ciclo", ciclo["id"]), ("dia", dia_1["id"])]
+
+
+def test_criar_gasto_trava_o_ciclo_antes_do_dia(ambiente, monkeypatch):  # noqa: F811
+    client = ambiente.como(USER_A)
+    ciclo = _viagem_dois_dias_um_gasto(client)
+    _, dia_2 = _dias_por_data(client, ciclo["id"])
+    travas = _espiar_travas(monkeypatch)
+
+    _criar_gasto(client, dia_2["id"], "gasto-2", "15.00")
+
+    assert travas == [("ciclo", ciclo["id"]), ("dia", dia_2["id"])]
+
+
+def test_delete_do_ciclo_trava_o_ciclo_antes_de_apagar(ambiente, monkeypatch):  # noqa: F811
+    client = ambiente.como(USER_A)
+    ciclo = _viagem_dois_dias_um_gasto(client)
+    travas = _espiar_travas(monkeypatch)
+
+    response = client.delete(f"/ciclos/{ciclo['id']}")
+
+    assert response.status_code == 204
+    assert travas == [("ciclo", ciclo["id"]), ("apagar ciclo", ciclo["id"])]
+    ambiente.session.commit()
+    assert ambiente.session.get(models.Ciclo, ciclo["id"]) is None
+
+
+def test_delete_de_ciclo_de_outro_usuario_responde_404(ambiente, monkeypatch):  # noqa: F811
+    ciclo_b = _viagem_dois_dias_um_gasto(ambiente.como(USER_B))
+    client = ambiente.como(USER_A)
+    travas = _espiar_travas(monkeypatch)
+
+    response = client.delete(f"/ciclos/{ciclo_b['id']}")
+
+    assert response.status_code == 404
+    assert ("apagar ciclo", ciclo_b["id"]) not in travas
+
+
+def test_mover_para_dia_de_outro_usuario_responde_404_sem_travar_dia(
+    ambiente, monkeypatch  # noqa: F811
+):
+    ciclo_b = _viagem_dois_dias_um_gasto(ambiente.como(USER_B))
+    dia_b = _dias_por_data(ambiente.como(USER_B), ciclo_b["id"])[1]
+    client = ambiente.como(USER_A)
+    ciclo = _viagem_dois_dias_um_gasto(client)
+    dia_1, _ = _dias_por_data(client, ciclo["id"])
+    gasto_id = dia_1["gastos"][0]["id"]
+    travas = _espiar_travas(monkeypatch)
+
+    response = _put_gasto(client, gasto_id, "30.00", dia_id=dia_b["id"])
+
+    assert response.status_code == 404
+    assert travas == []
+
+
+def test_mover_para_dia_de_outro_ciclo_responde_400_sem_travar_dia(
+    ambiente, monkeypatch  # noqa: F811
+):
+    client = ambiente.como(USER_A)
+    ciclo = _viagem_dois_dias_um_gasto(client)
+    dia_1, _ = _dias_por_data(client, ciclo["id"])
+    gasto_id = dia_1["gastos"][0]["id"]
+    outro = client.post(
+        "/ciclos", json=_ciclo_payload(client_id="ciclo-2")
+    ).json()
+    dia_outro = client.post(
+        f"/ciclos/{outro['id']}/dias/lote",
+        json=[{"client_id": "dia-x", "data": "2026-12-01T00:00:00Z"}],
+    ).json()[0]
+    travas = _espiar_travas(monkeypatch)
+
+    response = _put_gasto(client, gasto_id, "30.00", dia_id=dia_outro["id"])
+
+    assert response.status_code == 400
+    assert travas == []
+
+
+def test_saldos_e_total_fecham_ao_apagar_dia_e_lancar(ambiente):  # noqa: F811
+    client = ambiente.como(USER_A)
+    ciclo = _viagem_dois_dias_um_gasto(client)
+    dia_1, dia_2 = _dias_por_data(client, ciclo["id"])
+    _criar_gasto(client, dia_2["id"], "gasto-2", "15.00")
+    assert _saldos(ambiente, dia_1["id"], dia_2["id"]) == [
+        Decimal("70.00"),
+        Decimal("85.00"),
+    ]
+    assert _gasto_total(ambiente, ciclo["id"]) == Decimal("45.00")
+
+    assert client.delete(f"/dias/{dia_1['id']}").status_code == 204
+    assert _saldos(ambiente, dia_2["id"]) == [Decimal("85.00")]
+    assert _gasto_total(ambiente, ciclo["id"]) == Decimal("15.00")
 
 
 def test_saldos_e_total_fecham_ao_apagar_editar_e_mover(ambiente):  # noqa: F811

@@ -935,15 +935,22 @@ Para evitar criação duplicada quando o app não recebe a resposta do `POST` (e
   devolvem o existente (o gasto passa pelo `conciliar_gasto`), ou relançam se
   não acharem. Os incrementos nunca ficam fora do savepoint (contaria o
   dinheiro duas vezes). Testes em `tests/test_client_id_corrida.py`.
-- `DELETE /dias/{id}`, `POST /dias/{id}/gastos` e o `PUT /gastos/{id}` que muda de dia
-  leem o dia com `find_dia(..., para_atualizar=True)` (`FOR UPDATE`, só o dia, não o
-  ciclo); o `remover_dia` soma e apaga os gastos de uma leitura com `FOR UPDATE` de
-  `gastos_dia` (`listar_por_dia_para_atualizar`), não de `dia.gastos`. Ordem das
-  travas em todo o servidor: dia(s) por id crescente → gasto → ciclo (só por
-  `UPDATE` relativo). `DELETE`/`PUT /gastos/{id}` (`gasto_service._travar_gasto`)
-  leem o gasto sem trava para saber o dia, travam o dia atual (e o novo, ao mover)
-  e só então o gasto; se o gasto mudou de dia no meio, refazem uma vez e depois
-  respondem 409. Testes em `tests/test_remover_dia_corrida.py`.
+- Ordem das travas em todo o servidor: ciclo → dia(s) por id crescente → gasto
+  (o `PUT /ciclos` trava o ciclo e faz `UPDATE` em todos os dias; o `UPDATE`
+  relativo do `gasto_total` também trava o ciclo — outra ordem dava deadlock).
+  `DELETE /dias/{id}` e `POST /dias/{id}/gastos` passam por
+  `dia_service.travar_dia_do_usuario`: lê o dia sem trava (dono e ciclo, 404),
+  trava o ciclo (`get_user_ciclo_by_id(..., para_atualizar=True,
+  carregar_viagem=False)`) e só então o dia (`find_dia(..., para_atualizar=True)`;
+  sumiu no meio, 404). O `remover_dia` soma e apaga os gastos de uma leitura com
+  `FOR UPDATE` de `gastos_dia` (`listar_por_dia_para_atualizar`), não de
+  `dia.gastos`. `DELETE`/`PUT /gastos/{id}` (`gasto_service._travar_gasto`) leem
+  o gasto sem trava, conferem o dono e, ao mover, o dia novo (404 se não existe
+  ou é de outro usuário, 400 se é de outro ciclo) **antes** de travar qualquer
+  coisa; então travam o ciclo, os dias (atual e novo) por id crescente e o
+  gasto. Se o gasto mudou de dia no meio, refazem uma vez (o ciclo já travado
+  não é travado de novo) e depois respondem 409. `DELETE /ciclos/{id}` trava o
+  ciclo antes da cascata do ORM. Testes em `tests/test_remover_dia_corrida.py`.
 - As tabelas têm unique constraints por `client_id` + entidade pai:
   - `uix_ciclo_client_id_usuario`
   - `uix_dia_client_id_ciclo`

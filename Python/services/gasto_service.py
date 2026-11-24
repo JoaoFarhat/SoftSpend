@@ -4,22 +4,16 @@ from sqlalchemy.orm import Session
 import models, dtos
 from dtos.gasto import GastoRequest
 from repositories import gasto_repository, dia_repository, ciclo_repository
-from services import open_finance_reconciliation_service, storage_service
+from services import dia_service, open_finance_reconciliation_service, storage_service
 from services.comprovante_cleanup import (
     marcar_comprovante_para_remover,
     marcar_comprovante_para_remover_no_rollback,
 )
 
 def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: str):
-    # Trava o dia: um DELETE do mesmo dia ao mesmo tempo espera este gasto
-    # entrar (e o desconta) ou já o apagou (404 aqui).
-    dia = dia_repository.find_dia(db, dia_id, para_atualizar=True)
-
-    if not dia:
-        raise HTTPException(status_code=404, detail="Dia não encontrado")
-
-    if dia.ciclo.id_usuario != user_id:
-        raise HTTPException(status_code=404, detail="Dia não encontrado")
+    # Trava ciclo → dia: um DELETE do mesmo dia ao mesmo tempo espera este
+    # gasto entrar (e o desconta) ou já o apagou (404 aqui).
+    dia = dia_service.travar_dia_do_usuario(db, dia_id, user_id)
 
     if gasto.client_id:
         existente = gasto_repository.find_by_client_id(db, gasto.client_id, dia_id)
@@ -65,18 +59,22 @@ def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: str):
     return novo_gasto
 
 def _travar_gasto(db: Session, gasto_id: int, user_id: str, novo_dia_id: int | None = None):
-    """Trava os dias e o gasto na ordem do resto do servidor: dia(s) → gasto.
+    """Trava na ordem do resto do servidor: ciclo → dia(s) por id → gasto.
 
-    O `remover_dia` trava o dia e depois os gastos dele; travar o gasto
-    primeiro (como antes) fazia `DELETE /gastos/X` e `DELETE /dias/{dia de X}`
-    ao mesmo tempo travarem um ao outro (deadlock, 500). Por isso o gasto é
-    lido sem trava só para saber o dia, os dias envolvidos (o atual e, ao
-    mover, o novo) são travados em ordem crescente de id — dois "mover" em
-    sentidos opostos não se cruzam — e só então o gasto. Se o gasto mudou de
-    dia entre a leitura e a trava, refaz uma vez; mudando de novo, 409.
+    O `remover_dia` trava ciclo, dia e depois os gastos dele, e o
+    `PUT /ciclos` trava o ciclo e depois todos os dias; travar em outra ordem
+    fazia dois pedidos ao mesmo tempo travarem um ao outro (deadlock, 500).
+    Por isso o gasto é lido sem trava só para saber o dia e o ciclo; o dono
+    e, ao mover, o dia novo (existe, é do usuário, é do mesmo ciclo) são
+    conferidos antes de travar qualquer coisa. Então trava o ciclo, os dias
+    envolvidos (o atual e, ao mover, o novo) em ordem crescente de id e só
+    então o gasto. Se o gasto mudou de dia entre a leitura e a trava, refaz
+    uma vez (com o ciclo já travado, a segunda volta não cruza com ninguém);
+    mudando de novo, 409.
 
     Devolve `(gasto, dias)`, com `dias` = {id: Dia ou None} dos dias travados.
     """
+    ciclo_travado = None
     for _ in range(2):
         gasto = gasto_repository.find_gasto(db, gasto_id)
 
@@ -87,6 +85,26 @@ def _travar_gasto(db: Session, gasto_id: int, user_id: str, novo_dia_id: int | N
             raise HTTPException(status_code=404, detail="Gasto não encontrado")
 
         dia_id = gasto.dia_id
+        ciclo_id = gasto.dia.ciclo_id
+
+        if novo_dia_id is not None and novo_dia_id != dia_id:
+            novo_dia = dia_repository.find_dia(db, novo_dia_id)
+
+            if not novo_dia or novo_dia.ciclo.id_usuario != user_id:
+                raise HTTPException(status_code=404, detail="Dia não encontrado")
+
+            if novo_dia.ciclo_id != ciclo_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail="O gasto só pode ser movido dentro do mesmo ciclo",
+                )
+
+        if ciclo_travado != ciclo_id:
+            ciclo_repository.get_user_ciclo_by_id(
+                db, ciclo_id, user_id, para_atualizar=True, carregar_viagem=False
+            )
+            ciclo_travado = ciclo_id
+
         ids = sorted({dia_id} | ({novo_dia_id} if novo_dia_id is not None else set()))
         dias = {
             id_: dia_repository.find_dia(db, id_, para_atualizar=True) for id_ in ids
@@ -113,18 +131,13 @@ def atualizar_gasto(db: Session, gasto_id: int, gasto_request: GastoRequest, use
     diferenca = gasto_request.valor - gasto.valor
 
     if novo_dia_id is not None and novo_dia_id != dia_atual.id:
-        # Já travado em `_travar_gasto` (mesma trava do `criar_gasto`): o gasto
-        # não entra num dia que outro pedido está apagando.
+        # Conferido e travado em `_travar_gasto` (mesma trava do
+        # `criar_gasto`): o gasto não entra num dia que outro pedido está
+        # apagando. Se o dia sumiu entre a conferência e a trava, 404.
         novo_dia = dias[novo_dia_id]
 
         if not novo_dia:
             raise HTTPException(status_code=404, detail="Dia não encontrado")
-
-        if novo_dia.ciclo.id_usuario != user_id:
-            raise HTTPException(status_code=404, detail="Dia não encontrado")
-
-        if novo_dia.ciclo_id != dia_atual.ciclo_id:
-            raise HTTPException(status_code=400, detail="O gasto só pode ser movido dentro do mesmo ciclo")
 
         dia_repository.incrementar_saldo(db, dia_atual.id, gasto.valor)
         dia_repository.incrementar_saldo(db, novo_dia_id, -gasto_request.valor)
