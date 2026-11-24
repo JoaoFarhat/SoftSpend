@@ -275,14 +275,18 @@ final class NetworkManager: Sendable {
         try await execute(request, logout401: logout401, session: uploadSession, timeoutSeconds: 90, allowRefresh: allowRefresh)
     }
 
-    nonisolated func fetchCicloResumo(skip: Int = 0, limit: Int = 5) async throws -> [CicloSoftex] {
+    nonisolated func fetchCicloResumo(antesDe: Int? = nil, skip: Int = 0, limit: Int = 5) async throws -> [CicloSoftex] {
         guard var components = URLComponents(string: "\(APIConfig.shared.baseURL)/usuario/ciclos/resumo") else {
             throw URLError(.badURL)
         }
-        components.queryItems = [
+        var queryItems = [
             URLQueryItem(name: "skip", value: String(skip)),
             URLQueryItem(name: "limit", value: String(limit))
         ]
+        if let antesDe {
+            queryItems.append(URLQueryItem(name: "antes_de", value: String(antesDe)))
+        }
+        components.queryItems = queryItems
         guard let url = components.url else {
             throw URLError(.badURL)
         }

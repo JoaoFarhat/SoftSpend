@@ -221,7 +221,7 @@ struct ExclusaoNoServidorTests {
 
         let vm = viewModel(aberto: mantido)
         vm.iniciarLeituraDeCiclos()
-        let removidos = vm.registrarPaginaDeCiclos([cicloDoServidor(2)], skip: 0, limit: 5)
+        let removidos = vm.registrarPaginaDeCiclos([cicloDoServidor(2)], antesDe: nil, limit: 5)
 
         #expect(removidos == [idApagado])
         #expect(try idsDeCiclos() == [mantido.id])
@@ -246,26 +246,27 @@ struct ExclusaoNoServidorTests {
 
         let vm = viewModel(aberto: pendente)
         vm.iniciarLeituraDeCiclos()
-        let removidos = vm.registrarPaginaDeCiclos([], skip: 0, limit: 5)
+        let removidos = vm.registrarPaginaDeCiclos([], antesDe: nil, limit: 5)
 
         #expect(removidos.isEmpty)
         #expect(try idsDeCiclos() == todos)
     }
 
     /// Página cheia (há mais páginas) não apaga nada; nem uma última página que
-    /// chega com `skip` fora de sequência (outra página ficou sem ler).
+    /// chega com `antes_de` fora de sequência (outra página ficou sem ler).
     @Test func listaDeCiclosIncompletaNaoApaga() throws {
         let antigo = ciclo(1)
         try ctx.save()
 
         let vm = viewModel(aberto: antigo)
         vm.iniciarLeituraDeCiclos()
-        let primeira = vm.registrarPaginaDeCiclos((10..<15).map(cicloDoServidor), skip: 0, limit: 5)
+        let primeira = vm.registrarPaginaDeCiclos((10..<15).map(cicloDoServidor), antesDe: nil, limit: 5)
         #expect(primeira.isEmpty)
         #expect(try idsDeCiclos().contains(antigo.id))
 
-        // Pulou a página de skip 5 (falha ou offline): a de skip 10 não serve.
-        let ultima = vm.registrarPaginaDeCiclos([cicloDoServidor(20)], skip: 10, limit: 5)
+        // A próxima página teria `antes_de` = 10 (menor id da 1ª): a que chega
+        // com outro `antes_de` não bate com a leitura em curso e não serve.
+        let ultima = vm.registrarPaginaDeCiclos([cicloDoServidor(5)], antesDe: 15, limit: 5)
         #expect(ultima.isEmpty)
         #expect(try idsDeCiclos().contains(antigo.id))
         #expect(vm.leituraDeCiclos == nil)
@@ -277,7 +278,7 @@ struct ExclusaoNoServidorTests {
         try ctx.save()
 
         let vm = viewModel(aberto: antigo)
-        let removidos = vm.registrarPaginaDeCiclos([], skip: 0, limit: 5)
+        let removidos = vm.registrarPaginaDeCiclos([], antesDe: nil, limit: 5)
 
         #expect(removidos.isEmpty)
         #expect(try idsDeCiclos().contains(antigo.id))
@@ -286,20 +287,56 @@ struct ExclusaoNoServidorTests {
     /// Lida em várias páginas seguidas até a última: o ciclo ausente de todas sai.
     @Test func cicloApagadoSomeDepoisDeVariasPaginas() throws {
         let apagado = ciclo(1)
-        let naSegundaPagina = ciclo(15)
+        let naSegundaPagina = ciclo(8)
         try ctx.save()
         let idApagado = apagado.id
 
         let vm = viewModel(aberto: naSegundaPagina)
         vm.iniciarLeituraDeCiclos()
-        #expect(vm.registrarPaginaDeCiclos((10..<15).map(cicloDoServidor), skip: 0, limit: 5).isEmpty)
-        let removidos = vm.registrarPaginaDeCiclos([cicloDoServidor(15)], skip: 5, limit: 5)
+        #expect(vm.registrarPaginaDeCiclos((10..<15).map(cicloDoServidor), antesDe: nil, limit: 5).isEmpty)
+        // `antes_de` = 10: o menor `backendId` da página anterior.
+        let removidos = vm.registrarPaginaDeCiclos([cicloDoServidor(8)], antesDe: 10, limit: 5)
 
         #expect(removidos == [idApagado])
         let ids = try idsDeCiclos()
         #expect(!ids.contains(idApagado))
         #expect(ids.contains(naSegundaPagina.id))
         #expect(ids.count == 6)
+    }
+
+    /// Página seguinte pedida com o `antes_de` certo (menor `backendId` da
+    /// anterior) continua a leitura: só sai a viagem ausente de todas as
+    /// páginas. Página com `antes_de` que não bate invalida e nada é apagado.
+    @Test func paginaSeguinteComAntesDe() throws {
+        let apagado = ciclo(1)
+        let daPrimeiraPagina = ciclo(12)
+        let daSegundaPagina = ciclo(6)
+        try ctx.save()
+        let idApagado = apagado.id
+
+        let vm = viewModel(aberto: daPrimeiraPagina)
+        vm.iniciarLeituraDeCiclos()
+        #expect(vm.registrarPaginaDeCiclos((10..<15).map(cicloDoServidor), antesDe: nil, limit: 5).isEmpty)
+
+        // `antes_de` errado (o certo seria 10, o menor id da página 1): a
+        // leitura em curso não vale mais e o ciclo ausente continua aqui.
+        #expect(vm.registrarPaginaDeCiclos([cicloDoServidor(6)], antesDe: 9, limit: 5).isEmpty)
+        #expect(vm.leituraDeCiclos == nil)
+        #expect(try idsDeCiclos().contains(apagado.id))
+
+        // Leitura refeita do zero: 5 viagens na página 1 e a página 2 com o
+        // `antes_de` certo e menos de 5 — é a última e só a sumida sai.
+        vm.iniciarLeituraDeCiclos()
+        #expect(vm.registrarPaginaDeCiclos((10..<15).map(cicloDoServidor), antesDe: nil, limit: 5).isEmpty)
+        let removidos = vm.registrarPaginaDeCiclos(
+            [cicloDoServidor(6), cicloDoServidor(7)], antesDe: 10, limit: 5
+        )
+
+        #expect(removidos == [idApagado])
+        let ids = try idsDeCiclos()
+        #expect(!ids.contains(idApagado))
+        #expect(ids.contains(daPrimeiraPagina.id))
+        #expect(ids.contains(daSegundaPagina.id))
     }
 
     /// Ciclo que o sync enviou DURANTE a leitura não era candidato e fica.
@@ -311,7 +348,7 @@ struct ExclusaoNoServidorTests {
         vm.iniciarLeituraDeCiclos()
         novo.backendId = 99
         novo.syncStatus = .synced
-        let removidos = vm.registrarPaginaDeCiclos([], skip: 0, limit: 5)
+        let removidos = vm.registrarPaginaDeCiclos([], antesDe: nil, limit: 5)
 
         #expect(removidos.isEmpty)
         #expect(try idsDeCiclos().contains(novo.id))

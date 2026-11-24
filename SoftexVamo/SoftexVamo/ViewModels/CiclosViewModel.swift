@@ -27,7 +27,10 @@ final class CiclosViewModel: ObservableObject {
     
     private var hasLoadedOnce = false
     var index: Int = 0
-    private var skip = 0
+    /// `antes_de` da próxima página do resumo: o menor `backendId` da página
+    /// anterior (`nil` na primeira). Viagem apagada em outro aparelho no meio
+    /// da leitura não desloca a próxima página, como o `skip` deslocava.
+    private var proximoAntesDe: Int? = nil
     private let limit = 5
     
     private var diasSkip = 0
@@ -92,7 +95,7 @@ final class CiclosViewModel: ObservableObject {
         self.isLoading = true
         self.hasLoadedOnce = false
         self.hasMorePages = true
-        self.skip = 0
+        self.proximoAntesDe = nil
         self.diasSkip = 0
         self.hasMoreDias = true
         self.leituraDeCiclos = nil
@@ -116,7 +119,6 @@ final class CiclosViewModel: ObservableObject {
     
     func loadMoreCiclos() {
         guard hasMorePages, !isLoading else { return }
-        skip += limit
         loadCiclos(append: true)
     }
     
@@ -137,9 +139,10 @@ final class CiclosViewModel: ObservableObject {
         
         loadCiclosTask = Task {
             isLoading = true
-            let skipDaPagina = skip
+            let antesDeDaPagina = append ? proximoAntesDe : nil
 
             if !append {
+                proximoAntesDe = nil
                 deduplicarCiclosLocais()
                 iniciarLeituraDeCiclos()
             }
@@ -184,15 +187,18 @@ final class CiclosViewModel: ObservableObject {
             }
 
             do {
-                let ciclos = try await NetworkManager.shared.fetchCicloResumo(skip: skipDaPagina, limit: limit)
+                let ciclos = try await NetworkManager.shared.fetchCicloResumo(antesDe: antesDeDaPagina, limit: limit)
 
                 guard !Task.isCancelled else { return }
 
                 hasMorePages = ciclos.count == limit
+                if let menorId = ciclos.compactMap(\.backendId).min() {
+                    proximoAntesDe = menorId
+                }
 
                 // Lido antes: depois do delete, o `atualCiclo` pode ser um objeto apagado.
                 let idAberto = self.atualCiclo.id
-                let removidos = registrarPaginaDeCiclos(ciclos, skip: skipDaPagina, limit: limit)
+                let removidos = registrarPaginaDeCiclos(ciclos, antesDe: antesDeDaPagina, limit: limit)
 
                 salvarLocal()
                 
@@ -275,16 +281,17 @@ final class CiclosViewModel: ObservableObject {
     
     // MARK: Ciclos apagados no servidor (T5)
 
-    /// Leitura das páginas de `fetchCicloResumo` desde a primeira (`skip == 0`).
-    /// Só com todas as páginas lidas em sequência, sem buraco, dá para saber o
-    /// que sumiu do servidor.
+    /// Leitura das páginas de `fetchCicloResumo` desde a primeira (sem
+    /// `antes_de`). Só com todas as páginas lidas em sequência, sem buraco,
+    /// dá para saber o que sumiu do servidor.
     struct LeituraDeCiclos {
         /// Ciclos já sincronizados antes da primeira página: um ciclo que o
         /// `SyncActor` enviar durante a leitura não está aqui e não é apagado.
         let candidatos: Set<Int>
         var vistos: Set<Int> = []
-        /// `skip` que a próxima página precisa ter para não deixar buraco.
-        var proximoSkip = 0
+        /// `antes_de` que a próxima página precisa ter para não deixar buraco:
+        /// o menor `backendId` da página anterior (`nil` na primeira).
+        var antesDe: Int? = nil
     }
     private(set) var leituraDeCiclos: LeituraDeCiclos?
 
@@ -300,19 +307,19 @@ final class CiclosViewModel: ObservableObject {
     /// apaga os ciclos que sumiram de lá. Devolve os `id`s locais apagados.
     /// Interno para os testes.
     @discardableResult
-    func registrarPaginaDeCiclos(_ ciclos: [CicloSoftex], skip: Int, limit: Int) -> Set<UUID> {
+    func registrarPaginaDeCiclos(_ ciclos: [CicloSoftex], antesDe: Int?, limit: Int) -> Set<UUID> {
         let ids = ciclos.compactMap(\.backendId)
         for ciclo in ciclos {
             salvarOuAtualizarCicloLocal(ciclo)
         }
         // Página fora de ordem (outra pulada por falha, cancelamento ou offline):
         // a leitura não serve mais para apagar nada até recomeçar do zero.
-        guard var leitura = leituraDeCiclos, leitura.proximoSkip == skip else {
+        guard var leitura = leituraDeCiclos, leitura.antesDe == antesDe else {
             leituraDeCiclos = nil
             return []
         }
         leitura.vistos.formUnion(ids)
-        leitura.proximoSkip += ciclos.count
+        leitura.antesDe = ids.min()
         guard ciclos.count < limit else {
             leituraDeCiclos = leitura
             return []
