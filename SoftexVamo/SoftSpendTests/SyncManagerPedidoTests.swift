@@ -56,7 +56,9 @@ struct SyncManagerPedidoTests {
 
         let portao = api.segurar(.postCiclo) // o sync fica parado no POST do ciclo
 
-        let manager = SyncManager()
+        // `estaConectado: { true }`: sem ele, um CI rodando sem rede faria o
+        // sync cair no ramo offline e a FakeSyncAPI nunca seria chamada.
+        let manager = SyncManager(estaConectado: { true })
         manager.injetarSyncActor(SyncActor(modelContainer: container, api: api))
 
         // Primeira chamada, sem `forcar`: roda de verdade e fica parada no portão.
@@ -96,6 +98,119 @@ struct SyncManagerPedidoTests {
         let local = try ModelContext(container).fetch(FetchDescriptor<GastosDia>())
         #expect(local.first?.syncStatus == .synced)
         #expect(local.first?.backendId == api.gastos.first?.id)
+    }
+
+    /// Troca o usuário global pelo usuário do teste (ver `UsuarioGlobalTests`).
+    private func logarUsuarioDeTeste() -> UserModel? {
+        let anterior = AuthService.shared.currentUser
+        AuthService.shared.currentUser = UserModel(
+            id: userId, nome: "Teste", username: "teste", email: "t@t.com"
+        )
+        return anterior
+    }
+
+    /// Sem conexão o sync sai sem rodar nenhuma etapa nem chamar a API, mas
+    /// `pendentesRestantes` passa a refletir a fila local — a faixa
+    /// "N alterações aguardando envio" do `MainView` aparece (e cresce)
+    /// justamente quando há gastos novos esperando para subir.
+    @Test func offlinePublicaOsPendentesSemChamarAAPI() async throws {
+        let usuarioAnterior = logarUsuarioDeTeste()
+        defer { AuthService.shared.currentUser = usuarioAnterior }
+
+        let ctx = ModelContext(container)
+        let ciclo = CicloSoftex(
+            userId: userId, valor_total: 300, gasto_total: 0,
+            periodo: "01/09 - 03/09", diaria: 100, titulo: "Cuiabá, MT", dias: []
+        )
+        ctx.insert(ciclo)
+        let dia = DiaSoftex(data: Calendar.current.startOfDay(for: .now), saldo: 100)
+        ctx.insert(dia)
+        dia.ciclo = ciclo
+        // O dia já subiu antes: só o ciclo e o gasto estão na fila (2).
+        dia.backendId = 1
+        dia.syncStatus = .synced
+        let gasto = GastosDia(valor: 25, titulo: "Almoço", categoria: .ALIMENTACAO, dia: dia)
+        ctx.insert(gasto)
+        try ctx.save()
+
+        let manager = SyncManager(estaConectado: { false })
+        manager.injetarSyncActor(SyncActor(modelContainer: container, api: api))
+        manager.pendentesRestantes = 9 // contagem velha: tem que ser sobrescrita
+
+        await manager.sync()
+
+        #expect(manager.pendentesRestantes == 2)
+        #expect(api.chamadas.isEmpty)
+        #expect(manager.isSyncing == false)
+    }
+
+    /// Offline e sem nada na fila: publica 0 (apagando uma contagem velha).
+    @Test func offlineSemPendentesPublicaZero() async throws {
+        let usuarioAnterior = logarUsuarioDeTeste()
+        defer { AuthService.shared.currentUser = usuarioAnterior }
+
+        let manager = SyncManager(estaConectado: { false })
+        manager.injetarSyncActor(SyncActor(modelContainer: container, api: api))
+        manager.pendentesRestantes = 9
+
+        await manager.sync()
+
+        #expect(manager.pendentesRestantes == 0)
+        #expect(api.chamadas.isEmpty)
+    }
+
+    /// Offline e sem usuário logado: publica 0 — o que está na fila é de
+    /// outro usuário e não entra na contagem.
+    @Test func offlineSemUsuarioPublicaZero() async throws {
+        let usuarioAnterior = AuthService.shared.currentUser
+        AuthService.shared.currentUser = nil
+        defer { AuthService.shared.currentUser = usuarioAnterior }
+
+        let ctx = ModelContext(container)
+        let ciclo = CicloSoftex(
+            userId: "outro-usuario", valor_total: 300, gasto_total: 0,
+            periodo: "01/09 - 03/09", diaria: 100, titulo: "Cuiabá, MT", dias: []
+        )
+        ctx.insert(ciclo)
+        try ctx.save()
+
+        let manager = SyncManager(estaConectado: { false })
+        manager.injetarSyncActor(SyncActor(modelContainer: container, api: api))
+        manager.pendentesRestantes = 9
+
+        await manager.sync()
+
+        #expect(manager.pendentesRestantes == 0)
+        #expect(api.chamadas.isEmpty)
+    }
+
+    /// Online o caminho não muda: as etapas rodam, tudo sobe em cascata e
+    /// `pendentesRestantes` zera.
+    @Test func onlineSobeTudoEZeraOsPendentes() async throws {
+        let usuarioAnterior = logarUsuarioDeTeste()
+        defer { AuthService.shared.currentUser = usuarioAnterior }
+
+        let ctx = ModelContext(container)
+        let ciclo = CicloSoftex(
+            userId: userId, valor_total: 300, gasto_total: 0,
+            periodo: "01/09 - 03/09", diaria: 100, titulo: "Cuiabá, MT", dias: []
+        )
+        ctx.insert(ciclo)
+        let dia = DiaSoftex(data: Calendar.current.startOfDay(for: .now), saldo: 100)
+        ctx.insert(dia)
+        dia.ciclo = ciclo
+        let gasto = GastosDia(valor: 25, titulo: "Almoço", categoria: .ALIMENTACAO, dia: dia)
+        ctx.insert(gasto)
+        try ctx.save()
+
+        let manager = SyncManager(estaConectado: { true })
+        manager.injetarSyncActor(SyncActor(modelContainer: container, api: api))
+        manager.pendentesRestantes = 9
+
+        await manager.sync()
+
+        #expect(manager.pendentesRestantes == 0)
+        #expect(api.chamadas == [.postCiclo, .postDiasLote, .postGasto])
     }
 }
 

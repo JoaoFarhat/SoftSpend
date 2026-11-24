@@ -158,6 +158,15 @@ deixa acrescentar parâmetro ao `init`). Nos testes, `SoftSpendTests/FakeSyncAPI
 é um servidor em memória que pode segurar a resposta (`segurar` → `Portao`) e
 falhar sob comando (`falhar`); ver `SyncActorTests.swift`.
 
+A conectividade do `SyncManager` também é injetável
+(`init(estaConectado:)`, padrão `{ NetworkMonitor.shared.isConnected }`),
+como no `CiclosViewModel`. Sem conexão, `sync()` não roda nenhuma etapa nem
+chama a API, mas publica `pendentesRestantes = await syncActor.pendentes(userId:)`
+antes de sair — a faixa "N alterações aguardando envio" do `MainView` aparece
+(e cresce) mesmo offline; `userId` vazio publica 0. `SyncActor.pendentes` só
+expõe o `contarPendentes` que o `sync` já usa. Testes em
+`SoftSpendTests/SyncManagerPedidoTests.swift`.
+
 Cada stage só processa itens cujo pai já tem `backendId`. Itens órfãos aguardam
 na fila (`continue`) para a próxima passada.
 
