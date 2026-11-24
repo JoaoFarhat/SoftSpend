@@ -154,4 +154,39 @@ struct DescartarNotaIlegivelTests {
         #expect(api.chamadas.contains(.deleteComprovante))
         #expect(try lerGasto().syncStatus == .synced)
     }
+
+    /// Remoção pedida com a nota ilegível ainda guardada no aparelho: o
+    /// DELETE sai sem tentar ler os bytes — `comprovanteParaRemover` é
+    /// checado antes do ramo "nota não abre" do `sincronizarComprovante`.
+    /// O estado é montado à mão (o `removerComprovante` da tela limpa os
+    /// bytes junto com o pedido) justamente para prender a ordem dos
+    /// ramos: se a checagem da nota passar na frente, a remoção esperaria
+    /// a nota abrir — que nunca acontece — e este teste falha.
+    @Test func remocaoNaoEsperaANotaAbrir() async throws {
+        try await subirViagemComNotaIlegivel()
+
+        let ctx = ModelContext(container)
+        let gasto = try #require(try ctx.fetch(FetchDescriptor<GastosDia>()).first)
+        gasto.comprovanteParaRemover = true
+        try ctx.save()
+
+        let restantes = await sync()
+
+        // A remoção subiu mesmo com a nota ilegível guardada: a nota não
+        // precisa abrir para o gasto ser desfeito no servidor.
+        #expect(api.chamadas.contains(.deleteComprovante))
+        #expect(!api.chamadas.contains(.uploadComprovante))
+        let fim = try lerGasto()
+        #expect(!fim.comprovanteParaRemover)
+        #expect(fim.comprovanteUrl == nil)
+
+        // Os bytes ilegíveis que ficaram no aparelho seguem o caso
+        // conhecido da suíte: `.failed` com "nota não abre" e backoff — a
+        // saída é o "Descartar nota" da tela, que limpa os bytes.
+        #expect(restantes == 1)
+        #expect(fim.syncStatus == .failed)
+        #expect(fim.syncError == SyncActor.erroNotaNaoAbre)
+        #expect(fim.comprovanteDataCriptografado == ilegiveis)
+        #expect(EstadoEnvio.de(fim) == .falhou(SyncActor.erroNotaNaoAbre))
+    }
 }
