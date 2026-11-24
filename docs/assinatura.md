@@ -229,7 +229,7 @@ Ordem, **depois** que a versão da loja com I1 e I2 estiver publicada e os produ
 2. Decidir sobre as contas antigas (§6).
 3. Na EC2, trocar `BILLING_ENFORCEMENT` para `on` e reiniciar o serviço.
 4. Conferir no iPhone: conta sem assinatura bloqueia as quatro ações; conta com assinatura não.
-5. Se algo der errado: voltar a `off` (instantâneo; nada foi apagado).
+5. Se algo der errado: voltar a `off` e reiniciar o serviço (alguns segundos; nada foi apagado). Roteiro completo em `docs/publicacao.md` §6.
 
 ## 5. O que o usuário cria na App Store Connect
 
