@@ -248,9 +248,12 @@ viagem bloqueada não faz requisição). Na tela, `EstadoEnvio.aguardandoAssinat
 
 **Comprovantes**: `syncComprovantes` filtra por `syncStatusRaw != synced` no
 predicado. Chama `marcarFalha` em falha (backoff) e `marcarSucesso` apenas se
-`comprovanteData == nil && !comprovanteParaRemover`. `syncGastos` também só
-marca `.synced` se não há comprovante pendente — o gasto permanece `.pending`
-até o comprovante ser processado.
+`comprovanteDataCriptografado == nil && !comprovanteParaRemover` — nota
+guardada conta como pendente mesmo quando não abre com a chave atual (olhar o
+campo cifrado basta; decifrar só para checar existência marcava `.synced` e a
+pendência sumia sem registro). `syncGastos` também só marca `.synced` se não
+há comprovante pendente — o gasto permanece `.pending` até o comprovante ser
+processado.
 
 **Exclusão vinda do servidor (T5)**: no `CiclosViewModel`, com a lista completa
 de dias (`listaCompleta`), `removerSumidos` apaga gasto `.synced` com `backendId`
@@ -270,10 +273,16 @@ copia. Testes em `SoftSpendTests/TotalDaViagemTests.swift`.
 
 ### ComprovanteCrypto
 
-`GastosDia.comprovanteData` é uma propriedade `@Transient` que encripta/decripta
-sob demanda usando `ComprovanteCrypto` (CryptoKit AES-GCM). O bytes criptografados
-ficam em `comprovanteDataCriptografado`. A chave simétrica de 256 bits é armazenada
-no Keychain com `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`.
+`GastosDia.comprovanteData` é uma propriedade `@Transient` de só leitura que
+decripta sob demanda usando `ComprovanteCrypto` (CryptoKit AES-GCM). Os bytes
+criptografados ficam em `comprovanteDataCriptografado`. A chave simétrica de
+256 bits é armazenada no Keychain com
+`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`.
+
+A escrita passa por métodos, não por setter: `gravarComprovante(_:)` lança
+`ComprovanteCryptoError` quando a chave não está acessível (quem chama avisa a
+tela — o setter antigo apagava a nota guardada e só logava) e
+`removerComprovante()` limpa o campo sem passar pela cifra.
 
 `ComprovanteCrypto` é `nonisolated` porque é acessado de `GastosDia` (que é
 `nonisolated`).
