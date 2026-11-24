@@ -70,6 +70,10 @@ def criar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], user_id:
     if not ciclo:
         raise HTTPException(status_code=404, detail="Ciclo não encontrado")
 
+    # `dias_existentes` também recebe os dias montados neste pedido: um
+    # `client_id` repetido no mesmo corpo reusa o mesmo objeto (senão os dois
+    # esbarram no unique `uix_dia_client_id_ciclo` na gravação e o lote vira
+    # 500). A resposta mantém a ordem pedida, com o dia nas duas posições.
     dias_existentes = {d.client_id: d for d in ciclo.dias if d.client_id}
     novos_dias: List[models.Dia] = []
 
@@ -77,7 +81,10 @@ def criar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], user_id:
         if dia.client_id and dia.client_id in dias_existentes:
             novos_dias.append(dias_existentes[dia.client_id])
             continue
-        novos_dias.append(models.Dia(client_id=dia.client_id, data=dia.data, saldo=ciclo.diaria, ciclo_id=ciclo_id))
+        novo = models.Dia(client_id=dia.client_id, data=dia.data, saldo=ciclo.diaria, ciclo_id=ciclo_id)
+        novos_dias.append(novo)
+        if dia.client_id:
+            dias_existentes[dia.client_id] = novo
 
     if novos_dias:
         try:
@@ -98,8 +105,6 @@ def criar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], user_id:
             if any(lido is None for lido in lidos):
                 raise
             return lidos
-
-    return ciclo.dias
 
 
 def travar_dia_do_usuario(db: Session, dia_id: int, user_id: str) -> models.Dia:
