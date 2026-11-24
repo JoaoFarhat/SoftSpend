@@ -649,7 +649,10 @@ nem de `PLUGGY_*`:
   arquivo e devolve a prévia **sem gravar nada** (nem banco, nem S3).
   `arquivo`: PDF até 10 MB e 20 páginas, OFX ou CSV até 2 MB; `senha?` para
   PDF protegido (regravado sem proteção em memória pelo `pypdfium2`; a senha
-  nunca é guardada nem logada). `services/fatura_arquivo_service.py` detecta
+  nunca é guardada nem logada). Todo uso do `pypdfium2` fica dentro da
+  trava `services/pdfium_seguro.trava_pdfium` — ele não é seguro entre
+  threads e as leituras rodam em threads do FastAPI.
+  `services/fatura_arquivo_service.py` detecta
   o tipo pelos bytes/cabeçalho, faz o parse de OFX e CSV por regex/`csv`
   (sem IA) e aplica a validação e o `soma_confere` compartilhados.
   `services/fatura_ia_service.py` manda o PDF nativo ao Gemini (mesmas
