@@ -257,10 +257,33 @@ processado. Nota guardada que a chave atual não abre (`sincronizarComprovante`,
 ramo sem bytes legíveis): `syncError = SyncActor.erroNotaNaoAbre` +
 `marcarFalha` — a tela mostra o motivo e o backoff impede insistir a cada
 passada, com os bytes preservados. A saída é o "Descartar nota" do
-`DetalheGastoView` (mostrado sempre que `comprovanteDataCriptografado != nil`
-e a nota não abre): chama `removerComprovante`, que limpa os bytes e sobe a
-remoção — o gasto destrava na passada seguinte. Testes em
-`SoftSpendTests/DescartarNotaIlegivelTests.swift`.
+`DetalheGastoView` (mostrado quando `comprovanteDataCriptografado != nil`, a
+nota não abre e a chave **não** está só indisponível): chama
+`removerComprovante`, que limpa os bytes e sobe a remoção — o gasto destrava
+na passada seguinte. Testes em `SoftSpendTests/DescartarNotaIlegivelTests.swift`.
+
+**Chave indisponível ≠ nota que não abre**: o `SyncActor` recebe o crypto no
+`init(modelContainer:api:crypto:)` (padrão `ComprovanteCrypto.shared`) e lê a
+nota por `GastosDia.lerComprovante(crypto:)`. Ordem dos ramos de
+`sincronizarComprovante` (não reordenar):
+
+1. nota que abre: upload;
+2. `comprovanteParaRemover`: DELETE — não precisa dos bytes nem da chave, sobe
+   mesmo com o iPhone trancado;
+3. `keyNotAvailable` (Keychain `WhenUnlockedThisDeviceOnly` com o iPhone
+   trancado, típico do sync em segundo plano): `marcarAguardandoDesbloqueio` —
+   `.pending`, sem contar tentativa, sem `syncError`,
+   `proximaTentativaEm = agora + 60 s`, bytes intactos. Nunca `.synced` nem
+   `erroNotaNaoAbre`;
+4. `invalidKeySize` (chave guardada com tamanho errado, não volta sozinha):
+   lança, e o `syncComprovantes` faz `marcarFalha` com o motivo;
+5. bytes que a chave atual não abre: `erroNotaNaoAbre` + `marcarFalha`.
+
+O `DetalheGastoView` separa do mesmo jeito: com `keyNotAvailable` não mostra
+"não abre" nem "Descartar nota". Testes em `SoftSpendTests/ChaveInacessivelTests.swift`
+(espera, desbloqueio e a remoção com bytes guardados e a chave fora) e
+`ChaveIndisponivelSyncTests.swift` (gasto já enviado e chave inválida), com
+`ArmazemDeChaveFalso`.
 
 **Exclusão vinda do servidor (T5)**: no `CiclosViewModel`, com a lista completa
 de dias (`listaCompleta`), `removerSumidos` apaga gasto `.synced` com `backendId`
@@ -293,6 +316,27 @@ tela — o setter antigo apagava a nota guardada e só logava) e
 
 `ComprovanteCrypto` é `nonisolated` porque é acessado de `GastosDia` (que é
 `nonisolated`).
+
+**A chave nunca é trocada por erro passageiro.** O acesso ao Keychain fica atrás
+do protocolo `ArmazemDeChave` (`nonisolated`, `Sendable`): `buscar()` devolve
+`.achou(Data)`, `.naoExiste` (`errSecItemNotFound`) ou `.indisponivel(OSStatus)`
+(qualquer outro status, ex. `errSecInteractionNotAllowed` com o iPhone trancado),
+e `adicionar(_:)` só faz `SecItemAdd`. `ComprovanteCrypto.init(armazem:)`;
+`shared` usa `ArmazemDeChaveKeychain`.
+
+- Chave nova só em `.naoExiste`. `.indisponivel` lança `keyNotAvailable` —
+  criar outra deixaria todas as notas guardadas ilegíveis para sempre.
+- Nunca `SecItemDelete`. `errSecDuplicateItem` no add (outra chamada criou
+  antes) relê e usa a chave que está lá.
+- `GastosDia.lerComprovante(crypto:)` lança só erro de chave
+  (`keyNotAvailable`/`invalidKeySize`) e devolve `nil` (com log) quando os bytes
+  não abrem com a chave atual. O getter `comprovanteData` continua devolvendo
+  `nil` nos dois casos.
+- O `concluirGasto` decide pelo campo cifrado
+  (`comprovanteDataCriptografado != nil || comprovanteParaRemover` segura o
+  gasto), sem decifrar.
+- Testes em `SoftSpendTests/ComprovanteCryptoTests.swift`, com
+  `ArmazemDeChaveFalso` (em memória; `indisponivel` simula o iPhone trancado).
 
 ### Apple Pay (atalho "Registrar gasto")
 
