@@ -58,6 +58,24 @@ struct ValorDaCompraTests {
         #expect(ValorDaCompra.interpretar("€ 5") == nil)
     }
 
+    /// `Decimal(string:)` aceita o começo e ignora o resto: "1.234.5" (dois
+    /// pontos sem formar milhar) viraria R$ 1,23 em vez de ser recusado. O
+    /// texto final tem que ser só dígitos com no máximo um ponto.
+    @Test func pontosQueNaoFormamMilhar() {
+        #expect(ValorDaCompra.interpretar("1.234.5") == nil)
+        #expect(ValorDaCompra.interpretar("12.3.4") == nil)
+        #expect(ValorDaCompra.interpretar("1,2,3.4.5") == nil)
+        #expect(ValorDaCompra.interpretar("12.") == nil)
+
+        // Formatos válidos seguem iguais.
+        #expect(ValorDaCompra.interpretar("R$ 12,34") == d("12.34"))
+        #expect(ValorDaCompra.interpretar("1.234") == d("1234"))
+        #expect(ValorDaCompra.interpretar("99.999") == d("99999"))
+        #expect(ValorDaCompra.interpretar("1.234,56") == d("1234.56"))
+        #expect(ValorDaCompra.interpretar("R$1,234.56") == d("1234.56"))
+        #expect(ValorDaCompra.interpretar("12.34") == d("12.34"))
+    }
+
     @Test func teto() {
         // Acima de R$ 100.000 é provável erro de leitura; no teto passa.
         #expect(ValorDaCompra.interpretar("R$ 100.000,00") == d("100000"))
