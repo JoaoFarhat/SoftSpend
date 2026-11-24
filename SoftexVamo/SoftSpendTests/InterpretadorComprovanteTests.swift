@@ -44,6 +44,43 @@ struct InterpretadorComprovanteTests {
         #expect(InterpretadorComprovante.inferirCategoria(de: ["Showroom Móveis"]) == nil)
     }
 
+    @Test func nomesCompostosDeAlimentacaoCasam() {
+        // "hipermercado" tem "mercado" dentro, mas palavra inteira não casa
+        // por pedaço — cada nome composto precisa da palavra própria na lista.
+        #expect(InterpretadorComprovante.inferirCategoria(de: ["Pizzaria do Zé"]) == .ALIMENTACAO)
+        #expect(InterpretadorComprovante.inferirCategoria(de: ["Pizzarias Reunidas"]) == .ALIMENTACAO)
+        #expect(InterpretadorComprovante.inferirCategoria(de: ["Hipermercado Extra"]) == .ALIMENTACAO)
+        #expect(InterpretadorComprovante.inferirCategoria(de: ["Mercadinho São Luiz"]) == .ALIMENTACAO)
+        #expect(InterpretadorComprovante.inferirCategoria(de: ["Minimercado"]) == .ALIMENTACAO)
+        #expect(InterpretadorComprovante.inferirCategoria(de: ["Churrascaria Gaúcha"]) == .ALIMENTACAO)
+        #expect(InterpretadorComprovante.inferirCategoria(de: ["Hamburgueria do Centro"]) == .ALIMENTACAO)
+        #expect(InterpretadorComprovante.inferirCategoria(de: ["Sorveteria Gelato"]) == .ALIMENTACAO)
+        #expect(InterpretadorComprovante.inferirCategoria(de: ["Doceria da Ana"]) == .ALIMENTACAO)
+    }
+
+    @Test func autopostoEhTransporte() {
+        #expect(InterpretadorComprovante.inferirCategoria(de: ["AUTOPOSTO SHELL"]) == .TRANSPORTE)
+        #expect(InterpretadorComprovante.inferirCategoria(de: ["Auto Posto Avenida"]) == .TRANSPORTE)
+    }
+
+    // MARK: Título — ruído casa palavra inteira
+
+    @Test func tituloComRuidoDentroDePalavraPassa() {
+        // "rua" está dentro de "restaurante" e "nota" dentro de "notável":
+        // só palavra inteira derruba o título.
+        #expect(InterpretadorComprovante.encontrarTitulo(em: ["Restaurante Peruano"]) == "Restaurante Peruano")
+        #expect(InterpretadorComprovante.encontrarTitulo(em: ["Notável Café"]) == "Notável Café")
+    }
+
+    @Test func tituloPulaEnderecoENotaFiscal() {
+        #expect(InterpretadorComprovante.encontrarTitulo(em: [
+            "Rua das Flores, 10", "Padaria Real"
+        ]) == "Padaria Real")
+        #expect(InterpretadorComprovante.encontrarTitulo(em: [
+            "NOTA FISCAL", "Padaria Real"
+        ]) == "Padaria Real")
+    }
+
     // MARK: Valor — não é pedaço de número maior
 
     @Test func cnpjSozinhoNaoDaValor() {
