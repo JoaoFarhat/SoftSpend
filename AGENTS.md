@@ -938,8 +938,12 @@ Para evitar criação duplicada quando o app não recebe a resposta do `POST` (e
 - `DELETE /dias/{id}`, `POST /dias/{id}/gastos` e o `PUT /gastos/{id}` que muda de dia
   leem o dia com `find_dia(..., para_atualizar=True)` (`FOR UPDATE`, só o dia, não o
   ciclo); o `remover_dia` soma e apaga os gastos de uma leitura com `FOR UPDATE` de
-  `gastos_dia` (`listar_por_dia_para_atualizar`), não de `dia.gastos`. Testes em
-  `tests/test_remover_dia_corrida.py`.
+  `gastos_dia` (`listar_por_dia_para_atualizar`), não de `dia.gastos`. Ordem das
+  travas em todo o servidor: dia(s) por id crescente → gasto → ciclo (só por
+  `UPDATE` relativo). `DELETE`/`PUT /gastos/{id}` (`gasto_service._travar_gasto`)
+  leem o gasto sem trava para saber o dia, travam o dia atual (e o novo, ao mover)
+  e só então o gasto; se o gasto mudou de dia no meio, refazem uma vez e depois
+  respondem 409. Testes em `tests/test_remover_dia_corrida.py`.
 - As tabelas têm unique constraints por `client_id` + entidade pai:
   - `uix_ciclo_client_id_usuario`
   - `uix_dia_client_id_ciclo`
