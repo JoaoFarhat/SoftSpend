@@ -295,6 +295,14 @@ def _por_token(db: Session, token: str):
     )
 
 
+def _por_uuid_notificacao(db: Session, notification_uuid: str):
+    return (
+        db.query(models.AppleNotificacao)
+        .filter(models.AppleNotificacao.notification_uuid == notification_uuid)
+        .first()
+    )
+
+
 def registrar_transacao(
     db: Session, user_id: str, jws: str, agora: datetime | None = None
 ) -> dict:
@@ -371,12 +379,7 @@ def processar_notificacao(
     if not notificacao.uuid or not notificacao.tipo:
         raise apple_service.ComprovanteInvalido("notificação sem uuid ou tipo")
 
-    repetida = (
-        db.query(models.AppleNotificacao)
-        .filter(models.AppleNotificacao.notification_uuid == notificacao.uuid)
-        .first()
-    )
-    if repetida is not None:
+    if _por_uuid_notificacao(db, notificacao.uuid) is not None:
         return "repetida"
 
     transacao = notificacao.transacao
@@ -428,7 +431,16 @@ def processar_notificacao(
     try:
         db.commit()
     except IntegrityError:
-        # A mesma notificação chegou duas vezes ao mesmo tempo.
         db.rollback()
-        return "repetida"
+        if _por_uuid_notificacao(db, notificacao.uuid) is not None:
+            # A mesma notificação chegou duas vezes ao mesmo tempo.
+            return "repetida"
+        # Conflito em outra linha (ex.: o único de
+        # `assinaturas.original_transaction_id` numa corrida com /transacoes)
+        # não é reenvio: relança para a rota responder 500 e a Apple repetir,
+        # senão a renovação, o reembolso ou o cancelamento deste aviso some.
+        logger.error(
+            "Webhook da Apple recusado pelo banco (%s)", notificacao.tipo
+        )
+        raise
     return resultado
