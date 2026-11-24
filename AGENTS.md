@@ -817,6 +817,13 @@ DEMO_SENHA='...' python -m scripts.criar_conta_demo --email demo@softspend.com.b
 com o mesmo e-mail não duplica nada: avisa no stderr e sai sem gravar.
 Testes em `tests/test_conta_demo.py`.
 
+Para conferir se o servidor está pronto para a loja (banco conecta,
+`alembic_version` igual ao head, segredos e `APPLE_*` presentes, `.cer` em
+`certificados_apple/`, conta de demonstração liberada), rode na EC2, de
+dentro de `Python/`: `python -m scripts.conferir_servidor`. Imprime uma
+linha `OK`/`FALTA` por item — nunca o valor de segredos — e sai 1 se faltar
+algo. Testes em `tests/test_conferir_servidor.py`.
+
 | Variável | Default | Descrição |
 | --- | --- | --- |
 | `BILLING_ENFORCEMENT` | `off` | Lida a cada requisição. Só `on` liga o bloqueio; com qualquer outro valor `tem_acesso` é sempre `true` e nada responde `subscription_required` (o `status` real continua no `GET /api/assinatura`) |
