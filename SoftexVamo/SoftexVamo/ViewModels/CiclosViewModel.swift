@@ -444,7 +444,7 @@ final class CiclosViewModel: ObservableObject {
             return
         }
         await carregarDiasDoServidor(cicloId: cicloId) { skip, limit in
-            try await api.fetchDias(cicloId: cicloId, skip: skip, limit: limit)
+            try await self.api.fetchDias(cicloId: cicloId, skip: skip, limit: limit)
         }
     }
 
