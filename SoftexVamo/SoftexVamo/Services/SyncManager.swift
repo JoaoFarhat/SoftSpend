@@ -23,8 +23,14 @@ final class SyncManager: ObservableObject {
     private var forcarPendente = false
     private var networkObservationTask: Task<Void, Never>?
     private let logger = Logger(subsystem: "br.com.softspend", category: "SyncManager")
+    /// Conectividade consultada antes de chamar a rede; injetável para os
+    /// testes — produção usa `NetworkMonitor.shared.isConnected` (padrão do
+    /// `init`), como no `CiclosViewModel`. Sem ela, um teste com a `SyncAPI`
+    /// falsa cairia no ramo offline quando o CI rodasse sem rede.
+    private let estaConectado: @MainActor () -> Bool
 
-    init() {
+    init(estaConectado: @escaping @MainActor () -> Bool = { NetworkMonitor.shared.isConnected }) {
+        self.estaConectado = estaConectado
         observeNetwork()
     }
 
@@ -47,7 +53,7 @@ final class SyncManager: ObservableObject {
 
     func configure(container: ModelContainer) {
         syncActor = SyncActor(modelContainer: container)
-        if NetworkMonitor.shared.isConnected {
+        if estaConectado() {
             Task {
                 await sync(forcar: true)
             }
@@ -116,11 +122,16 @@ final class SyncManager: ObservableObject {
             logger.info("SyncManager: sync já em andamento, pedido guardado para o fim")
             return
         }
-        guard NetworkMonitor.shared.isConnected else {
-            logger.warning("SyncManager: sem conexão, sync ignorado")
+        let userId = AuthService.shared.currentUser?.id ?? ""
+        guard estaConectado() else {
+            // Sem conexão nenhuma etapa roda e nenhuma requisição sai, mas a
+            // faixa "N alterações aguardando envio" do MainView precisa
+            // refletir o que já está na fila — sem isso ela some justamente
+            // quando há gastos novos esperando para subir.
+            pendentesRestantes = userId.isEmpty ? 0 : await syncActor.pendentes(userId: userId)
+            logger.warning("SyncManager: sem conexão, sync ignorado (pendentes=\(self.pendentesRestantes, privacy: .public))")
             return
         }
-        let userId = AuthService.shared.currentUser?.id ?? ""
         guard !userId.isEmpty else {
             logger.error("SyncManager: userId vazio, sync ignorado")
             return
@@ -327,6 +338,13 @@ actor SyncActor: ModelActor {
             if pendentesDepois == 0 || pendentesDepois >= pendentesAntes { break }
         }
         return pendentesDepois
+    }
+
+    /// Só a contagem dos pendentes, sem rodar nenhuma etapa nem chamar a API.
+    /// O `SyncManager` usa para atualizar `pendentesRestantes` quando o sync
+    /// não pode rodar (sem conexão) — a regra de contagem é a mesma do `sync`.
+    func pendentes(userId: String) -> Int {
+        contarPendentes(agora: .now, userId: userId)
     }
 
     private func contarPendentes(agora: Date, userId: String) -> Int {
