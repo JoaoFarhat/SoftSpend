@@ -5,6 +5,7 @@ nenhum teste faz chamada real. O rate limit é desligado porque ele é por IP
 e tornaria a suite dependente do total de requisições.
 """
 
+import asyncio
 import importlib
 import io
 import logging
@@ -13,6 +14,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
+from fastapi import UploadFile
 from fastapi.testclient import TestClient
 from reportlab.lib.pdfencrypt import StandardEncryption
 from reportlab.pdfgen import canvas
@@ -21,6 +23,11 @@ from sqlalchemy.orm import Session
 
 from enums.categoria_enum import Categoria
 from services import fatura_ia_service
+from services.fatura_arquivo_service import (
+    TAMANHO_MAXIMO_PDF,
+    ErroFatura,
+    ler_upload,
+)
 from services.fatura_ia_service import CompraExtraida, FaturaExtraida
 
 
@@ -166,6 +173,33 @@ def gemini(monkeypatch):
     falso = _ClienteGeminiFalso(_resposta_gemini(_fatura_extraida()))
     monkeypatch.setattr(fatura_ia_service, "_client", falso)
     return falso
+
+
+# -------------------------------------------------------- ler_upload
+
+
+def _upload_sem_size(conteudo: bytes) -> UploadFile:
+    # `UploadFile` montado à mão tem `size` None (o tamanho só vem do
+    # Content-Length do multipart), então o laço de chunks decide o limite.
+    return UploadFile(file=io.BytesIO(conteudo))
+
+
+def test_pdf_maior_que_64kb_sem_size_chega_inteiro_como_bytes():
+    dados = b"%PDF-1.7\n" + b"0" * (70 * 1024)
+
+    tipo, conteudo = asyncio.run(ler_upload(_upload_sem_size(dados)))
+
+    assert tipo == "pdf"
+    assert isinstance(conteudo, bytes)
+    assert conteudo == dados
+
+
+def test_arquivo_de_10mb_mais_1_byte_da_413():
+    dados = b"0" * (TAMANHO_MAXIMO_PDF + 1)
+
+    with pytest.raises(ErroFatura) as erro:
+        asyncio.run(ler_upload(_upload_sem_size(dados)))
+    assert erro.value.status_code == 413
 
 
 # ------------------------------------------------------------------- PDF
