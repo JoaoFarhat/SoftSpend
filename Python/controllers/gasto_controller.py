@@ -13,6 +13,9 @@ router = APIRouter()
 TAMANHO_MAXIMO_IMAGEM = 5 * 1024 * 1024
 # Recibo em PDF (ex: Uber) costuma ser maior que uma foto de cupom.
 TAMANHO_MAXIMO_PDF = 10 * 1024 * 1024
+# A foto da nota que o app guarda chega a 9 MB (`NotaFiscal.tamanhoMaximo`):
+# na rota do comprovante a imagem tem o mesmo teto do PDF.
+TAMANHO_MAXIMO_IMAGEM_COMPROVANTE = TAMANHO_MAXIMO_PDF
 
 
 @router.post("/dias/{dia_id}/gastos", response_model=GastoResponse)
@@ -37,13 +40,18 @@ MIME_TYPES_PERMITIDOS = {"image/jpeg", "image/jpg", "image/png", "image/webp"}
 MIME_TYPE_PDF = "application/pdf"
 
 
-def _limite_para(content_type: str) -> tuple[int, str]:
+def _limite_para(content_type: str, tamanho_maximo_imagem: int) -> tuple[int, str]:
     if content_type == MIME_TYPE_PDF:
         return TAMANHO_MAXIMO_PDF, "PDF muito grande (max 10MB)"
-    return TAMANHO_MAXIMO_IMAGEM, "Imagem muito grande (max 5MB)"
+    maximo_mb = tamanho_maximo_imagem // (1024 * 1024)
+    return tamanho_maximo_imagem, f"Imagem muito grande (max {maximo_mb}MB)"
 
 
-async def _ler_arquivo(arquivo: UploadFile, permitir_pdf: bool = False) -> tuple[bytes, str]:
+async def _ler_arquivo(
+    arquivo: UploadFile,
+    permitir_pdf: bool = False,
+    tamanho_maximo_imagem: int = TAMANHO_MAXIMO_IMAGEM,
+) -> tuple[bytes, str]:
     """Le e valida o upload, devolvendo o conteudo e o MIME real (magic bytes).
 
     O MIME declarado pelo client serve so para a rejeicao antecipada; o tipo
@@ -61,15 +69,18 @@ async def _ler_arquivo(arquivo: UploadFile, permitir_pdf: bool = False) -> tuple
     if not arquivo.content_type or arquivo.content_type not in tipos_aceitos:
         raise HTTPException(status_code=400, detail=erro_tipo)
 
-    tamanho_maximo, erro_tamanho = _limite_para(arquivo.content_type)
+    tamanho_maximo, erro_tamanho = _limite_para(
+        arquivo.content_type, tamanho_maximo_imagem
+    )
 
     # Aborta o mais cedo possível se o client declarar Content-Length
     if arquivo.size is not None and arquivo.size > tamanho_maximo:
         raise HTTPException(status_code=413, detail=erro_tamanho)
 
     # Lê em chunks para não carregar arquivos gigantes inteiros em memória/disco
-    # caso o Content-Length esteja ausente ou seja mentiroso.
-    conteudo = b""
+    # caso o Content-Length esteja ausente ou seja mentiroso. O bytearray
+    # evita a cópia quadrática de `bytes += chunk` em arquivos de ~10 MB.
+    conteudo = bytearray()
     chunk_size = 64 * 1024
     while True:
         chunk = await arquivo.read(chunk_size)
@@ -85,11 +96,13 @@ async def _ler_arquivo(arquivo: UploadFile, permitir_pdf: bool = False) -> tuple
 
     # O limite depende do tipo real, nao do declarado, senao um PDF renomeado
     # como imagem escaparia do limite menor.
-    tamanho_maximo_real, erro_tamanho_real = _limite_para(kind.mime)
+    tamanho_maximo_real, erro_tamanho_real = _limite_para(
+        kind.mime, tamanho_maximo_imagem
+    )
     if len(conteudo) > tamanho_maximo_real:
         raise HTTPException(status_code=413, detail=erro_tamanho_real)
 
-    return conteudo, kind.mime
+    return bytes(conteudo), kind.mime
 
 
 @router.post(
@@ -137,7 +150,11 @@ async def anexar_comprovante(
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
-    conteudo, mime = await _ler_arquivo(imagem, permitir_pdf=True)
+    conteudo, mime = await _ler_arquivo(
+        imagem,
+        permitir_pdf=True,
+        tamanho_maximo_imagem=TAMANHO_MAXIMO_IMAGEM_COMPROVANTE,
+    )
 
     return await run_in_threadpool(
         gasto_service.anexar_comprovante, db, gasto_id, conteudo, mime, user_id

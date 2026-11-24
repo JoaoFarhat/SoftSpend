@@ -64,25 +64,49 @@ func textoValorBRL(_ valor: Decimal) -> String {
 // MARK: - Nota fiscal
 
 /// Codificação da foto do comprovante: a nota guardada mantém a resolução
-/// original; só a cópia enviada para leitura é reduzida.
+/// original quando ela cabe no teto; só a cópia enviada para leitura é
+/// sempre reduzida.
 enum NotaFiscal {
-    /// Teto de upload da nota. O servidor rejeita acima de 10MB.
+    /// Teto de upload da nota: 9 MB, um passo abaixo dos 10 MB que o
+    /// servidor aceita na rota do comprovante (o mesmo teto do PDF).
     static let tamanhoMaximo = 9 * 1024 * 1024
 
-    /// Codifica a nota preservando a resolução original.
+    /// Codifica a nota garantindo o `tamanhoMaximo`.
     ///
-    /// A nota arquivada precisa continuar legível para fins fiscais, então não
-    /// há redimensionamento: só a conversão para JPEG (o HEIC da galeria não é
-    /// universalmente legível). A qualidade cai apenas se o arquivo passar do
-    /// teto aceito pelo servidor.
+    /// A nota arquivada precisa continuar legível para fins fiscais, então o
+    /// redimensionamento é o último recurso: primeiro cai só a qualidade do
+    /// JPEG (o HEIC da galeria não é universalmente legível); se mesmo em
+    /// 0,4 o arquivo passar do teto do servidor, a resolução desce em
+    /// passos de 0,75 até caber.
     static func codificar(_ image: UIImage) -> Data? {
         var qualidade: CGFloat = 0.95
         var dados = image.jpegData(compressionQuality: qualidade)
         while let atual = dados, atual.count > tamanhoMaximo, qualidade > 0.4 {
-            qualidade -= 0.15
+            qualidade = max(0.4, qualidade - 0.15)
             dados = image.jpegData(compressionQuality: qualidade)
         }
+        var reduzida = image
+        while let atual = dados, atual.count > tamanhoMaximo,
+              let menor = escalonada(reduzida, por: 0.75) {
+            reduzida = menor
+            dados = menor.jpegData(compressionQuality: qualidade)
+        }
         return dados
+    }
+
+    /// Reduz a imagem para `fator` × as dimensões atuais; `nil` quando o
+    /// resultado seria pequeno demais para servir de nota.
+    private static func escalonada(_ image: UIImage, por fator: CGFloat) -> UIImage? {
+        let novoTamanho = CGSize(
+            width: image.size.width * fator,
+            height: image.size.height * fator
+        )
+        guard novoTamanho.width >= 16, novoTamanho.height >= 16 else { return nil }
+        let formato = UIGraphicsImageRendererFormat.default()
+        formato.scale = 1
+        return UIGraphicsImageRenderer(size: novoTamanho, format: formato).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: novoTamanho))
+        }
     }
 
     /// Reduz a imagem (maior lado 1280px, JPEG 0.8) antes de enviar à leitura.

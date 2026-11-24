@@ -913,10 +913,13 @@ gasto), o que evita objetos órfãos no bucket. Fluxos suportados no app:
 2. Anexar manualmente durante a criação do gasto.
 3. Anexar depois, reabrindo o gasto salvo para edição.
 
-A nota arquivada mantém a **resolução original** (só é convertida para JPEG, e a
-qualidade cai apenas se passar de 9MB); a redução para 1280px existe só para a
-requisição do OCR. Ver `NotaFiscal.codificar` e `NotaFiscal.comprimirParaOCR` em
-`Services/LancamentoGasto.swift`.
+A nota arquivada mantém a **resolução original** quando cabe: é convertida para
+JPEG e a qualidade cai até 0,4 se passar de 9MB; se ainda não couber, a
+resolução desce em passos de 0,75 (`NotaFiscal.codificar` garante o teto). O
+servidor aceita imagem de até 10 MB no `POST /gastos/{id}/comprovante` (o mesmo
+teto do PDF; o `POST /gastos/extrair` segue com 5 MB). A redução para 1280px
+existe só para a requisição do OCR. Ver `NotaFiscal.codificar` e
+`NotaFiscal.comprimirParaOCR` em `Services/LancamentoGasto.swift`.
 
 A limpeza do bucket fica em `services/comprovante_cleanup.py`, via listeners do
 SQLAlchemy registrados no import feito pelo `main.py`. O `after_delete` anota as
