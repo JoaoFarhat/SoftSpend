@@ -365,7 +365,7 @@ def test_com_interruptor_ligado_o_resto_continua(ambiente, monkeypatch):
     )
     assert gasto.status_code == 200, gasto.text
 
-    assert client.get("/usuario/ciclos").status_code == 200
+    assert client.get("/usuario/ciclos/resumo").status_code == 200
     assert client.get("/api/assinatura").status_code == 200
 
     excluir = client.delete("/auth/conta")

@@ -21,18 +21,6 @@ def criar_ciclo(request: Request, ciclo: CicloRequest, db: Session = Depends(get
     return ciclo_service.criar_ciclo(db, ciclo, user_id)
 
 
-@router.get("/usuario/ciclos", response_model=list[CicloResponse])
-@limiter.limit("60/minute")
-def get_all_ciclos(
-    request: Request,
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
-    db: Session = Depends(get_db),
-    user_id: str = Depends(get_current_user_id),
-):
-    return ciclo_service.get_all_ciclos(db, user_id, skip=skip, limit=limit)
-
-
 @router.get("/usuario/ciclos/resumo", response_model=list[CicloResponse])
 @limiter.limit("60/minute")
 def get_ciclos_resumo(
