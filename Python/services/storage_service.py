@@ -7,6 +7,8 @@ import boto3
 from botocore.config import Config
 from PIL import Image
 
+from services.pdfium_seguro import trava_pdfium
+
 logger = logging.getLogger(__name__)
 
 S3_BUCKET = os.getenv("S3_BUCKET")
@@ -118,27 +120,30 @@ def pdf_primeira_pagina_para_jpeg(conteudo: bytes) -> bytes:
     """
     import pypdfium2 as pdfium
 
-    try:
-        documento = pdfium.PdfDocument(conteudo)
-    except Exception as erro:
-        raise ValueError(f"PDF invalido: {erro}")
+    # O pypdfium2 não e seguro entre threads e isto roda no threadpool do
+    # FastAPI: todo o uso fica dentro da trava (ver `pdfium_seguro`).
+    with trava_pdfium:
+        try:
+            documento = pdfium.PdfDocument(conteudo)
+        except Exception as erro:
+            raise ValueError(f"PDF invalido: {erro}")
 
-    try:
-        if len(documento) == 0:
-            raise ValueError("PDF nao tem paginas")
+        try:
+            if len(documento) == 0:
+                raise ValueError("PDF nao tem paginas")
 
-        pagina = documento[0]
-        largura_pt, altura_pt = pagina.get_size()
-        if largura_pt <= 0 or altura_pt <= 0:
-            raise ValueError("PDF tem pagina sem dimensoes")
-        escala = min(
-            PDF_ESCALA_RENDER,
-            PDF_MAX_LADO_PX / largura_pt,
-            PDF_MAX_LADO_PX / altura_pt,
-        )
-        imagem = pagina.render(scale=escala).to_pil()
-    finally:
-        documento.close()
+            pagina = documento[0]
+            largura_pt, altura_pt = pagina.get_size()
+            if largura_pt <= 0 or altura_pt <= 0:
+                raise ValueError("PDF tem pagina sem dimensoes")
+            escala = min(
+                PDF_ESCALA_RENDER,
+                PDF_MAX_LADO_PX / largura_pt,
+                PDF_MAX_LADO_PX / altura_pt,
+            )
+            imagem = pagina.render(scale=escala).to_pil()
+        finally:
+            documento.close()
 
     if imagem.mode != "RGB":
         imagem = imagem.convert("RGB")

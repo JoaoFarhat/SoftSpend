@@ -91,7 +91,7 @@ Resumo do estado por área; o detalhe de cada item está nos passos A a E abaixo
     - Criar viagem sem internet, ligar a rede e ver subir sozinha.
     - Gasto com leitura por IA (pede consentimento na primeira vez).
     - Importar uma fatura real (PDF) e conferir o aviso da primeira importação.
-18. **[Você, servidor]** **Ligar `BILLING_ENFORCEMENT=on` agora**, só depois de o passo 17 passar e antes de enviar (`docs/publicacao.md` §4, passo 15): na EC2 editar o `.env`, `sudo systemctl restart softspend`. Antes de ligar, responder as decisões de `docs/assinatura.md` §6 (contas antigas, carência de cobrança, até quando aceitar Sandbox). Se algo der errado, voltar a `off` (instantâneo, nada é apagado).
+18. **[Você, servidor]** **Ligar `BILLING_ENFORCEMENT=on` agora**, só depois de o passo 17 passar e antes de enviar (`docs/publicacao.md` §4, passo 15): na EC2 editar o `.env`, `sudo systemctl restart softspend`. Antes de ligar, responder as decisões de `docs/assinatura.md` §6 (contas antigas, carência de cobrança, até quando aceitar Sandbox). Se algo der errado, voltar a `off` e reiniciar o serviço (alguns segundos, nada é apagado); roteiro completo em `docs/publicacao.md` §6.
 19. **[iPhone]** Com `on`, conferir os bloqueios (PR #68): uma conta nova sem teste iniciado deve abrir a tela de planos ao tentar nova viagem, ler comprovante com IA, exportar e importar fatura; ver, editar e lançar gasto à mão continuam livres; a conta de demonstração passa em tudo sem comprar. Se a conta de demonstração for bloqueada, o id não está em `ACESSO_LIBERADO_USUARIOS`.
 
 ## E. Ficha e envio

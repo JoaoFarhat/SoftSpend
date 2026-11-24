@@ -10,6 +10,12 @@ import SwiftData
 /// viagem —, sem nenhuma requisição a mais. Itens guardados por versões
 /// anteriores com `SyncActor.erroApagadoEmOutroAparelho` são descartados do
 /// mesmo jeito no começo do `sync`. Erro 500 segue o backoff normal.
+///
+/// O descarte só vale para o 404 **da API** (corpo com `request_id`, que vira
+/// `requestId != "-"` no `APIError.serverError`). Um 404 sem `request_id` —
+/// rota inexistente do FastAPI (`{"detail": "Not Found"}`: deploy quebrado,
+/// app novo contra servidor velho) — não prova que o item sumiu e segue a
+/// falha comum, com backoff.
 @MainActor
 struct FalhaFinal404Tests {
     let container: ModelContainer
@@ -302,5 +308,99 @@ struct FalhaFinal404Tests {
         gasto = try #require(gastosLocais(leitura).first { $0.titulo == "Táxi" })
         #expect(gasto.syncStatus == .synced)
         #expect(gasto.backendId == api.gastos.last?.id)
+    }
+
+    // MARK: 404 que não veio da API (rota inexistente)
+
+    /// 404 sem `request_id` no POST do gasto: nada é descartado — segue a
+    /// falha comum (`.failed`, backoff, valor intacto no `gasto_total`) e o
+    /// gasto sobe quando a rota volta a existir.
+    @Test func postGastoRotaInexistenteNaoDescarta() async throws {
+        try await subirViagem()
+        api.falhar(.postGasto, com: FakeSyncAPI.rotaInexistente)
+
+        let ctx = ModelContext(container)
+        _ = try novoGasto("Táxi", valor: 30, no: try diaLocal(ctx), ctx: ctx)
+        try ctx.save()
+        #expect(try cicloLocal(ModelContext(container)).gasto_total == 55)
+
+        #expect(await sync() == 1)
+        #expect(api.chamadas == [.postGasto])
+
+        let leitura = ModelContext(container)
+        let gasto = try #require(gastosLocais(leitura).first { $0.titulo == "Táxi" })
+        #expect(gasto.syncStatus == .failed)
+        #expect(gasto.tentativas == 1)
+        #expect(gasto.backendId == nil)
+        #expect(try cicloLocal(leitura).gasto_total == 55)
+
+        api.pararDeFalhar(.postGasto)
+        #expect(await sync() == 0)
+        #expect(api.gastos.count == 2)
+    }
+
+    /// Mesmo caso no `POST /dias/lote`: os dias do lote ficam `.failed` com
+    /// backoff, os gastos deles continuam no aparelho e nada sai do total.
+    @Test func postDiasLoteRotaInexistenteNaoDescarta() async throws {
+        try await subirViagem()
+        api.falhar(.postDiasLote, com: FakeSyncAPI.rotaInexistente)
+
+        let ctx = ModelContext(container)
+        let diaNovo = DiaSoftex(data: .now.addingTimeInterval(86400), saldo: 100)
+        ctx.insert(diaNovo)
+        diaNovo.ciclo = try cicloLocal(ctx)
+        _ = try novoGasto("Hotel", valor: 40, no: diaNovo, ctx: ctx)
+        try ctx.save()
+        #expect(try cicloLocal(ModelContext(container)).gasto_total == 65)
+
+        // O gasto novo espera o backendId do dia: também conta como pendente.
+        #expect(await sync() == 2)
+        #expect(api.chamadas == [.postDiasLote])
+
+        let leitura = ModelContext(container)
+        let dias = try diasLocais(leitura)
+        #expect(dias.count == 2)
+        let falho = try #require(dias.first { $0.backendId == nil })
+        #expect(falho.syncStatus == .failed)
+        #expect(falho.tentativas == 1)
+        #expect(Set(try gastosLocais(leitura).map(\.titulo)) == ["Almoço", "Hotel"])
+        #expect(try cicloLocal(leitura).gasto_total == 65)
+
+        api.pararDeFalhar(.postDiasLote)
+        #expect(await sync() == 0)
+        #expect(api.dias.count == 2)
+    }
+
+    /// `DELETE` de gasto com a rota inexistente: falha comum — o gasto fica na
+    /// fila com `deletadoEm` (não sai do aparelho) e o DELETE é tentado de novo.
+    @Test func deleteGastoRotaInexistenteNaoApaga() async throws {
+        try await subirViagem()
+        api.falhar(.deleteGasto, com: FakeSyncAPI.rotaInexistente)
+
+        // Como o deleteGasto do app faz: marca deletadoEm e tira o valor do total.
+        let ctx = ModelContext(container)
+        let gasto = try #require(gastosLocais(ctx).first)
+        gasto.deletadoEm = .now
+        gasto.syncStatus = .pending
+        try cicloLocal(ctx).gasto_total = 0
+        try ctx.save()
+
+        // Item com deletadoEm não conta nos pendentes, mas também não some.
+        #expect(await sync() == 0)
+        #expect(api.chamadas == [.deleteGasto])
+        #expect(api.gastos.count == 1)
+
+        let leitura = ModelContext(container)
+        let local = try #require(gastosLocais(leitura).first)
+        #expect(local.deletadoEm != nil)
+        #expect(local.syncStatus == .failed)
+        #expect(local.tentativas == 1)
+
+        api.pararDeFalhar(.deleteGasto)
+        #expect(await sync() == 0)
+        #expect(api.gastos.isEmpty)
+        let final = try #require(gastosLocais(ModelContext(container)).first)
+        #expect(final.syncStatus == .synced)
+        #expect(final.deletadoEm != nil)
     }
 }
