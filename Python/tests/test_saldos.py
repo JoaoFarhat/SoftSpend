@@ -16,6 +16,7 @@ from sqlalchemy import event
 
 from test_core_api import (  # noqa: F401  (`ambiente` e o fixture do core)
     USER_A,
+    USER_B,
     _ciclo_payload,
     _dia_payload,
     _gasto_payload,
@@ -137,6 +138,61 @@ def test_mover_gasto_para_dia_de_outra_viagem_da_400_e_nada_muda(ambiente):
     total_b, saldos_b = _estado(client, ciclo_b["id"])
     assert total_b == 0.00
     assert all(saldo == 400.00 for saldo in saldos_b.values())
+
+
+def test_mover_gasto_para_dia_de_outro_usuario_da_404_e_nada_muda(ambiente):
+    client = ambiente.como(USER_A)
+    ciclo_a, dias_a = _viagem(client, "ciclo-do-a")
+    gasto = _gasto(client, dias_a[0]["id"], "gasto-do-a")
+
+    client_b = ambiente.como(USER_B)
+    ciclo_b, dias_b = _viagem(
+        client_b, "ciclo-do-b", valor_total="1200.00", diaria="400.00"
+    )
+
+    client = ambiente.como(USER_A)
+    response = client.put(
+        f"/gastos/{gasto['id']}",
+        json=_gasto_payload(valor="45.00", dia_id=dias_b[0]["id"]),
+    )
+    assert response.status_code == 404
+
+    total_a, saldos_a = _estado(client, ciclo_a["id"])
+    assert total_a == 30.00
+    assert saldos_a[dias_a[0]["id"]] == 70.00
+    assert saldos_a[dias_a[1]["id"]] == 100.00
+    assert saldos_a[dias_a[2]["id"]] == 100.00
+
+    client_b = ambiente.como(USER_B)
+    total_b, saldos_b = _estado(client_b, ciclo_b["id"])
+    assert total_b == 0.00
+    assert all(saldo == 400.00 for saldo in saldos_b.values())
+
+    corpo_b = client_b.get(f"/ciclos/{ciclo_b['id']}").json()
+    assert all(dia["gastos"] == [] for dia in corpo_b["dias"])
+
+
+def test_mover_gasto_para_dia_inexistente_da_404_e_nada_muda(ambiente):
+    client = ambiente.como(USER_A)
+    ciclo, dias = _viagem(client, "ciclo-dia-inexistente")
+    gasto = _gasto(client, dias[0]["id"], "gasto-dia-inexistente")
+
+    response = client.put(
+        f"/gastos/{gasto['id']}",
+        json=_gasto_payload(valor="45.00", dia_id=999999),
+    )
+    assert response.status_code == 404
+
+    total, saldos = _estado(client, ciclo["id"])
+    assert total == 30.00
+    assert saldos[dias[0]["id"]] == 70.00
+    assert saldos[dias[1]["id"]] == 100.00
+    assert saldos[dias[2]["id"]] == 100.00
+
+    corpo = client.get(f"/ciclos/{ciclo['id']}").json()
+    gastos_dia = next(d["gastos"] for d in corpo["dias"] if d["id"] == dias[0]["id"])
+    assert [g["id"] for g in gastos_dia] == [gasto["id"]]
+    assert gastos_dia[0]["valor"] == 30.00
 
 
 def test_apagar_gasto_devolve_saldo_e_total(ambiente):
