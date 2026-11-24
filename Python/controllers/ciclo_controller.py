@@ -37,12 +37,13 @@ def get_all_ciclos(
 @limiter.limit("60/minute")
 def get_ciclos_resumo(
     request: Request,
+    antes_de: int | None = Query(None, gt=0),
     skip: int = Query(0, ge=0),
     limit: int = Query(1000, ge=1, le=1000),
     db: Session = Depends(get_db),
     user_id: str = Depends(get_current_user_id),
 ):
-    return ciclo_service.get_ciclos_resumo(db, user_id, skip=skip, limit=limit)
+    return ciclo_service.get_ciclos_resumo(db, user_id, antes_de=antes_de, skip=skip, limit=limit)
 
 
 @router.get("/ciclos/{ciclo_id}", response_model=CicloResponse)

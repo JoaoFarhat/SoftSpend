@@ -24,8 +24,8 @@ def get_all_ciclos(db: Session, user_id: str, skip: int = 0, limit: int = 100):
         .all()
     )
 
-def get_ciclos_resumo(db: Session, user_id: str, skip: int = 0, limit: int = 1000):
-    return (
+def get_ciclos_resumo(db: Session, user_id: str, antes_de: int | None = None, skip: int = 0, limit: int = 1000):
+    query = (
         db.query(models.Ciclo)
         .options(
             selectinload(models.Ciclo.dias)
@@ -34,7 +34,11 @@ def get_ciclos_resumo(db: Session, user_id: str, skip: int = 0, limit: int = 100
             .selectinload(models.ExpenseTransactionMatch.transacao)
         )
         .filter(models.Ciclo.id_usuario == user_id)
-        .order_by(models.Ciclo.id.desc())
+    )
+    if antes_de is not None:
+        query = query.filter(models.Ciclo.id < antes_de)
+    return (
+        query.order_by(models.Ciclo.id.desc())
         .offset(skip)
         .limit(limit)
         .all()

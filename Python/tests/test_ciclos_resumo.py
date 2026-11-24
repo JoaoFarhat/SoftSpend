@@ -285,3 +285,48 @@ def test_resumo_numero_de_consultas_nao_cresce_com_o_tamanho(ambiente):
     # viagem: o resumo tem que sair com o mesmo número de SELECTs (um por
     # nível carregado), sem N+1.
     assert len(selects_3) == len(selects_1)
+
+
+def test_resumo_antes_de_nao_pula_viagem_apagada_no_meio_da_leitura(ambiente):
+    client_a = ambiente.como(USER_A)
+    ciclos = [_criar_ciclo(client_a, f"Viagem {i}") for i in range(7)]
+
+    pagina_1 = client_a.get("/usuario/ciclos/resumo", params={"limit": 5})
+    assert pagina_1.status_code == 200
+    ids_1 = [c["id"] for c in pagina_1.json()]
+    assert ids_1 == [c["id"] for c in reversed(ciclos[2:])]
+
+    # Uma viagem já lida é apagada em outro aparelho antes da página seguinte.
+    assert client_a.delete(f"/ciclos/{ids_1[0]}").status_code == 204
+
+    # Com `skip=5` a mais antiga das restantes subiria uma posição e a primeira
+    # desta página nunca seria lida; com `antes_de` vêm exatamente as 2.
+    pagina_2 = client_a.get(
+        "/usuario/ciclos/resumo",
+        params={"antes_de": min(ids_1), "limit": 5},
+    )
+    assert pagina_2.status_code == 200
+    assert [c["id"] for c in pagina_2.json()] == [ciclos[1]["id"], ciclos[0]["id"]]
+
+
+def test_resumo_antes_de_nao_mostra_viagem_de_outro_usuario(ambiente):
+    client_b = ambiente.como(USER_B)
+    de_outro = _criar_ciclo(client_b, "Viagem de outro usuario")
+
+    client_a = ambiente.como(USER_A)
+    velha = _criar_ciclo(client_a, "Viagem velha")
+    nova = _criar_ciclo(client_a, "Viagem nova")
+
+    pagina = client_a.get(
+        "/usuario/ciclos/resumo", params={"antes_de": nova["id"], "limit": 5}
+    )
+    assert pagina.status_code == 200
+    ids = [c["id"] for c in pagina.json()]
+    assert ids == [velha["id"]]
+    assert de_outro["id"] not in ids
+
+
+def test_resumo_antes_de_zero_da_422(ambiente):
+    client = ambiente.como(USER_A)
+    response = client.get("/usuario/ciclos/resumo", params={"antes_de": 0})
+    assert response.status_code == 422

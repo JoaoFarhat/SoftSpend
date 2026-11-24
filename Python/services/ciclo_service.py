@@ -55,8 +55,8 @@ def get_all_ciclos(db: Session, user_id: str, skip: int = 0, limit: int = 100):
     return ciclo_repository.get_all_ciclos(db, user_id, skip=skip, limit=limit)
 
 
-def get_ciclos_resumo(db: Session, user_id: str, skip: int = 0, limit: int = 1000):
-    return ciclo_repository.get_ciclos_resumo(db, user_id, skip=skip, limit=limit)
+def get_ciclos_resumo(db: Session, user_id: str, antes_de: int | None = None, skip: int = 0, limit: int = 1000):
+    return ciclo_repository.get_ciclos_resumo(db, user_id, antes_de=antes_de, skip=skip, limit=limit)
 
 
 def get_ciclo_by_id(db: Session, ciclo_id: int):
