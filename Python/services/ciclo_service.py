@@ -55,16 +55,8 @@ def get_ciclos_resumo(db: Session, user_id: str, antes_de: int | None = None, sk
     return ciclo_repository.get_ciclos_resumo(db, user_id, antes_de=antes_de, skip=skip, limit=limit)
 
 
-def get_ciclo_by_id(db: Session, ciclo_id: int):
-    return ciclo_repository.get_ciclo_by_id(db, ciclo_id)
-
-
 def get_user_ciclo_by_id(db: Session, ciclo_id: int, user_id: str):
     return ciclo_repository.get_user_ciclo_by_id(db, ciclo_id, user_id)
-
-
-def incrementar_gasto_total(db: Session, ciclo_id: int, valor: float):
-    return ciclo_repository.incrementar_gasto_total(db, ciclo_id, valor)
 
 
 def update_ciclo(db: Session, ciclo_id: int, user_id: str, ciclo_request: CicloRequest):
