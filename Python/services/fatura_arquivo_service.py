@@ -82,7 +82,7 @@ async def ler_upload(arquivo: UploadFile) -> tuple[str, bytes | str]:
     if arquivo.size is not None and arquivo.size > TAMANHO_MAXIMO_PDF:
         raise ErroFatura(413, "Arquivo muito grande (PDF: máx 10MB; OFX/CSV: máx 2MB)")
 
-    conteudo = b""
+    conteudo = bytearray()
     while True:
         chunk = await arquivo.read(CHUNK_UPLOAD)
         if not chunk:
@@ -94,6 +94,7 @@ async def ler_upload(arquivo: UploadFile) -> tuple[str, bytes | str]:
     if not conteudo:
         raise ErroFatura(400, "Arquivo vazio")
 
+    conteudo = bytes(conteudo)
     kind = filetype.guess(conteudo)
     if kind is not None:
         if kind.mime == "application/pdf":
