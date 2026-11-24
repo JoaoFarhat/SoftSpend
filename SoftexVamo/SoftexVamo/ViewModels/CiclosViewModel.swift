@@ -122,18 +122,6 @@ final class CiclosViewModel: ObservableObject {
         self.leituraDeCiclos = nil
     }
 
-    func limparDadosLocais() {
-        guard let modelContext else { return }
-        try? modelContext.delete(model: GastosDia.self)
-        try? modelContext.delete(model: DiaSoftex.self)
-        try? modelContext.delete(model: CicloSoftex.self)
-        try? modelContext.delete(model: CartaoOpenFinance.self)
-        try? modelContext.delete(model: FaturaCartao.self)
-        try? modelContext.delete(model: TransacaoCartao.self)
-        try? modelContext.delete(model: UserModel.self)
-        try? modelContext.save()
-    }
-
     func fetchCiclosResumo() {
         loadCiclos(append: false)
     }
@@ -985,12 +973,6 @@ final class CiclosViewModel: ObservableObject {
         }
     }
 
-    @available(*, deprecated, message: "Use deleteCiclo(ciclo:) com o objeto CicloSoftex")
-    func deleteCiclo(cicloId: Int) async throws {
-        guard let ciclo = self.allCiclos.first(where: { $0.backendId == cicloId }) else { return }
-        try await deleteCiclo(ciclo: ciclo)
-    }
-    
     private func salvarCicloLocal(_ ciclo: CicloSoftex) {
         salvarOuAtualizarCicloLocal(ciclo)
         salvarLocal()
