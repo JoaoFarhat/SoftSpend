@@ -17,7 +17,13 @@ def listar_dias_por_ciclo(db: Session, ciclo_id: int, user_id: str, skip: int, l
 
 
 def criar_dia(db: Session, ciclo_id: int, dia: DiaRequest, user_id: str):
-    ciclo = ciclo_repository.get_user_ciclo_by_id(db, ciclo_id, user_id)
+    # Trava a linha do ciclo: o saldo do dia novo nasce da `diaria` lida aqui,
+    # e uma edição concorrente só ajusta os dias com UPDATE relativo — sem a
+    # trava, um dia criado no mesmo instante ficaria com a diária antiga e
+    # fora do ajuste.
+    ciclo = ciclo_repository.get_user_ciclo_by_id(
+        db, ciclo_id, user_id, para_atualizar=True
+    )
 
     if not ciclo:
         raise HTTPException(status_code=404, detail="Ciclo não encontrado")
@@ -53,7 +59,11 @@ def criar_dia(db: Session, ciclo_id: int, dia: DiaRequest, user_id: str):
 
 
 def criar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], user_id: str):
-    ciclo = ciclo_repository.get_user_ciclo_by_id(db, ciclo_id, user_id)
+    # Mesma trava do `criar_dia`: a `diaria` lida aqui é o saldo dos dias
+    # novos e precisa estar serializada com a edição do ciclo.
+    ciclo = ciclo_repository.get_user_ciclo_by_id(
+        db, ciclo_id, user_id, para_atualizar=True
+    )
 
     if not ciclo:
         raise HTTPException(status_code=404, detail="Ciclo não encontrado")
