@@ -28,10 +28,13 @@ enum InterpretadorComprovante {
     static let palavrasPorCategoria: [Categoria: [String]] = [
         .ALIMENTACAO: ["restaurante", "lanchonete", "mercado", "supermercado",
                        "padaria", "ifood", "rappi", "acougue", "hortifruti",
-                       "pizza", "burger", "lanche", "cafe", "cafeteria"],
+                       "pizza", "burger", "lanche", "cafe", "cafeteria",
+                       "pizzaria", "hipermercado", "mercadinho", "minimercado",
+                       "churrascaria", "hamburgueria", "sorveteria", "doceria"],
         .TRANSPORTE: ["uber", "taxi", "posto", "combustivel", "gasolina",
                       "etanol", "diesel", "ipiranga", "shell", "petrobras",
-                      "estacionamento", "pedagio", "metro", "onibus"],
+                      "estacionamento", "pedagio", "metro", "onibus",
+                      "autoposto"],
         .LAZER: ["cinema", "cinemark", "teatro", "show", "netflix", "spotify",
                  "parque", "boate", "ingresso"],
         .COMPRAS: ["farmacia", "drogaria", "drogasil", "magazine", "americanas",
@@ -73,16 +76,21 @@ enum InterpretadorComprovante {
     }
 
     static func encontrarTitulo(em linhas: [String]) -> String? {
-        let ruido = ["cnpj", "cpf", "cupom", "fiscal", "nota", "extrato",
-                     "www", "http", "rua", "av.", "avenida", "inscricao"]
+        // Palavra inteira: "rua" não derruba "Restaurante" nem "nota" derruba
+        // "Notável". Só URL e abreviatura com ponto seguem casando por pedaço.
+        let ruidoPalavra = ["cnpj", "cpf", "cupom", "fiscal", "nota", "extrato",
+                            "rua", "avenida", "inscricao"]
+        let ruidoPedaco = ["www", "http", "av."]
 
         for linha in linhas.prefix(8) {
             let limpa = linha.trimmingCharacters(in: .whitespacesAndNewlines)
             let normalizada = normalizar(limpa)
+            let palavras = palavrasDo(normalizada)
 
             guard limpa.count >= 4,
                   limpa.contains(where: { $0.isLetter }),
-                  ruido.allSatisfy({ !normalizada.contains($0) }),
+                  ruidoPedaco.allSatisfy({ !normalizada.contains($0) }),
+                  ruidoPalavra.allSatisfy({ !palavras.contains($0) }),
                   // Ignora linhas majoritariamente numericas (data, CNPJ, cupom).
                   limpa.filter({ $0.isNumber }).count * 2 < limpa.count
             else { continue }
