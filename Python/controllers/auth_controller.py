@@ -51,7 +51,7 @@ def login(request: Request, dados: LoginRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/refresh", response_model=AuthResponse)
-@limiter.limit("5/minute", key_func=get_real_ip)
+@limiter.limit("60/minute", key_func=get_real_ip)
 def refresh(
     request: Request, dados: RefreshRequest, db: Session = Depends(get_db)
 ):
@@ -65,7 +65,7 @@ def refresh(
 
 
 @router.post("/logout", status_code=204)
-@limiter.limit("10/minute", key_func=get_real_ip)
+@limiter.limit("30/minute", key_func=get_real_ip)
 def logout(request: Request, dados: LogoutRequest, db: Session = Depends(get_db)):
     auth_service.logout(db, dados.refresh_token)
     return None

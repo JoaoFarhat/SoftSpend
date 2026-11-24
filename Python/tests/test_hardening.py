@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from starlette.requests import Request
 
 import limiter
@@ -240,6 +240,71 @@ def test_health_localhost_is_not_rate_limited(monkeypatch):
         respostas = [client.get("/health").status_code for _ in range(40)]
         assert 429 not in respostas
     finally:
+        limiter_module.limiter.reset()
+
+
+def _uma_copia_do_limite_de_refresh(monkeypatch):
+    """Mesma pegadinha de `_uma_copia_do_limite_de_health`, para /auth/refresh.
+
+    Trunca `_route_limits["controllers.auth_controller.refresh"]` para uma
+    copia, assim cada request custa 1 hit no balde do IP e o teto de
+    60/minuto fica deterministico.
+    """
+    import limiter as limiter_module
+
+    chave = "controllers.auth_controller.refresh"
+    limites = limiter_module.limiter._route_limits[chave]
+    monkeypatch.setitem(
+        limiter_module.limiter._route_limits, chave, limites[-1:]
+    )
+    return limites[-1]
+
+
+def test_refresh_permite_60_por_minuto_por_ip(monkeypatch, tmp_path):
+    """60 refresh seguidos do mesmo IP nao levam 429; o 61o leva.
+
+    O access token dura 15 minutos e muita gente sai pelo mesmo IP no
+    celular (CGNAT): um teto apertado derrubaria o login de usuarios
+    inocentes. O refresh token tem 256 bits e o reuso ja revoga as
+    sessoes, entao o limite por IP so precisa segurar abuso.
+    """
+    import limiter as limiter_module
+    from database import Base, get_db
+    from main import app
+
+    # O pedido precisa chegar ao endpoint (corpo valido) para contar no
+    # balde; com SQLite no lugar do MySQL o token invalido devolve 401
+    # deterministico em vez de erro de conexao.
+    engine = create_engine(f"sqlite:///{tmp_path}/refresh_limite.db")
+    Base.metadata.create_all(engine)
+    SessionLocal = sessionmaker(bind=engine)
+
+    def override_db():
+        db = SessionLocal()
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+
+    app.dependency_overrides[get_db] = override_db
+    _uma_copia_do_limite_de_refresh(monkeypatch)
+    limiter_module.limiter.reset()
+    try:
+        client = TestClient(app)
+        corpo = {"refresh_token": "token-que-nao-existe"}
+        respostas = [
+            client.post("/auth/refresh", json=corpo).status_code
+            for _ in range(61)
+        ]
+        assert respostas[:60] == [401] * 60
+        assert respostas[-1] == 429
+    finally:
+        app.dependency_overrides.clear()
+        engine.dispose()
         limiter_module.limiter.reset()
 
 
