@@ -64,23 +64,58 @@ def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: str):
     open_finance_reconciliation_service.conciliar_gasto(db, novo_gasto, user_id)
     return novo_gasto
 
+def _travar_gasto(db: Session, gasto_id: int, user_id: str, novo_dia_id: int | None = None):
+    """Trava os dias e o gasto na ordem do resto do servidor: dia(s) → gasto.
+
+    O `remover_dia` trava o dia e depois os gastos dele; travar o gasto
+    primeiro (como antes) fazia `DELETE /gastos/X` e `DELETE /dias/{dia de X}`
+    ao mesmo tempo travarem um ao outro (deadlock, 500). Por isso o gasto é
+    lido sem trava só para saber o dia, os dias envolvidos (o atual e, ao
+    mover, o novo) são travados em ordem crescente de id — dois "mover" em
+    sentidos opostos não se cruzam — e só então o gasto. Se o gasto mudou de
+    dia entre a leitura e a trava, refaz uma vez; mudando de novo, 409.
+
+    Devolve `(gasto, dias)`, com `dias` = {id: Dia ou None} dos dias travados.
+    """
+    for _ in range(2):
+        gasto = gasto_repository.find_gasto(db, gasto_id)
+
+        if not gasto:
+            raise HTTPException(status_code=404, detail="Gasto não encontrado")
+
+        if gasto.dia.ciclo.id_usuario != user_id:
+            raise HTTPException(status_code=404, detail="Gasto não encontrado")
+
+        dia_id = gasto.dia_id
+        ids = sorted({dia_id} | ({novo_dia_id} if novo_dia_id is not None else set()))
+        dias = {
+            id_: dia_repository.find_dia(db, id_, para_atualizar=True) for id_ in ids
+        }
+
+        gasto = gasto_repository.find_gasto_for_update(db, gasto_id)
+
+        if not gasto:
+            raise HTTPException(status_code=404, detail="Gasto não encontrado")
+
+        if gasto.dia_id == dia_id:
+            return gasto, dias
+
+    raise HTTPException(
+        status_code=409, detail="Gasto alterado ao mesmo tempo, tente de novo"
+    )
+
+
 def atualizar_gasto(db: Session, gasto_id: int, gasto_request: GastoRequest, user_id: str):
-    gasto = gasto_repository.find_gasto_for_update(db, gasto_id)
+    gasto, dias = _travar_gasto(db, gasto_id, user_id, gasto_request.dia_id)
 
-    if not gasto:
-        raise HTTPException(status_code=404, detail="Gasto não encontrado")
-
-    if gasto.dia.ciclo.id_usuario != user_id:
-        raise HTTPException(status_code=404, detail="Gasto não encontrado")
-
-    dia_atual = gasto.dia
+    dia_atual = dias[gasto.dia_id]
     novo_dia_id = gasto_request.dia_id
     diferenca = gasto_request.valor - gasto.valor
 
     if novo_dia_id is not None and novo_dia_id != dia_atual.id:
-        # Mesma trava do `criar_gasto`: o gasto não entra num dia que outro
-        # pedido está apagando.
-        novo_dia = dia_repository.find_dia(db, novo_dia_id, para_atualizar=True)
+        # Já travado em `_travar_gasto` (mesma trava do `criar_gasto`): o gasto
+        # não entra num dia que outro pedido está apagando.
+        novo_dia = dias[novo_dia_id]
 
         if not novo_dia:
             raise HTTPException(status_code=404, detail="Dia não encontrado")
@@ -115,15 +150,9 @@ def atualizar_gasto(db: Session, gasto_id: int, gasto_request: GastoRequest, use
 
 
 def remover_gasto(db: Session, gasto_id: int, user_id: str):
-    gasto = gasto_repository.find_gasto_for_update(db, gasto_id)
+    gasto, dias = _travar_gasto(db, gasto_id, user_id)
 
-    if not gasto:
-        raise HTTPException(status_code=404, detail="Gasto não encontrado")
-
-    if gasto.dia.ciclo.id_usuario != user_id:
-        raise HTTPException(status_code=404, detail="Gasto não encontrado")
-
-    dia = gasto.dia
+    dia = dias[gasto.dia_id]
 
     dia_repository.incrementar_saldo(db, dia.id, gasto.valor)
     ciclo_repository.incrementar_gasto_total(db, dia.ciclo_id, -gasto.valor)
