@@ -28,15 +28,15 @@ enum InterpretadorComprovante {
     static let palavrasPorCategoria: [Categoria: [String]] = [
         .ALIMENTACAO: ["restaurante", "lanchonete", "mercado", "supermercado",
                        "padaria", "ifood", "rappi", "acougue", "hortifruti",
-                       "pizza", "burger", "lanche", "cafe"],
+                       "pizza", "burger", "lanche", "cafe", "cafeteria"],
         .TRANSPORTE: ["uber", "taxi", "posto", "combustivel", "gasolina",
                       "etanol", "diesel", "ipiranga", "shell", "petrobras",
                       "estacionamento", "pedagio", "metro", "onibus"],
         .LAZER: ["cinema", "cinemark", "teatro", "show", "netflix", "spotify",
                  "parque", "boate", "ingresso"],
         .COMPRAS: ["farmacia", "drogaria", "drogasil", "magazine", "americanas",
-                   "renner", "riachuelo", "amazon", "mercado livre", "livraria",
-                   "perfumaria"]
+                   "renner", "riachuelo", "amazon", "mercado livre",
+                   "mercadolivre", "livraria", "perfumaria"]
     ]
 
     static func interpretar(linhas: [String]) -> GastoLocalExtraido {
@@ -94,20 +94,54 @@ enum InterpretadorComprovante {
     }
 
     static func inferirCategoria(de linhas: [String]) -> Categoria? {
-        let texto = normalizar(linhas.joined(separator: " "))
+        let palavras = palavrasDo(normalizar(linhas.joined(separator: " ")))
 
+        // Expressões de várias palavras casam como sequência de palavras e vêm
+        // antes das palavras simples de todas as categorias — sem isso
+        // "mercado livre" virava Alimentação pelo "mercado".
         for categoria in Categoria.allCases {
-            guard let palavras = palavrasPorCategoria[categoria] else { continue }
-            if palavras.contains(where: { texto.contains($0) }) {
+            guard let chaves = palavrasPorCategoria[categoria] else { continue }
+            for chave in chaves {
+                let termos = palavrasDo(normalizar(chave))
+                guard termos.count > 1, contemSequencia(termos, em: palavras)
+                else { continue }
                 return categoria
+            }
+        }
+
+        // Palavra simples só casa palavra inteira, ou com "s" no fim:
+        // "pizza" casa "pizzas", mas "posto" não casa "impostos" nem
+        // "uber" casa "uberlandia".
+        for categoria in Categoria.allCases {
+            guard let chaves = palavrasPorCategoria[categoria] else { continue }
+            for chave in chaves where !chave.contains(" ") {
+                if palavras.contains(where: { $0 == chave || $0 == chave + "s" }) {
+                    return categoria
+                }
             }
         }
 
         return nil
     }
 
+    /// Quebra o texto normalizado em palavras: tudo que não é letra ou número
+    /// separa ("MERCADOLIVRE*LOJA" → ["mercadolivre", "loja"]).
+    static func palavrasDo(_ texto: String) -> [String] {
+        texto.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+    }
+
+    static func contemSequencia(_ termos: [String], em palavras: [String]) -> Bool {
+        guard !termos.isEmpty, termos.count <= palavras.count else { return false }
+        return (0...(palavras.count - termos.count)).contains { inicio in
+            Array(palavras[inicio..<(inicio + termos.count)]) == termos
+        }
+    }
+
     static func valoresMonetarios(em linha: String) -> [Decimal] {
-        let padrao = #"\d{1,3}(?:\.\d{3})+,\d{2}|\d+,\d{2}|\d+\.\d{2}"#
+        // O valor não pode estar colado a outro dígito nem a ".", "," ou "/"
+        // seguido de dígito — senão o CNPJ "12.345.678/0001-90" soltava
+        // "12,34" e "5,67". O ponto final de frase ("R$ 12,50.") segue aceito.
+        let padrao = #"(?<![\d.,/])(?:\d{1,3}(?:\.\d{3})+,\d{2}|\d+,\d{2}|\d+\.\d{2})(?!\d|[.,/]\d)"#
 
         guard let regex = try? NSRegularExpression(pattern: padrao) else { return [] }
 
