@@ -30,25 +30,11 @@ nonisolated final class GastosDia {
 
     @Transient
     var comprovanteData: Data? {
-        get {
-            do {
-                return try lerComprovante()
-            } catch {
-                GastosDia.logger.error("ComprovanteCrypto: nota fiscal indisponível: \(error.localizedDescription, privacy: .public)")
-                return nil
-            }
-        }
-        set {
-            if let newValue {
-                do {
-                    comprovanteDataCriptografado = try ComprovanteCrypto.shared.criptografar(newValue)
-                } catch {
-                    GastosDia.logger.error("ComprovanteCrypto: falha ao criptografar comprovante: \(error.localizedDescription, privacy: .public)")
-                    comprovanteDataCriptografado = nil
-                }
-            } else {
-                comprovanteDataCriptografado = nil
-            }
+        do {
+            return try lerComprovante()
+        } catch {
+            GastosDia.logger.error("ComprovanteCrypto: nota fiscal indisponível: \(error.localizedDescription, privacy: .public)")
+            return nil
         }
     }
 
@@ -69,6 +55,20 @@ nonisolated final class GastosDia {
             GastosDia.logger.error("ComprovanteCrypto: falha ao descriptografar comprovante: \(error.localizedDescription, privacy: .public)")
             return nil
         }
+    }
+
+    /// Grava a nota cifrada no aparelho.
+    ///
+    /// Lança `ComprovanteCryptoError` quando a chave não está acessível: quem
+    /// chama avisa a tela em vez de a nota anexada sumir sem aviso (o setter
+    /// antigo de `comprovanteData` apagava a nota guardada e só logava).
+    func gravarComprovante(_ dados: Data) throws {
+        comprovanteDataCriptografado = try ComprovanteCrypto.shared.criptografar(dados)
+    }
+
+    /// Tira a nota guardada no aparelho (remover não passa pela cifra).
+    func removerComprovante() {
+        comprovanteDataCriptografado = nil
     }
 
     var comprovanteParaRemover: Bool = false
@@ -124,7 +124,6 @@ nonisolated final class GastosDia {
         dia: DiaSoftex? = nil,
         backendId: Int? = nil,
         comprovanteUrl: String? = nil,
-        comprovanteData: Data? = nil,
         comprovanteMime: String = "image/jpeg",
         comprovanteParaRemover: Bool = false
     ) {
@@ -137,7 +136,6 @@ nonisolated final class GastosDia {
         self.backendId = backendId
         self.comprovanteUrl = comprovanteUrl
         self.comprovanteDataCriptografado = nil
-        self.comprovanteData = comprovanteData
         self.comprovanteMime = comprovanteMime
         self.comprovanteParaRemover = comprovanteParaRemover
 

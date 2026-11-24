@@ -764,22 +764,15 @@ actor SyncActor: ModelActor {
 
     /// Depois de um envio do gasto que deu certo: `.synced` só se nada mudou
     /// desde a foto e não há comprovante pendente (o `syncComprovantes` resolve).
+    /// A checagem olha o campo cifrado, não `comprovanteData`: decifrar a nota
+    /// inteira só para ver se existe era custoso e, quando ela não abria,
+    /// devolvia `nil` — o gasto era marcado `.synced` e a nota ficava presa
+    /// no aparelho sem nenhum registro.
     private func concluirGasto(_ atual: GastosDia, mudou: Bool) {
         if mudou {
             marcarMudancaDuranteEnvio(atual)
-        } else if !temComprovantePendente(atual) {
+        } else if atual.comprovanteDataCriptografado == nil && !atual.comprovanteParaRemover {
             marcarSucesso(atual)
-        }
-    }
-
-    /// Nota a enviar ou a apagar. Chave indisponível conta como pendente: a nota
-    /// existe, só não abre agora (o `syncComprovantes` marca a falha).
-    private func temComprovantePendente(_ gasto: GastosDia) -> Bool {
-        if gasto.comprovanteParaRemover { return true }
-        do {
-            return try gasto.lerComprovante(crypto: crypto) != nil
-        } catch {
-            return true
         }
     }
 

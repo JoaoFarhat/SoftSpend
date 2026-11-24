@@ -45,8 +45,9 @@ struct DemoInicioView: View {
         _viewModel = StateObject(wrappedValue: vm)
         if estado == .detalhe,
            let spoleto = dados.gastosDeHoje.first(where: { $0.titulo == "Spoleto" }),
-           spoleto.comprovanteDataCriptografado == nil {
-            spoleto.comprovanteData = DadosExemplo.imagemComprovante().jpegData(compressionQuality: 0.9)
+           spoleto.comprovanteDataCriptografado == nil,
+           let nota = DadosExemplo.imagemComprovante().jpegData(compressionQuality: 0.9) {
+            try? spoleto.gravarComprovante(nota)
         }
     }
 
