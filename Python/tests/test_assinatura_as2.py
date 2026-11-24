@@ -6,6 +6,7 @@ Nenhum teste chama a Apple nem usa certificado real: `obter_verificador` e
 """
 
 import importlib
+import logging
 import sys
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -76,7 +77,7 @@ class FakeApple:
         self.notificacoes[nome] = (notificacao, ambiente)
         return nome
 
-    def estado(self, transacao: Transacao, status: int, renovacao=None, ambiente="Production"):
+    def estado(self, transacao: Transacao, status: int | None, renovacao=None, ambiente="Production"):
         self.estados[(ambiente, transacao.original_transaction_id)] = EstadoApple(
             status=status, transacao=transacao, renovacao=renovacao
         )
@@ -275,9 +276,29 @@ def test_tabela_24_cobre_todos_os_estados_com_compra():
     assert {caso[4] for caso in TABELA_24} == set(assinatura_service.ESTADOS) - {"none"}
 
 
-def test_reconciliar_status_desconhecido_falha():
-    with pytest.raises(ValueError):
-        assinatura_service.traduzir_status(9, _tx(), None, AGORA)
+@pytest.mark.parametrize(
+    "caso, campos, renovacao, esperado",
+    [
+        ("vigente sem teste grátis", dict(expira_em=EXP_FUT), None, "active"),
+        ("vigente com teste grátis", TRIAL_TX, None, "trial"),
+        ("vencida", dict(expira_em=EXP_PAS), None, "expired"),
+        ("vencida na carência", dict(expira_em=EXP_PAS),
+         _ren(carencia_ate=AGORA + UM_SEG), "grace"),
+        ("carência vencida, em nova tentativa", dict(expira_em=EXP_PAS),
+         _ren(carencia_ate=EXP_PAS, em_nova_tentativa=True), "billing_retry"),
+        ("revogada", dict(expira_em=EXP_FUT, revogada_em=EXP_PAS), None, "revoked"),
+    ],
+)
+def test_status_desconhecido_deriva_das_datas(caso, campos, renovacao, esperado, caplog):
+    """Código novo da Apple (6, 7, ...): avisa no log e usa a regra por datas,
+    o mesmo caminho de "Apple fora do ar" — nunca falha."""
+    with caplog.at_level(logging.WARNING, logger=assinatura_service.__name__):
+        resultado = assinatura_service.traduzir_status(6, _tx(**campos), renovacao, AGORA)
+    assert resultado == esperado, caso
+    [aviso] = caplog.records
+    assert "desconhecido" in aviso.getMessage()
+    assert "6" in aviso.getMessage()
+    assert "otid-1" in aviso.getMessage()
 
 
 @pytest.mark.parametrize(
@@ -486,6 +507,16 @@ def test_transacoes_usa_o_estado_atual_da_api(ambiente):
     assert resposta.json()["status"] == "expired"
 
 
+def test_transacoes_estado_sem_status_deriva_das_datas(ambiente):
+    """Item de `lastTransactions` sem `status`: o estado sai das datas."""
+    jws, tx = _transacao_do_usuario(ambiente)
+    ambiente.fake.estado(tx, None)
+    resposta = ambiente.como(USER_A).post("/api/assinatura/transacoes", json={"jws": jws})
+    assert resposta.status_code == 200, resposta.text
+    assert resposta.json()["status"] == "active"  # expira_em no futuro
+    assert ambiente.linha(USER_A).status == "active"
+
+
 def test_transacoes_exige_login(monkeypatch):
     monkeypatch.setenv("SECRET_KEY", "access-secret-com-pelo-menos-32-chars!!")
     monkeypatch.setenv("REFRESH_TOKEN_SECRET_KEY", "refresh-secret-com-pelo-menos-32-chars!")
@@ -550,6 +581,35 @@ def test_webhook_reconcilia_pela_api(ambiente):
     assert (registro.notification_uuid, registro.tipo, registro.subtipo, registro.original_transaction_id) == (
         "n-1", "EXPIRED", "VOLUNTARY", "otid-1",
     )
+
+
+def test_webhook_status_desconhecido_200_e_uuid_gravado(ambiente):
+    """A Apple devolve um código que o servidor ainda não conhece: sem 500,
+    reconcilia pelas datas e registra o notificationUUID."""
+    tx = _ligar(ambiente)
+    ambiente.fake.estado(tx, 6)
+    payload = ambiente.fake.payload("p-6", _notif(tipo="DID_RENEW", transacao=tx))
+
+    assert _webhook(ambiente, payload).status_code == 200
+    assert ambiente.linha(USER_A).status == "active"  # expira_em no futuro
+    [registro] = ambiente.notificacoes()
+    assert registro.notification_uuid == "n-1"
+
+
+def test_webhook_status_texto_200_e_uuid_gravado(ambiente):
+    """`data.status` não numérico não pode derrubar o webhook: sem 500,
+    reconcilia pelas datas e registra o notificationUUID."""
+    tx = _ligar(ambiente)
+    ambiente.fake.fora_do_ar = True  # aplica a notificação (mais nova) direto
+    payload = ambiente.fake.payload(
+        "p-abc",
+        _notif(uuid="n-abc", tipo="EXPIRED", transacao=tx, status="abc",
+               assinada_em=_agora_real() + timedelta(minutes=1)),
+    )
+    assert _webhook(ambiente, payload).status_code == 200
+    assert ambiente.linha(USER_A).status == "active"  # expira_em no futuro
+    [registro] = ambiente.notificacoes()
+    assert registro.notification_uuid == "n-abc"
 
 
 def test_webhook_uuid_repetido_200_sem_efeito(ambiente):
@@ -781,6 +841,28 @@ def test_job_uma_falha_nao_impede_as_outras(ambiente):
     assert ambiente.linha("expirou_3_dias").status == "active"
 
 
+def test_job_status_desconhecido_reconcilia_e_sai_com_0(ambiente, monkeypatch):
+    """Linha com código novo da Apple reconcilia pelas datas: sem falha, `main` sai 0."""
+    import database
+    import models
+
+    ambiente.session.add(models.Assinatura(
+        user_id=USER_A, status="active", original_transaction_id="otid-6",
+        expira_em=_agora_real() + timedelta(days=10), ambiente="Production",
+    ))
+    ambiente.session.commit()
+    ambiente.fake.estado(
+        _tx(original_transaction_id="otid-6", expira_em=_agora_real() - timedelta(days=1)),
+        6,
+    )
+    monkeypatch.setattr(apple_service, "configurada", lambda: True)
+    monkeypatch.setattr("logging_config.setup_logging", lambda *a, **k: None)
+    monkeypatch.setattr(database, "SessionLocal", lambda: ambiente.session)
+
+    assert assinatura_job.main() == 0
+    assert ambiente.linha(USER_A).status == "expired"
+
+
 def test_job_sem_configuracao_sai_com_2(monkeypatch):
     monkeypatch.delenv("APPLE_BUNDLE_ID", raising=False)
     monkeypatch.setattr("logging_config.setup_logging", lambda *a, **k: None)
@@ -839,6 +921,42 @@ def test_replay_nao_vale_para_client_id_de_outro_usuario(ambiente, monkeypatch):
 
 
 # ============================================== adaptador da biblioteca
+
+
+def test_codigo_status_ausente_ou_texto_vira_none():
+    assert apple_service._codigo_status(None) is None
+    assert apple_service._codigo_status("abc") is None
+    assert apple_service._codigo_status("2") == 2
+
+
+def test_notificacao_data_sem_status_nao_avisa(caplog):
+    """`data` sem `status` (ex.: TEST) é o comum e não pode gerar aviso — o
+    aviso "Status da Apple" fica só para o campo que veio e não é número."""
+    payload = SimpleNamespace(
+        data=SimpleNamespace(
+            status=None, rawStatus=None,
+            signedTransactionInfo=None, signedRenewalInfo=None,
+        ),
+        notificationUUID="n-1", rawNotificationType="TEST",
+        subtype=None, rawSubtype=None, signedDate=None,
+    )
+    # __new__ pula o __init__, que pediria APPLE_* e certificados reais.
+    verificador = apple_service.VerificadorApple.__new__(apple_service.VerificadorApple)
+    verificador.ambiente = "Production"
+    verificador._verificador = SimpleNamespace(
+        verify_and_decode_notification=lambda jws: payload
+    )
+
+    with caplog.at_level(logging.WARNING, logger=apple_service.logger.name):
+        notificacao = verificador.verificar_notificacao("jws")
+    assert (notificacao.uuid, notificacao.tipo, notificacao.status) == ("n-1", "TEST", None)
+    assert "Status da Apple" not in caplog.text
+
+    payload.data.rawStatus = "abc"
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger=apple_service.logger.name):
+        assert verificador.verificar_notificacao("jws").status is None
+    assert "Status da Apple" in caplog.text
 
 
 def test_transacao_da_biblioteca_converte_campos():

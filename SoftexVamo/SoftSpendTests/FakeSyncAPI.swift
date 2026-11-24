@@ -52,7 +52,12 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
     }
 
     static let erroSimulado = APIError.serverError(message: "Falha simulada", requestId: "-", statusCode: 500)
-    static let naoEncontrado = APIError.serverError(message: "Não encontrado", requestId: "-", statusCode: 404)
+    static let naoEncontrado = APIError.serverError(message: "Não encontrado", requestId: "req-teste", statusCode: 404)
+    /// 404 de rota inexistente (deploy quebrado, app novo contra servidor
+    /// velho): o FastAPI responde só `{"detail": "Not Found"}`, sem
+    /// `request_id`, e o `NetworkManager.execute` monta `serverError` com
+    /// `requestId "-"` — não pode descartar item nenhum no aparelho.
+    static let rotaInexistente = APIError.serverError(message: "Erro no servidor", requestId: "-", statusCode: 404)
 
     private let lock = NSLock()
     private var _chamadas: [Endpoint] = []

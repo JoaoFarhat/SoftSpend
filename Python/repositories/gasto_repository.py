@@ -19,11 +19,29 @@ def find_gasto(db: Session, gasto_id: int):
 
 
 def find_gasto_for_update(db: Session, gasto_id: int):
+    # `populate_existing`: o gasto costuma já estar na sessão (lido sem trava
+    # pelo `gasto_service._travar_gasto`); sem isso o ORM manteria os campos
+    # da primeira leitura e não veria o `dia_id` que outro pedido mudou.
     return (
         db.query(models.Gasto)
         .filter(models.Gasto.id == gasto_id)
         .with_for_update()
+        .populate_existing()
         .first()
+    )
+
+
+def listar_por_dia_para_atualizar(db: Session, dia_id: int):
+    # Leitura com bloqueio direto da tabela, não pela relação `dia.gastos`: no
+    # MySQL (REPEATABLE READ) a leitura comum usa a foto do começo da
+    # transação e não vê o gasto que outro pedido gravou depois. O
+    # `populate_existing` traz o valor atual mesmo de gasto já na sessão.
+    return (
+        db.query(models.Gasto)
+        .filter(models.Gasto.dia_id == dia_id)
+        .with_for_update()
+        .populate_existing()
+        .all()
     )
 
 

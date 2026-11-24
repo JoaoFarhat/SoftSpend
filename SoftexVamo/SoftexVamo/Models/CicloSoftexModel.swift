@@ -108,13 +108,24 @@ nonisolated extension CicloSoftex {
         status != .synced || deletadoEm != nil
     }
 
-    /// Algum dia ou gasto da viagem (inclusive os apagados ainda não enviados) com
-    /// alteração local que o servidor ainda não conhece.
-    var temAlteracaoNaViagem: Bool {
-        (dias ?? []).contains { dia in
-            Self.temAlteracaoLocal(dia.syncStatus, deletadoEm: dia.deletadoEm)
-                || dia.gastos.contains { Self.temAlteracaoLocal($0.syncStatus, deletadoEm: $0.deletadoEm) }
+    /// Quantos dias e gastos da viagem (inclusive os apagados cujo `DELETE` ainda
+    /// não subiu — eles ainda entrariam no relatório montado pelo servidor) têm
+    /// alteração local que o servidor ainda não conhece. A edição da própria
+    /// viagem não conta.
+    var alteracoesNaoEnviadas: Int {
+        (dias ?? []).reduce(0) { total, dia in
+            total
+                + (Self.temAlteracaoLocal(dia.syncStatus, deletadoEm: dia.deletadoEm) ? 1 : 0)
+                + dia.gastos.filter {
+                    Self.temAlteracaoLocal($0.syncStatus, deletadoEm: $0.deletadoEm)
+                }.count
         }
+    }
+
+    /// Algum dia ou gasto da viagem com alteração local que o servidor ainda
+    /// não conhece.
+    var temAlteracaoNaViagem: Bool {
+        alteracoesNaoEnviadas > 0
     }
 
     /// Copia o `gasto_total` que veio do servidor só quando nenhum dia ou gasto da

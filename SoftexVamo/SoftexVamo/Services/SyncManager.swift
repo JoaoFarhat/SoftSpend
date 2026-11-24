@@ -180,6 +180,8 @@ actor SyncActor: ModelActor {
     nonisolated let modelExecutor: any ModelExecutor
     nonisolated let modelContainer: ModelContainer
     private let api: any SyncAPI
+    /// Abre as notas guardadas no aparelho. Nos testes, com um armazém de chave falso.
+    private let crypto: ComprovanteCrypto
 
     /// Algum item mudou durante o envio nesta passada: vale rodar outra.
     private var mudouDuranteEnvio = false
@@ -193,11 +195,16 @@ actor SyncActor: ModelActor {
     /// toma mais 429. Vale mesmo com `forcar: true`.
     private var limiteAtingidoNesteSync = false
 
-    init(modelContainer: ModelContainer, api: any SyncAPI = NetworkManager.shared) {
+    init(
+        modelContainer: ModelContainer,
+        api: any SyncAPI = NetworkManager.shared,
+        crypto: ComprovanteCrypto = .shared
+    ) {
         let modelContext = ModelContext(modelContainer)
         self.modelExecutor = DefaultSerialModelExecutor(modelContext: modelContext)
         self.modelContainer = modelContainer
         self.api = api
+        self.crypto = crypto
     }
 
     private let logger = Logger(subsystem: "br.com.softspend", category: "SyncActor")
@@ -535,7 +542,8 @@ actor SyncActor: ModelActor {
 
     /// `syncError` da nota guardada no aparelho que a chave atual não abre
     /// (`sincronizarComprovante`): falha comum, com backoff — os bytes ficam
-    /// guardados e a tela mostra o motivo.
+    /// guardados (a nota pode voltar a abrir) e a tela mostra o motivo, com
+    /// "Descartar nota" como saída no detalhe do gasto.
     nonisolated static let erroNotaNaoAbre = "Nota não abre com a chave atual"
 
     /// Viagem nova recusada por falta de assinatura: fica `.pending`, sem
@@ -762,15 +770,23 @@ actor SyncActor: ModelActor {
 
     /// Depois de um envio do gasto que deu certo: `.synced` só se nada mudou
     /// desde a foto e não há comprovante pendente (o `syncComprovantes` resolve).
-    /// A checagem olha o campo cifrado, não `comprovanteData`: decifrar a nota
-    /// inteira só para ver se ela existe era custoso e, quando ela não abre
-    /// com a chave atual, o getter devolve `nil` — o gasto virava `.synced`
-    /// e a nota ficava presa no aparelho sem nenhum registro.
     private func concluirGasto(_ atual: GastosDia, mudou: Bool) {
         if mudou {
             marcarMudancaDuranteEnvio(atual)
-        } else if atual.comprovanteDataCriptografado == nil && !atual.comprovanteParaRemover {
+        } else if !temComprovantePendente(atual) {
             marcarSucesso(atual)
+        }
+    }
+
+    /// Nota a enviar ou a apagar. Chave indisponível conta como pendente: a nota
+    /// existe, só não abre agora (o `syncComprovantes` marca a falha). Bytes que
+    /// não abrem com a chave atual não têm o que enviar e não seguram o gasto.
+    private func temComprovantePendente(_ gasto: GastosDia) -> Bool {
+        if gasto.comprovanteParaRemover { return true }
+        do {
+            return try gasto.lerComprovante(crypto: crypto) != nil
+        } catch {
+            return true
         }
     }
 
@@ -901,10 +917,13 @@ actor SyncActor: ModelActor {
     ///
     /// Só limpa o comprovante local se ele ainda é o que foi enviado: uma foto
     /// nova anexada durante o upload fica para a próxima passada.
+    ///
+    /// Chave da nota indisponível (iPhone trancado) lança: o `syncComprovantes`
+    /// marca a falha com backoff e os bytes guardados ficam intactos.
     private func sincronizarComprovante(_ gasto: GastosDia, backendId: Int, foto: FotoGasto) async throws {
         let gastoUUID = gasto.id
 
-        if let comprovanteData = gasto.comprovanteData {
+        if let comprovanteData = try gasto.lerComprovante(crypto: crypto) {
             let atualizado = try await api.uploadComprovante(
                 gastoId: backendId,
                 imageData: comprovanteData,
@@ -941,7 +960,7 @@ actor SyncActor: ModelActor {
             // nem o que apagar. Falha com o motivo na tela e backoff, em vez
             // de concluir sem registro nem tentar a cada passada — os bytes
             // ficam (a nota pode voltar a abrir quando a chave estiver
-            // acessível de novo).
+            // acessível de novo) e a tela oferece "Descartar nota" como saída.
             gravarGasto(gastoUUID, etapa: "syncComprovantes") { atual in
                 if FotoGasto(atual) != foto {
                     marcarMudancaDuranteEnvio(atual)
@@ -953,17 +972,19 @@ actor SyncActor: ModelActor {
         }
     }
 
+    /// 404 **vindo da API**: os "não encontrado" dela saem pelo handler de
+    /// `middlewares.py` (`build_error_response`), sempre com `request_id` no
+    /// corpo — o `NetworkManager.execute` o traz no `serverError`. Um 404 sem
+    /// `request_id` (`requestId == "-"`, como o de rota inexistente do FastAPI,
+    /// que responde só `{"detail": "Not Found"}` — deploy quebrado, app novo
+    /// contra servidor velho) não prova que o item sumiu: segue a falha comum
+    /// (`marcarFalha`, backoff), sem descarte e sem apagar no `syncDeletions`.
     private func isNotFoundError(_ error: Error) -> Bool {
-        if let apiError = error as? APIError {
-            if case .serverError(_, _, let statusCode) = apiError {
-                return statusCode == 404
-            }
+        guard let apiError = error as? APIError,
+              case .serverError(_, let requestId, let statusCode) = apiError else {
+            return false
         }
-        let nsError = error as NSError
-        if let statusCode = nsError.userInfo["statusCode"] as? Int {
-            return statusCode == 404
-        }
-        return false
+        return statusCode == 404 && requestId != "-"
     }
 
     /// `403 subscription_required` no erro tipado, antes de virar texto (§3.1).
@@ -975,17 +996,11 @@ actor SyncActor: ModelActor {
     /// falha. O outro 429 — `daily_ai_limit`, teto diário de leituras por IA —
     /// não entra aqui: só libera no dia seguinte e segue no caminho de falha.
     private func isLimitePorMinuto(_ error: Error) -> Bool {
-        if let apiError = error as? APIError {
-            if case .serverError(_, _, let statusCode) = apiError {
-                return statusCode == 429 && !apiError.limiteDiarioIA
-            }
+        guard let apiError = error as? APIError,
+              case .serverError(_, _, let statusCode) = apiError else {
             return false
         }
-        let nsError = error as NSError
-        if let statusCode = nsError.userInfo["statusCode"] as? Int {
-            return statusCode == 429
-        }
-        return false
+        return statusCode == 429 && !apiError.limiteDiarioIA
     }
 
     /// `error` é o 429 do limite por minuto? Freia este `sync` — liga
@@ -1017,7 +1032,7 @@ actor SyncActor: ModelActor {
         case falhou(String)
     }
 
-    /// 404: o pai não existe no servidor. `403 subscription_required`: com o
+    /// 404 da API: o pai não existe no servidor. `403 subscription_required`: com o
     /// servidor corrigido (AS2, §3.3 de `docs/assinatura.md`), um `client_id`
     /// que já existe devolveria o item; o 403 garante que ele não está lá.
     private func classificar(_ error: Error) -> Recuperacao {

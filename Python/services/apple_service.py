@@ -103,7 +103,7 @@ class Notificacao:
 class EstadoApple:
     """O que a App Store Server API diz agora sobre a assinatura."""
 
-    status: int
+    status: int | None
     transacao: Transacao
     renovacao: Renovacao | None = None
 
@@ -172,6 +172,20 @@ def _bruto(modelo, campo: str):
         return raw
     valor = getattr(modelo, campo, None)
     return getattr(valor, "value", valor)
+
+
+def _codigo_status(valor) -> int | None:
+    """`status` da Apple como inteiro; `None` se falta ou não é número.
+
+    Sem isso um campo vazio ou texto virava `TypeError`/`ValueError` e o
+    webhook respondia 500 (a Apple repete por dias). O aviso leva só o
+    valor bruto; com `None`, `reconciliar` segue a regra por datas.
+    """
+    try:
+        return int(valor)
+    except (TypeError, ValueError):
+        logger.warning("Status da Apple ausente ou não numérico: %r", valor)
+        return None
 
 
 def transacao_da_biblioteca(payload) -> Transacao:
@@ -279,14 +293,16 @@ class VerificadorApple:
                 transacao = self.verificar_transacao(jws_transacao)
             if jws_renovacao:
                 renovacao = self.verificar_renovacao(jws_renovacao)
-            status = _bruto(dados, "status")
+            bruto_status = _bruto(dados, "status")
+            if bruto_status is not None:
+                status = _codigo_status(bruto_status)
         return Notificacao(
             uuid=str(getattr(payload, "notificationUUID", "") or ""),
             tipo=str(_bruto(payload, "notificationType") or ""),
             subtipo=_bruto(payload, "subtype"),
             assinada_em=_data_ms(getattr(payload, "signedDate", None)),
             ambiente=self.ambiente,
-            status=None if status is None else int(status),
+            status=status,
             transacao=transacao,
             renovacao=renovacao,
         )
@@ -336,7 +352,7 @@ class ClienteApple:
         if getattr(escolhido, "signedRenewalInfo", None):
             renovacao = self._verificador.verificar_renovacao(escolhido.signedRenewalInfo)
         return EstadoApple(
-            status=int(_bruto(escolhido, "status")),
+            status=_codigo_status(_bruto(escolhido, "status")),
             transacao=transacao,
             renovacao=renovacao,
         )

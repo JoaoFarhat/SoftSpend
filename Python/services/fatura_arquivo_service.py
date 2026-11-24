@@ -19,6 +19,7 @@ from fastapi import UploadFile
 
 from dtos.fatura import MAXIMO_COMPRAS, CompraLida, FaturaLida
 from enums.categoria_enum import Categoria
+from services.pdfium_seguro import trava_pdfium
 
 TAMANHO_MAXIMO_PDF = 10 * 1024 * 1024
 TAMANHO_MAXIMO_TEXTO = 2 * 1024 * 1024
@@ -137,45 +138,48 @@ def desproteger_pdf(conteudo: bytes, senha: str | None) -> bytes:
     devolve os bytes sem proteção para enviar ao Gemini."""
     import pypdfium2 as pdfium
 
-    documento = None
-    protegido = False
-    try:
-        documento = pdfium.PdfDocument(conteudo)
-    except pdfium.PdfiumError as erro:
-        if "password" not in str(erro).lower():
-            raise ErroFatura(422, "PDF inválido")
-        if not senha:
-            raise ErroFatura(422, "PDF protegido por senha; informe a senha")
+    # O pypdfium2 não é seguro entre threads e isto roda no threadpool do
+    # FastAPI: todo o uso fica dentro da trava (ver `pdfium_seguro`).
+    with trava_pdfium:
+        documento = None
+        protegido = False
         try:
-            documento = pdfium.PdfDocument(conteudo, password=senha)
-        except pdfium.PdfiumError:
-            raise ErroFatura(422, "Senha incorreta")
-        protegido = True
-
-    try:
-        paginas = len(documento)
-        if paginas == 0:
-            raise ErroFatura(422, "PDF sem páginas")
-        if paginas > MAXIMO_PAGINAS_PDF:
-            raise ErroFatura(413, f"PDF com mais de {MAXIMO_PAGINAS_PDF} páginas")
-
-        if not protegido:
-            return conteudo
-
-        # Regrava sem a proteção em memória: importar as páginas num documento
-        # novo produz um PDF aberto (doc.save() copiaria a criptografia junto).
-        novo = pdfium.PdfDocument.new()
-        try:
-            novo.import_pages(documento)
-            buffer = io.BytesIO()
-            novo.save(buffer)
-            return buffer.getvalue()
+            documento = pdfium.PdfDocument(conteudo)
         except pdfium.PdfiumError as erro:
-            raise ErroFatura(422, f"Não foi possível processar o PDF: {erro}")
+            if "password" not in str(erro).lower():
+                raise ErroFatura(422, "PDF inválido")
+            if not senha:
+                raise ErroFatura(422, "PDF protegido por senha; informe a senha")
+            try:
+                documento = pdfium.PdfDocument(conteudo, password=senha)
+            except pdfium.PdfiumError:
+                raise ErroFatura(422, "Senha incorreta")
+            protegido = True
+
+        try:
+            paginas = len(documento)
+            if paginas == 0:
+                raise ErroFatura(422, "PDF sem páginas")
+            if paginas > MAXIMO_PAGINAS_PDF:
+                raise ErroFatura(413, f"PDF com mais de {MAXIMO_PAGINAS_PDF} páginas")
+
+            if not protegido:
+                return conteudo
+
+            # Regrava sem a proteção em memória: importar as páginas num documento
+            # novo produz um PDF aberto (doc.save() copiaria a criptografia junto).
+            novo = pdfium.PdfDocument.new()
+            try:
+                novo.import_pages(documento)
+                buffer = io.BytesIO()
+                novo.save(buffer)
+                return buffer.getvalue()
+            except pdfium.PdfiumError as erro:
+                raise ErroFatura(422, f"Não foi possível processar o PDF: {erro}")
+            finally:
+                novo.close()
         finally:
-            novo.close()
-    finally:
-        documento.close()
+            documento.close()
 
 
 # ------------------------------------------------------------------ OFX
@@ -245,7 +249,7 @@ def ler_ofx(texto: str) -> FaturaBruta:
     if emissor:
         fatura.emissor = emissor[:100]
     fatura.fechamento = _data_ofx(_tag(texto, "DTEND"))
-    fatura.vencimento = _data_ofx(_tag(texto, "DTASOF"))
+    data_saldo = _data_ofx(_tag(texto, "DTASOF"))
 
     bloco_ledger = re.search(
         r"<LEDGERBAL>(.*?)</LEDGERBAL>", texto, re.IGNORECASE | re.DOTALL
@@ -287,6 +291,14 @@ def ler_ofx(texto: str) -> FaturaBruta:
         fatura.compras.append(
             CompraBruta(data=data, descricao=descricao, valor=abs(valor), tipo=tipo)
         )
+
+    # DTASOF é a data do saldo, não do vencimento. Um saldo de antes das
+    # últimas compras viraria um teto falso em `_motivo_descarte` e as
+    # compras sumiriam da prévia: DTASOF só vale como vencimento se cobrir
+    # a última compra; sem isso fica None e o app pergunta a data.
+    ultima_compra = max((c.data for c in fatura.compras), default=None)
+    if data_saldo and ultima_compra and data_saldo >= ultima_compra:
+        fatura.vencimento = data_saldo
 
     return fatura
 

@@ -1222,6 +1222,16 @@ final class CiclosViewModel: ObservableObject {
         try await NetworkManager.shared.exportarCiclo(cicloId: $0, formato: $1, comprovantes: $2)
     }
 
+    /// Sync forçado antes de exportar o relatório, injetável para os
+    /// testes (produção: `SyncManager.shared`).
+    var sincronizarAntesDeExportar: @MainActor () async -> Void = {
+        await SyncManager.shared.sync(forcar: true)
+    }
+
+    /// Teto da espera do `sincronizarAntesDeExportar` (20 s em produção;
+    /// injetável para os testes não esperarem).
+    var tetoSyncExportacao: Duration = .seconds(20)
+
     /// Nome do arquivo temporário do relatório. O título pode ter "/" (vira
     /// subpasta e o `write` falha depois do download) e pode ser comprido
     /// demais para um nome de arquivo: só letra, número, "-" e "_" ficam,
@@ -1244,12 +1254,38 @@ final class CiclosViewModel: ObservableObject {
         return "relatorio_\(cortado.isEmpty ? "viagem" : cortado).\(formato.extensao)"
     }
 
-    /// `nil` quando a assinatura barra a exportação (§3.5): a tela de planos
-    /// abre no lugar e nenhum alerta de erro aparece.
-    func exportarCiclo(formato: ExportFormato, comprovantes: ExportComprovantes = .imagem) async throws -> URL? {
-        guard assinatura.exigirAcesso() else { return nil }
+    /// `.bloqueado` quando a assinatura barra a exportação (§3.5): a tela
+    /// de planos abre no lugar e nenhum alerta de erro aparece.
+    ///
+    /// O relatório é montado pelo servidor, que não conhece alteração ainda
+    /// não enviada (gasto feito sem internet, edição ou exclusão que não
+    /// subiu). Com alteração na viagem e `aceitarPendencias == false`, um
+    /// sync forçado roda antes, esperado no máximo `tetoSyncExportacao` e
+    /// nunca cancelado; sobrando dias/gastos não enviados, devolve
+    /// `.pendencias(n)` sem chamar o `exportarRemoto` — a tela pergunta se
+    /// gera assim mesmo (refazendo a chamada com `aceitarPendencias: true`,
+    /// que exporta direto, sem sync nem checagem).
+    func exportarCiclo(
+        formato: ExportFormato,
+        comprovantes: ExportComprovantes = .imagem,
+        aceitarPendencias: Bool = false
+    ) async throws -> ResultadoExportacao {
+        guard assinatura.exigirAcesso() else { return .bloqueado }
+
+        if !aceitarPendencias
+            && (atualCiclo.backendId == nil || atualCiclo.temAlteracaoNaViagem) {
+            await EsperaComTeto.esperar(teto: tetoSyncExportacao) {
+                await self.sincronizarAntesDeExportar()
+            }
+        }
+
         guard let cicloId = atualCiclo.backendId else {
             throw APIError.serverError(message: "Ciclo ainda não sincronizado com o servidor", requestId: "-", statusCode: 400)
+        }
+
+        if !aceitarPendencias {
+            let pendentes = atualCiclo.alteracoesNaoEnviadas
+            if pendentes > 0 { return .pendencias(pendentes) }
         }
 
         let data: Data
@@ -1257,13 +1293,24 @@ final class CiclosViewModel: ObservableObject {
             data = try await exportarRemoto(cicloId, formato, comprovantes)
         } catch {
             // 403 `subscription_required` direto: planos, não "Erro no servidor".
-            if assinatura.tratarErroDeAcesso(error) { return nil }
+            if assinatura.tratarErroDeAcesso(error) { return .bloqueado }
             throw error
         }
 
         let nome = Self.nomeArquivoExportacao(titulo: atualCiclo.titulo, formato: formato)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(nome)
         try data.write(to: url, options: .atomic)
-        return url
+        return .arquivo(url)
     }
+}
+
+/// Saída do `exportarCiclo`.
+nonisolated enum ResultadoExportacao: Equatable, Sendable {
+    /// Relatório baixado e gravado no temporário — a tela compartilha.
+    case arquivo(URL)
+    /// A assinatura barrou: a tela de planos já abriu, nada mais a fazer.
+    case bloqueado
+    /// N dias/gastos ainda não enviados ficariam fora do relatório — a
+    /// tela pergunta antes de gerar (`aceitarPendencias: true`).
+    case pendencias(Int)
 }

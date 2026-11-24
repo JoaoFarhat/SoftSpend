@@ -137,6 +137,34 @@ struct TotalDaViagemTests {
         #expect(c.gasto_total == 0)
     }
 
+    // MARK: Contagem de alterações não enviadas
+
+    /// A mesma conta do `.pendencias(n)` da exportação: cada dia e cada gasto
+    /// não enviado — inclusive o `.synced` apagado no aparelho cujo `DELETE`
+    /// não subiu — conta um. O gasto `.synced` vivo não conta.
+    @Test func alteracoesNaoEnviadasContaDiasEGastosNaoEnviados() throws {
+        let (c, d) = viagem(gastoTotal: 90)
+        d.syncStatus = .pending // dia criado sem internet
+        gasto(40, em: d, backendId: 9, status: .failed) // envio em erro
+        let apagado = gasto(30, em: d, backendId: 8, status: .synced)
+        apagado.deletadoEm = .now // DELETE que não subiu
+        gasto(20, em: d, backendId: 5, status: .synced)
+        try ctx.save()
+
+        #expect(c.alteracoesNaoEnviadas == 3)
+        #expect(c.temAlteracaoNaViagem)
+    }
+
+    /// Viagem toda no servidor: nada a enviar.
+    @Test func viagemTodaEnviadaNaoTemAlteracao() throws {
+        let (c, d) = viagem(gastoTotal: 100)
+        gasto(100, em: d, backendId: 5, status: .synced)
+        try ctx.save()
+
+        #expect(c.alteracoesNaoEnviadas == 0)
+        #expect(!c.temAlteracaoNaViagem)
+    }
+
     // MARK: Resposta do PUT da viagem
 
     /// Edição da viagem e gasto novo no mesmo `sync`: o `PUT` sobe antes do gasto

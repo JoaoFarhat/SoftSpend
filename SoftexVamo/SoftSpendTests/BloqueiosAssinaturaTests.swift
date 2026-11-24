@@ -202,9 +202,9 @@ struct BloqueiosAssinaturaTests {
         var rede = 0
         vm.exportarRemoto = { _, _, _ in rede += 1; return Data([1]) }
 
-        let url = try await vm.exportarCiclo(formato: .pdf)
+        let resultado = try await vm.exportarCiclo(formato: .pdf)
 
-        #expect(url == nil)
+        #expect(resultado == .bloqueado)
         #expect(f.vm.planosAbertos)
         #expect(rede == 0)
     }
@@ -219,11 +219,14 @@ struct BloqueiosAssinaturaTests {
         var rede = 0
         vm.exportarRemoto = { _, _, _ in rede += 1; return Data([1, 2, 3]) }
 
-        let url = try await vm.exportarCiclo(formato: .pdf)
+        let resultado = try await vm.exportarCiclo(formato: .pdf)
 
         #expect(rede == 1)
         #expect(!f.vm.planosAbertos)
-        let gerado = try #require(url)
+        guard case .arquivo(let gerado) = resultado else {
+            Issue.record("esperava .arquivo, veio \(resultado)")
+            return
+        }
         #expect(try Data(contentsOf: gerado) == Data([1, 2, 3]))
     }
 
@@ -239,9 +242,9 @@ struct BloqueiosAssinaturaTests {
                 message: "subscription_required", requestId: "-", statusCode: 403)
         }
 
-        let url = try await vm.exportarCiclo(formato: .csv)
+        let resultado = try await vm.exportarCiclo(formato: .csv)
 
-        #expect(url == nil)
+        #expect(resultado == .bloqueado)
         #expect(f.vm.planosAbertos)
     }
 

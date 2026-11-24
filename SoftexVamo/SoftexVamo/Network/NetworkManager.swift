@@ -25,6 +25,18 @@ nonisolated func ehFalhaTransitoriaDeRefresh(_ error: Error) -> Bool {
     return false
 }
 
+/// Falha do refresh que derruba a sessão. O `429` não desloga: o limitador
+/// do `/auth/refresh` recusa antes de a rota trocar o token, então o mesmo
+/// refresh token continua valendo e pode ser reenviado depois sem virar
+/// reuso — quem chamou recebe o próprio 429 (o `SyncActor` o trata como
+/// limite por minuto). Qualquer outro erro desloga como antes.
+nonisolated func deveDeslogarAposFalhaDeRefresh(_ error: Error) -> Bool {
+    if case APIError.serverError(_, _, let statusCode) = error {
+        return statusCode != 429
+    }
+    return true
+}
+
 /// Executa `operacao` e, se falhar de forma transitória, repete após cada
 /// espera de `esperas` (no máximo `esperas.count` repetições). Erro não
 /// transitório ou o erro da última tentativa é propagado.
@@ -246,6 +258,14 @@ final class NetworkManager: Sendable {
                     // rede/servidor falhou nas 3 tentativas do refresher.
                     // Nao adianta chamar /auth/logout, e o token antigo nao
                     // e guardado: passados 60 s, reenvia-lo seria reuso.
+                    // Excecao: o 429 do limitador recusou antes de trocar o
+                    // token, entao o mesmo refresh token ainda vale — o erro
+                    // sobe intacto para quem chamou agendar a nova tentativa
+                    // (o SyncActor trata como limite por minuto), sem logout
+                    // e sem apagar os tokens.
+                    guard deveDeslogarAposFalhaDeRefresh(error) else {
+                        throw error
+                    }
                     Task { @MainActor in AuthService.shared.logout(revogandoNoServidor: false) }
                     throw APIError.authentication
                 }

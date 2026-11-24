@@ -343,16 +343,8 @@ final class ImportarFaturaViewModel: ObservableObject {
     /// background): cancelar marcaria os itens em voo como `.failed` no
     /// `SyncActor`, um backoff que não existiria sem a tela.
     private func sincronizarComTeto() async {
-        let corrida = CorridaDoTeto()
-        await withCheckedContinuation { (continuacao: CheckedContinuation<Void, Never>) in
-            Task {
-                await self.sincronizar()
-                if await corrida.responder() { continuacao.resume() }
-            }
-            Task {
-                try? await Task.sleep(for: self.tetoSync)
-                if await corrida.responder() { continuacao.resume() }
-            }
+        await EsperaComTeto.esperar(teto: tetoSync) {
+            await self.sincronizar()
         }
     }
 
@@ -581,18 +573,5 @@ final class ImportarFaturaViewModel: ObservableObject {
             titulo = "\(titulo) (\(parcela))"
         }
         return titulo
-    }
-}
-
-/// Quem vence a corrida do `sincronizarComTeto`: o primeiro `responder()`
-/// devolve `true` e retoma a continuação; o segundo é no-op (uma
-/// `CheckedContinuation` não pode ser retomada duas vezes).
-private actor CorridaDoTeto {
-    private var respondeu = false
-
-    func responder() -> Bool {
-        if respondeu { return false }
-        respondeu = true
-        return true
     }
 }
