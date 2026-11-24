@@ -293,7 +293,9 @@ class VerificadorApple:
                 transacao = self.verificar_transacao(jws_transacao)
             if jws_renovacao:
                 renovacao = self.verificar_renovacao(jws_renovacao)
-            status = _codigo_status(_bruto(dados, "status"))
+            bruto_status = _bruto(dados, "status")
+            if bruto_status is not None:
+                status = _codigo_status(bruto_status)
         return Notificacao(
             uuid=str(getattr(payload, "notificationUUID", "") or ""),
             tipo=str(_bruto(payload, "notificationType") or ""),

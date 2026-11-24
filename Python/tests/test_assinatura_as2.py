@@ -929,6 +929,36 @@ def test_codigo_status_ausente_ou_texto_vira_none():
     assert apple_service._codigo_status("2") == 2
 
 
+def test_notificacao_data_sem_status_nao_avisa(caplog):
+    """`data` sem `status` (ex.: TEST) é o comum e não pode gerar aviso — o
+    aviso "Status da Apple" fica só para o campo que veio e não é número."""
+    payload = SimpleNamespace(
+        data=SimpleNamespace(
+            status=None, rawStatus=None,
+            signedTransactionInfo=None, signedRenewalInfo=None,
+        ),
+        notificationUUID="n-1", rawNotificationType="TEST",
+        subtype=None, rawSubtype=None, signedDate=None,
+    )
+    # __new__ pula o __init__, que pediria APPLE_* e certificados reais.
+    verificador = apple_service.VerificadorApple.__new__(apple_service.VerificadorApple)
+    verificador.ambiente = "Production"
+    verificador._verificador = SimpleNamespace(
+        verify_and_decode_notification=lambda jws: payload
+    )
+
+    with caplog.at_level(logging.WARNING, logger=apple_service.logger.name):
+        notificacao = verificador.verificar_notificacao("jws")
+    assert (notificacao.uuid, notificacao.tipo, notificacao.status) == ("n-1", "TEST", None)
+    assert "Status da Apple" not in caplog.text
+
+    payload.data.rawStatus = "abc"
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger=apple_service.logger.name):
+        assert verificador.verificar_notificacao("jws").status is None
+    assert "Status da Apple" in caplog.text
+
+
 def test_transacao_da_biblioteca_converte_campos():
     payload = SimpleNamespace(
         originalTransactionId="2000001", transactionId="2000009", bundleId=BUNDLE,
