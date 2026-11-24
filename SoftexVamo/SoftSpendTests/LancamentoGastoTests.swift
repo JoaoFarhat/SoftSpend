@@ -128,4 +128,53 @@ struct LancamentoGastoTests {
 
         #expect(aviso == "Não foi possível ler o comprovante. Preencha os campos.")
     }
+
+    // MARK: - NotaFiscal.codificar
+
+    /// Imagem só de ruído em tons de cinza: o JPEG quase não comprime e,
+    /// sem canal de croma, o tamanho não depende do subsampling do encoder —
+    /// ~0,4 B/px em qualidade baixa, então 6000² (~36 MP) passa do teto.
+    private func imagemDeRuido(lado: Int) -> UIImage {
+        var bytes = [UInt8](repeating: 0, count: lado * lado)
+        arc4random_buf(&bytes, bytes.count)
+        let provedor = CGDataProvider(data: Data(bytes) as CFData)!
+        let imagem = CGImage(
+            width: lado, height: lado,
+            bitsPerComponent: 8, bitsPerPixel: 8, bytesPerRow: lado,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
+            provider: provedor,
+            decode: nil, shouldInterpolate: true,
+            intent: .defaultIntent
+        )!
+        return UIImage(cgImage: imagem)
+    }
+
+    /// Foto que nem na qualidade 0,4 cabe no teto: `codificar` reduz a
+    /// resolução em passos de 0,75 até o JPEG ficar abaixo de 9 MB — e o
+    /// resultado continua sendo uma imagem válida (era o buraco em que a
+    /// nota de 5–9 MB nunca subia: o app mandava e o servidor dava 413).
+    @Test func notaQueNaoCabeNaMenorQualidadeDesceResolucao() throws {
+        let original = imagemDeRuido(lado: 6000)
+        // Pré-condição do cenário: o ruído passa do teto mesmo na qualidade mínima.
+        let piorQualidade = try #require(original.jpegData(compressionQuality: 0.4))
+        #expect(piorQualidade.count > NotaFiscal.tamanhoMaximo)
+
+        let dados = try #require(NotaFiscal.codificar(original))
+
+        #expect(dados.count <= NotaFiscal.tamanhoMaximo)
+        let decodificada = try #require(UIImage(data: dados))
+        #expect(decodificada.size.width < original.size.width)
+        #expect(decodificada.size.height < original.size.height)
+    }
+
+    /// Nota que já cabe: só a conversão para JPEG, sem perda de resolução.
+    @Test func notaPequenaMantemResolucao() throws {
+        let original = imagemDeRuido(lado: 120)
+
+        let dados = try #require(NotaFiscal.codificar(original))
+        let decodificada = try #require(UIImage(data: dados))
+
+        #expect(decodificada.size == original.size)
+    }
 }
