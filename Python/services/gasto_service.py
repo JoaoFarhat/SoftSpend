@@ -11,7 +11,9 @@ from services.comprovante_cleanup import (
 )
 
 def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: str):
-    dia = dia_repository.find_dia(db, dia_id)
+    # Trava o dia: um DELETE do mesmo dia ao mesmo tempo espera este gasto
+    # entrar (e o desconta) ou já o apagou (404 aqui).
+    dia = dia_repository.find_dia(db, dia_id, para_atualizar=True)
 
     if not dia:
         raise HTTPException(status_code=404, detail="Dia não encontrado")
@@ -76,7 +78,9 @@ def atualizar_gasto(db: Session, gasto_id: int, gasto_request: GastoRequest, use
     diferenca = gasto_request.valor - gasto.valor
 
     if novo_dia_id is not None and novo_dia_id != dia_atual.id:
-        novo_dia = dia_repository.find_dia(db, novo_dia_id)
+        # Mesma trava do `criar_gasto`: o gasto não entra num dia que outro
+        # pedido está apagando.
+        novo_dia = dia_repository.find_dia(db, novo_dia_id, para_atualizar=True)
 
         if not novo_dia:
             raise HTTPException(status_code=404, detail="Dia não encontrado")
