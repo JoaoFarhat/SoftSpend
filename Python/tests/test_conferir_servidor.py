@@ -106,6 +106,40 @@ def test_sem_apple_key_id_sai_1_e_linha_diz_falta(ambiente, capsys):
     assert "APPLE_KEY_ID" in falta[0]
 
 
+@pytest.mark.parametrize(
+    "ausentes",
+    [("S3_BUCKET",), ("GEMINI_API_KEY",), ("S3_BUCKET", "GEMINI_API_KEY")],
+)
+def test_integracoes_ausentes_dao_falta(ambiente, capsys, ausentes):
+    env = dict(ambiente["env"])
+    for nome in ausentes:
+        del env[nome]
+    assert cs.main(
+        ambiente=env, sessao=ambiente["session"], pasta=ambiente["pasta"]
+    ) == 1
+    falta = [l for l in _linhas(capsys).splitlines() if l.startswith("FALTA")]
+    assert len(falta) == 1
+    for nome in ausentes:
+        assert nome in falta[0]
+
+
+def test_main_sem_sessao_sai_1_sem_traceback(ambiente, capsys, monkeypatch):
+    """Banco fora do ar: a fábrica de sessão falha, `main` segue sem sessão,
+    sai 1 com FALTA nas checagens de banco e nenhum traceback na saída."""
+    import database
+
+    def _fora_do_ar():
+        raise RuntimeError("banco fora do ar")
+
+    monkeypatch.setattr(database, "SessionLocal", _fora_do_ar)
+    assert cs.main(ambiente=ambiente["env"], pasta=ambiente["pasta"]) == 1
+    capturado = capsys.readouterr()
+    falta = [l for l in capturado.out.splitlines() if l.startswith("FALTA")]
+    assert any("sessão não abriu" in l for l in falta)
+    assert "Traceback" not in capturado.out
+    assert "Traceback" not in capturado.err
+
+
 @pytest.mark.parametrize("revisao", ["outra-revisao", None])
 def test_revisao_diferente_do_head_da_falta(ambiente, capsys, revisao):
     session = ambiente["session"]
