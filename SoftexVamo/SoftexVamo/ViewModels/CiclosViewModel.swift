@@ -1051,9 +1051,14 @@ final class CiclosViewModel: ObservableObject {
             dia: dia,
             backendId: nil,
             comprovanteUrl: nil,
-            comprovanteData: comprovante,
             comprovanteMime: comprovanteMime
         )
+
+        if let comprovante {
+            // A chave indisponível falha o lançamento inteiro: a tela avisa e o
+            // rascunho fica para tentar de novo, sem gasto salvo sem a nota.
+            try novoGasto.gravarComprovante(comprovante)
+        }
 
         modelContext.insert(novoGasto)
 
@@ -1076,7 +1081,7 @@ final class CiclosViewModel: ObservableObject {
         guard let gasto = encontrarGasto(id: gastoId) else {
             throw APIError.serverError(message: "Gasto não encontrado", requestId: "-", statusCode: 404)
         }
-        gasto.comprovanteData = imageData
+        try gasto.gravarComprovante(imageData)
         gasto.comprovanteMime = mime
         gasto.comprovanteParaRemover = false
         gasto.syncStatus = .pending
@@ -1094,7 +1099,7 @@ final class CiclosViewModel: ObservableObject {
         guard let gasto = encontrarGasto(id: gastoId) else {
             throw APIError.serverError(message: "Gasto não encontrado", requestId: "-", statusCode: 404)
         }
-        gasto.comprovanteData = nil
+        gasto.removerComprovante()
         gasto.comprovanteParaRemover = true
         gasto.syncStatus = .pending
         try modelContext.save()
