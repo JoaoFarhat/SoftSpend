@@ -356,7 +356,8 @@ libera recurso.
   `carregarEstado()` ao voltar para o primeiro plano.
 - `Scenes/PlanosAssinaturaView.swift`: preço e duração do teste vêm da App
   Store (semanas viram dias: "2 semanas" aparece "14 dias"). Termos e
-  Privacidade em `LinksLegais` (URLs ainda não hospedadas). Entrada sempre
+  Privacidade em `LinksLegais` (páginas servidas pelo nginx a partir de
+  `deploy/site/`; `LinksLegaisTests` confere os caminhos). Entrada sempre
   disponível no Perfil (seção "Assinatura"), mesmo com o bloqueio desligado.
 - `AssinaturaResponse.expira_em` tem decodificação própria (UTC sem fuso, com
   microssegundos, vira `nil` se ilegível).
