@@ -90,6 +90,12 @@ serializado no MainActor, congelando a UI durante a sincronização.
 ### Componentes
 
 - `CiclosViewModel` — operações de ciclo/dia/gasto com persistência local.
+  As leituras das listas (`fetchCicloResumo`, `fetchDias`) passam pelo
+  protocolo injetável `ListasAPI` (`Network/ListasAPI.swift`, `nonisolated`),
+  recebido no `init(api:)` com padrão `NetworkManager.shared` — como o
+  `SyncAPI` do `SyncActor`. Nos testes, `SoftSpendTests/FakeListasAPI.swift`
+  devolve as páginas configuradas e grava o `antes_de` de cada chamada
+  (o cursor da lista de viagens é testado em `ExclusaoNoServidorTests`).
 - `SyncManager` — sincronização sob demanda com backoff exponencial.
 
 ### Relacionamentos SwiftData
