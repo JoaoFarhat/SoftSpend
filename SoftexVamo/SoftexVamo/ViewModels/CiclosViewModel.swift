@@ -38,8 +38,19 @@ final class CiclosViewModel: ObservableObject {
     /// (padrão do `init`). Ver `Network/ListasAPI.swift`.
     private let api: ListasAPI
 
+    /// Conectividade consultada antes de chamar a rede; injetável para os
+    /// testes — produção usa `NetworkMonitor.shared.isConnected` (padrão do
+    /// `init`). Sem ela, um teste com `ListasAPI` falsa cairia no ramo
+    /// offline quando o CI rodasse sem rede.
+    private let estaConectado: @MainActor () -> Bool
+
     private var diasSkip = 0
-    private let diasLimit = 20
+    /// Teto do `limit` de `GET /ciclos/{id}/dias` (`le=100` no servidor).
+    /// Com 100, a leitura por `skip` só tem mais de uma página em viagem com
+    /// mais de 100 dias: uma de 30 dias sobe em uma chamada, e um dia apagado
+    /// em outro aparelho no meio da leitura não faz a limpeza (T5) tirar um
+    /// dia vivo daqui até a próxima.
+    private let diasLimit = 100
     private var hasMoreDias = true
     var isLoadingDias = false
 
@@ -55,8 +66,10 @@ final class CiclosViewModel: ObservableObject {
 
     private let viewModelLogger = Logger(subsystem: "br.com.softspend", category: "CiclosViewModel")
 
-    init(api: ListasAPI = NetworkManager.shared) {
+    init(api: ListasAPI = NetworkManager.shared,
+         estaConectado: @escaping @MainActor () -> Bool = { NetworkMonitor.shared.isConnected }) {
         self.api = api
+        self.estaConectado = estaConectado
         observeNetwork()
     }
 
@@ -183,7 +196,7 @@ final class CiclosViewModel: ObservableObject {
                 self.isLoading = false
             }
 
-            guard NetworkMonitor.shared.isConnected else {
+            guard estaConectado() else {
                 if !append, !ciclosLocais.isEmpty {
                     self.diasSkip = 0
                     self.hasMoreDias = false
@@ -426,7 +439,7 @@ final class CiclosViewModel: ObservableObject {
     /// Mostra os dias locais do `atualCiclo` e busca no servidor todas as
     /// páginas de dias (viagens com mais de `diasLimit` dias inclusive).
     func loadMoreDias(cicloId: Int) async {
-        guard NetworkMonitor.shared.isConnected else {
+        guard estaConectado() else {
             carregarDiasLocais()
             return
         }
@@ -572,7 +585,7 @@ final class CiclosViewModel: ObservableObject {
         index = allCiclos.firstIndex(where: { $0.id == ciclo.id }) ?? 0
         diasSkip = 0
         carregarDiasLocais()
-        if let cicloId = ciclo.backendId, NetworkMonitor.shared.isConnected {
+        if let cicloId = ciclo.backendId, estaConectado() {
             hasMoreDias = true
             loadMoreDiasTask = Task { await loadMoreDias(cicloId: cicloId) }
         } else {

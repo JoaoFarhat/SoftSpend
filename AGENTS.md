@@ -96,6 +96,13 @@ serializado no MainActor, congelando a UI durante a sincronização.
   `SyncAPI` do `SyncActor`. Nos testes, `SoftSpendTests/FakeListasAPI.swift`
   devolve as páginas configuradas e grava o `antes_de` de cada chamada
   (o cursor da lista de viagens é testado em `ExclusaoNoServidorTests`).
+  A conectividade também é injetável (`init(estaConectado:)`, padrão
+  `{ NetworkMonitor.shared.isConnected }`), para os testes não caírem no
+  ramo offline quando o CI roda sem rede. Os dias da viagem aberta são
+  pedidos com `limit` 100 (`diasLimit`, teto do `GET /ciclos/{id}/dias`):
+  viagem de até 100 dias sobe em uma leitura só, sem a janela em que um
+  dia apagado em outro aparelho entre páginas era tirado daqui pela
+  limpeza (T5).
 - `SyncManager` — sincronização sob demanda com backoff exponencial.
 
 ### Relacionamentos SwiftData
