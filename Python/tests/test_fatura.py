@@ -311,6 +311,29 @@ def test_ofx_pagamento_sai_da_lista(client):
     assert "PAGAMENTO RECEBIDO" not in descricoes
 
 
+def test_ofx_datasof_antes_da_ultima_compra_nao_vira_vencimento(client):
+    # DTASOF é a data do saldo, não do vencimento: um saldo de antes das
+    # últimas compras não pode cortá-las da prévia nem ir como vencimento.
+    ofx = _OFX.replace("<DTASOF>20261020000000", "<DTASOF>20261003000000")
+    resposta = _post(client, ofx.encode(), "fatura.ofx", "application/ofx")
+
+    assert resposta.status_code == 200
+    corpo = resposta.json()
+    assert corpo["vencimento"] is None
+    assert [c["descricao"] for c in corpo["compras"]] == [
+        "SUPERMERCADO X",
+        "UBER TRIP",
+        "ESTORNO LOJA",
+    ]
+
+
+def test_ofx_datasof_depois_da_ultima_compra_mantem_vencimento(client):
+    resposta = _post(client, _OFX.encode(), "fatura.ofx", "application/ofx")
+
+    assert resposta.status_code == 200
+    assert resposta.json()["vencimento"] == "2026-10-20"
+
+
 # ------------------------------------------------------------------- CSV
 
 
