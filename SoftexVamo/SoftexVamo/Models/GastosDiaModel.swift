@@ -28,11 +28,19 @@ nonisolated final class GastosDia {
     var comprovanteUrl: String?
     var comprovanteDataCriptografado: Data?
 
+    /// Lê a nota guardada propagando o erro — quem chama precisa distinguir a
+    /// chave inacessível agora (`ComprovanteCryptoError.keyNotAvailable`:
+    /// aparelho travado, tenta de novo depois) dos bytes que a chave não abre.
+    /// O `comprovanteData` segue devolvendo `nil` em qualquer erro, para a tela.
+    func lerComprovante(crypto: ComprovanteCrypto = .shared) throws -> Data? {
+        guard let comprovanteDataCriptografado else { return nil }
+        return try crypto.descriptografar(comprovanteDataCriptografado)
+    }
+
     @Transient
     var comprovanteData: Data? {
-        guard let comprovanteDataCriptografado else { return nil }
         do {
-            return try ComprovanteCrypto.shared.descriptografar(comprovanteDataCriptografado)
+            return try lerComprovante()
         } catch {
             GastosDia.logger.error("ComprovanteCrypto: falha ao descriptografar comprovante: \(error.localizedDescription, privacy: .public)")
             return nil

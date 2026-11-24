@@ -180,6 +180,7 @@ actor SyncActor: ModelActor {
     nonisolated let modelExecutor: any ModelExecutor
     nonisolated let modelContainer: ModelContainer
     private let api: any SyncAPI
+    private let crypto: ComprovanteCrypto
 
     /// Algum item mudou durante o envio nesta passada: vale rodar outra.
     private var mudouDuranteEnvio = false
@@ -193,11 +194,12 @@ actor SyncActor: ModelActor {
     /// toma mais 429. Vale mesmo com `forcar: true`.
     private var limiteAtingidoNesteSync = false
 
-    init(modelContainer: ModelContainer, api: any SyncAPI = NetworkManager.shared) {
+    init(modelContainer: ModelContainer, api: any SyncAPI = NetworkManager.shared, crypto: ComprovanteCrypto = .shared) {
         let modelContext = ModelContext(modelContainer)
         self.modelExecutor = DefaultSerialModelExecutor(modelContext: modelContext)
         self.modelContainer = modelContainer
         self.api = api
+        self.crypto = crypto
     }
 
     private let logger = Logger(subsystem: "br.com.softspend", category: "SyncActor")
@@ -557,6 +559,17 @@ actor SyncActor: ModelActor {
         item.syncError = nil
     }
 
+    /// Chave das notas inacessível agora (aparelho travado — sync em segundo
+    /// plano, atalho do Apple Pay): não é falha. O gasto fica `.pending`, sem
+    /// `syncError` e sem contar tentativa, e tenta de novo daqui a 60 s — a
+    /// chave volta a abrir quando o aparelho destravar. Mesmo desenho do
+    /// `marcarAguardandoLimite` (429).
+    private func marcarAguardandoChave(_ item: any Syncavel, agora: Date) {
+        item.proximaTentativaEm = agora.addingTimeInterval(60)
+        item.syncStatus = .pending
+        item.syncError = nil
+    }
+
     private func marcarSucesso(_ item: any Syncavel) {
         item.tentativas = 0
         item.proximaTentativaEm = nil
@@ -881,7 +894,7 @@ actor SyncActor: ModelActor {
             let gastoUUID = gasto.id
             let foto = FotoGasto(gasto)
             do {
-                try await sincronizarComprovante(gasto, backendId: backendId, foto: foto)
+                try await sincronizarComprovante(gasto, backendId: backendId, foto: foto, agora: agora)
             } catch {
                 if atingiuLimitePorMinuto(error) {
                     gravarGasto(gastoUUID, etapa: "syncComprovantes-limite") { atual in
@@ -902,10 +915,28 @@ actor SyncActor: ModelActor {
     ///
     /// Só limpa o comprovante local se ele ainda é o que foi enviado: uma foto
     /// nova anexada durante o upload fica para a próxima passada.
-    private func sincronizarComprovante(_ gasto: GastosDia, backendId: Int, foto: FotoGasto) async throws {
+    private func sincronizarComprovante(_ gasto: GastosDia, backendId: Int, foto: FotoGasto, agora: Date) async throws {
         let gastoUUID = gasto.id
 
-        if let comprovanteData = gasto.comprovanteData {
+        let comprovanteData: Data?
+        do {
+            comprovanteData = try gasto.lerComprovante(crypto: crypto)
+        } catch ComprovanteCryptoError.keyNotAvailable {
+            // Chave inacessível agora (aparelho travado): não é falha da nota.
+            // Fica `.pending`, sem `syncError` e sem contar tentativa, e tenta
+            // de novo daqui a 60 s — nunca cai no `erroNotaNaoAbre`: os bytes
+            // são bons, só não dá para lê-los neste momento.
+            gravarGasto(gastoUUID, etapa: "syncComprovantes-chave") { atual in
+                marcarAguardandoChave(atual, agora: agora)
+            }
+            return
+        } catch {
+            // Erro de decifrar (chave errada, bytes ruins): o `comprovanteData`
+            // devolvia `nil` — cai no ramo "nota não abre" abaixo, como antes.
+            comprovanteData = nil
+        }
+
+        if let comprovanteData {
             let atualizado = try await api.uploadComprovante(
                 gastoId: backendId,
                 imageData: comprovanteData,
