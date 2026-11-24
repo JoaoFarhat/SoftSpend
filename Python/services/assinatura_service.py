@@ -216,7 +216,10 @@ def traduzir_status(status_apple, transacao, renovacao, agora: datetime) -> str:
     """
     agora = _utc_naive(agora)
     if status_apple is not None:
-        codigo = int(status_apple)
+        try:
+            codigo = int(status_apple)
+        except (TypeError, ValueError):
+            codigo = None
         if codigo == 1:
             return TRIAL if _eh_teste_gratis(transacao) else ACTIVE
         if codigo == 2:
@@ -229,7 +232,7 @@ def traduzir_status(status_apple, transacao, renovacao, agora: datetime) -> str:
             return REVOKED
         logger.warning(
             "Status da Apple desconhecido (%s) em %s; derivando pelas datas",
-            codigo,
+            status_apple,
             transacao.original_transaction_id,
         )
 
