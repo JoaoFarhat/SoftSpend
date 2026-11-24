@@ -2,8 +2,14 @@ from decimal import Decimal
 from sqlalchemy.orm import Session, joinedload
 import models
 
-def find_dia(db: Session, dia_id: int):
-    return db.query(models.Dia).filter(models.Dia.id == dia_id).first()
+def find_dia(db: Session, dia_id: int, para_atualizar: bool = False):
+    # `para_atualizar`: bloqueia a linha do dia até o fim da transação. Um
+    # gasto novo nesse dia (o INSERT checa a FK e o UPDATE de saldo mexe na
+    # mesma linha) espera o bloqueio, então não entra no meio de um delete.
+    query = db.query(models.Dia).filter(models.Dia.id == dia_id)
+    if para_atualizar:
+        query = query.with_for_update()
+    return query.first()
 
 def find_by_client_id(db: Session, client_id: str, ciclo_id: int, para_atualizar: bool = False):
     # `para_atualizar`: leitura com bloqueio, que vê a linha recém-gravada por

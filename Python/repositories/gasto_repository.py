@@ -1,3 +1,6 @@
+from decimal import Decimal
+
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 import models
 
@@ -36,5 +39,21 @@ def find_by_client_id(db: Session, client_id: str, dia_id: int, para_atualizar: 
     if para_atualizar:
         query = query.with_for_update()
     return query.first()
+
+
+def somar_valores_do_dia(db: Session, dia_id: int) -> Decimal:
+    """Soma dos gastos do dia lida no banco, nunca da coleção em memória.
+
+    Leitura com bloqueio (`FOR UPDATE`, que o MySQL aceita em agregação):
+    no REPEATABLE READ a leitura comum usa a foto do começo da transação e
+    não veria um gasto gravado por outro pedido logo antes do bloqueio do dia.
+    """
+    total = (
+        db.query(func.coalesce(func.sum(models.Gasto.valor), 0))
+        .filter(models.Gasto.dia_id == dia_id)
+        .with_for_update()
+        .scalar()
+    )
+    return Decimal(total)
 
 

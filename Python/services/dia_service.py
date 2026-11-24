@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List
 import models
 from dtos.dia import DiaRequest
-from repositories import dia_repository, ciclo_repository
+from repositories import dia_repository, ciclo_repository, gasto_repository
 
 
 def listar_dias_por_ciclo(db: Session, ciclo_id: int, user_id: str, skip: int, limit: int):
@@ -91,7 +91,10 @@ def criar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], user_id:
 
 
 def remover_dia(db: Session, dia_id: int, user_id: str):
-    dia = dia_repository.find_dia(db, dia_id)
+    # Com bloqueio: um gasto lançado neste dia por outro pedido espera o fim
+    # deste delete, em vez de entrar entre a soma e o delete (sairia pelo
+    # cascade sem nunca ter sido tirado do `gasto_total` da viagem).
+    dia = dia_repository.find_dia(db, dia_id, para_atualizar=True)
 
     if not dia:
         raise HTTPException(status_code=404, detail="Dia não encontrado")
@@ -99,7 +102,11 @@ def remover_dia(db: Session, dia_id: int, user_id: str):
     if dia.ciclo.id_usuario != user_id:
         raise HTTPException(status_code=404, detail="Dia não encontrado")
 
-    gasto_total_dia = sum(gasto.valor for gasto in dia.gastos)
+    # A soma vem do banco, não de `dia.gastos`: a coleção pode ter sido
+    # carregada antes de outro pedido gravar um gasto aqui.
+    gasto_total_dia = gasto_repository.somar_valores_do_dia(db, dia.id)
+    # Recarrega a coleção no delete, para o cascade levar o gasto novo junto.
+    db.expire(dia, ["gastos"])
     ciclo_repository.incrementar_gasto_total(db, dia.ciclo_id, -gasto_total_dia)
     # O UPDATE vai direto ao banco e nao toca o objeto em sessao; sem expirar,
     # um ciclo que continue vivo (o delete mexe em `ciclo.dias`) entregaria o
