@@ -41,19 +41,27 @@ def get_ciclo_by_id(db: Session, ciclo_id: int):
     )
 
 def get_user_ciclo_by_id(
-    db: Session, ciclo_id: int, user_id: str, para_atualizar: bool = False
+    db: Session,
+    ciclo_id: int,
+    user_id: str,
+    para_atualizar: bool = False,
+    carregar_viagem: bool = True,
 ):
     # `para_atualizar` bloqueia a linha do ciclo (SELECT ... FOR UPDATE): duas
-    # edições ao mesmo tempo não partem da mesma diária antiga.
-    query = (
-        db.query(models.Ciclo)
-        .options(
+    # edições ao mesmo tempo não partem da mesma diária antiga. Toda escrita
+    # numa viagem trava o ciclo primeiro (ordem: ciclo → dia(s) → gasto).
+    # `carregar_viagem=False` só trava, sem trazer dias e gastos: lançar ou
+    # apagar um gasto não precisa ler a viagem inteira.
+    query = db.query(models.Ciclo)
+    if carregar_viagem:
+        query = query.options(
             selectinload(models.Ciclo.dias)
             .selectinload(models.Dia.gastos)
             .selectinload(models.Gasto.open_finance_match)
             .selectinload(models.ExpenseTransactionMatch.transacao)
         )
-        .filter(models.Ciclo.id == ciclo_id, models.Ciclo.id_usuario == user_id)
+    query = query.filter(
+        models.Ciclo.id == ciclo_id, models.Ciclo.id_usuario == user_id
     )
     if para_atualizar:
         query = query.with_for_update()
