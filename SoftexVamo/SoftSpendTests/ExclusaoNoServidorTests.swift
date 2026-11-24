@@ -353,6 +353,40 @@ struct ExclusaoNoServidorTests {
         #expect(removidos.isEmpty)
         #expect(try idsDeCiclos().contains(novo.id))
     }
+
+    // MARK: Cursor da lista de viagens
+
+    /// `loadMoreCiclos` pede a página seguinte com `antes_de` = menor
+    /// `backendId` da página anterior. Só `registrarPaginaDeCiclos` era
+    /// testado: um erro na passagem do cursor deixaria a leitura com buraco
+    /// (e nada poderia ser apagado com segurança) sem nenhum teste notar.
+    @Test func proximaPaginaPedeMenorIdDaAnterior() async throws {
+        let usuarioAnterior = AuthService.shared.currentUser
+        AuthService.shared.currentUser = UserModel(
+            id: userId, nome: "Teste", username: "teste", email: "t@t.com"
+        )
+        defer { AuthService.shared.currentUser = usuarioAnterior }
+
+        let api = FakeListasAPI(paginas: [
+            (11...15).map(cicloDoServidor),
+            (6...10).map(cicloDoServidor),
+        ])
+        let vm = CiclosViewModel(api: api)
+        vm.modelContext = ctx
+
+        vm.fetchCiclosResumo()
+        await vm.loadCiclosTask?.value
+        vm.loadMoreCiclos()
+        await vm.loadCiclosTask?.value
+        vm.loadMoreCiclos()
+        await vm.loadCiclosTask?.value
+
+        // 1ª página sem cursor; a 2ª e a 3ª com o menor id da página anterior
+        // (11 na página 1, 6 na página 2). A 3ª veio vazia: sem mais páginas.
+        #expect(api.antesDeChamados == [nil, 11, 6])
+        #expect(api.limitChamados == [5, 5, 5])
+        #expect(try idsDeCiclos().count == 10)
+    }
 }
 
 }  // extension UsuarioGlobalTests

@@ -32,23 +32,31 @@ final class CiclosViewModel: ObservableObject {
     /// da leitura não desloca a próxima página, como o `skip` deslocava.
     private var proximoAntesDe: Int? = nil
     private let limit = 5
-    
+
+    /// Leituras das listas (resumo das viagens, dias da viagem aberta);
+    /// injetável para os testes — produção usa `NetworkManager.shared`
+    /// (padrão do `init`). Ver `Network/ListasAPI.swift`.
+    private let api: ListasAPI
+
     private var diasSkip = 0
     private let diasLimit = 20
     private var hasMoreDias = true
     var isLoadingDias = false
-    
-    private var loadCiclosTask: Task<Void, Never>?
+
+    /// `private(set)` em vez de `private` para os testes aguardarem o fim da
+    /// carga (`await vm.loadCiclosTask?.value`).
+    private(set) var loadCiclosTask: Task<Void, Never>?
     private var loadMoreDiasTask: Task<Void, Never>?
     private var networkObservationTask: Task<Void, Never>?
-    
+
     private var currentUser: UserModel? {
         AuthService.shared.currentUser
     }
-    
+
     private let viewModelLogger = Logger(subsystem: "br.com.softspend", category: "CiclosViewModel")
 
-    init() {
+    init(api: ListasAPI = NetworkManager.shared) {
+        self.api = api
         observeNetwork()
     }
 
@@ -187,7 +195,7 @@ final class CiclosViewModel: ObservableObject {
             }
 
             do {
-                let ciclos = try await NetworkManager.shared.fetchCicloResumo(antesDe: antesDeDaPagina, limit: limit)
+                let ciclos = try await api.fetchCicloResumo(antesDe: antesDeDaPagina, skip: 0, limit: limit)
 
                 guard !Task.isCancelled else { return }
 
@@ -423,7 +431,7 @@ final class CiclosViewModel: ObservableObject {
             return
         }
         await carregarDiasDoServidor(cicloId: cicloId) { skip, limit in
-            try await NetworkManager.shared.fetchDias(cicloId: cicloId, skip: skip, limit: limit)
+            try await self.api.fetchDias(cicloId: cicloId, skip: skip, limit: limit)
         }
     }
 
