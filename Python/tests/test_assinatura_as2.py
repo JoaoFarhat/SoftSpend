@@ -77,7 +77,7 @@ class FakeApple:
         self.notificacoes[nome] = (notificacao, ambiente)
         return nome
 
-    def estado(self, transacao: Transacao, status: int, renovacao=None, ambiente="Production"):
+    def estado(self, transacao: Transacao, status: int | None, renovacao=None, ambiente="Production"):
         self.estados[(ambiente, transacao.original_transaction_id)] = EstadoApple(
             status=status, transacao=transacao, renovacao=renovacao
         )
@@ -507,6 +507,16 @@ def test_transacoes_usa_o_estado_atual_da_api(ambiente):
     assert resposta.json()["status"] == "expired"
 
 
+def test_transacoes_estado_sem_status_deriva_das_datas(ambiente):
+    """Item de `lastTransactions` sem `status`: o estado sai das datas."""
+    jws, tx = _transacao_do_usuario(ambiente)
+    ambiente.fake.estado(tx, None)
+    resposta = ambiente.como(USER_A).post("/api/assinatura/transacoes", json={"jws": jws})
+    assert resposta.status_code == 200, resposta.text
+    assert resposta.json()["status"] == "active"  # expira_em no futuro
+    assert ambiente.linha(USER_A).status == "active"
+
+
 def test_transacoes_exige_login(monkeypatch):
     monkeypatch.setenv("SECRET_KEY", "access-secret-com-pelo-menos-32-chars!!")
     monkeypatch.setenv("REFRESH_TOKEN_SECRET_KEY", "refresh-secret-com-pelo-menos-32-chars!")
@@ -584,6 +594,22 @@ def test_webhook_status_desconhecido_200_e_uuid_gravado(ambiente):
     assert ambiente.linha(USER_A).status == "active"  # expira_em no futuro
     [registro] = ambiente.notificacoes()
     assert registro.notification_uuid == "n-1"
+
+
+def test_webhook_status_texto_200_e_uuid_gravado(ambiente):
+    """`data.status` não numérico não pode derrubar o webhook: sem 500,
+    reconcilia pelas datas e registra o notificationUUID."""
+    tx = _ligar(ambiente)
+    ambiente.fake.fora_do_ar = True  # aplica a notificação (mais nova) direto
+    payload = ambiente.fake.payload(
+        "p-abc",
+        _notif(uuid="n-abc", tipo="EXPIRED", transacao=tx, status="abc",
+               assinada_em=_agora_real() + timedelta(minutes=1)),
+    )
+    assert _webhook(ambiente, payload).status_code == 200
+    assert ambiente.linha(USER_A).status == "active"  # expira_em no futuro
+    [registro] = ambiente.notificacoes()
+    assert registro.notification_uuid == "n-abc"
 
 
 def test_webhook_uuid_repetido_200_sem_efeito(ambiente):
@@ -895,6 +921,12 @@ def test_replay_nao_vale_para_client_id_de_outro_usuario(ambiente, monkeypatch):
 
 
 # ============================================== adaptador da biblioteca
+
+
+def test_codigo_status_ausente_ou_texto_vira_none():
+    assert apple_service._codigo_status(None) is None
+    assert apple_service._codigo_status("abc") is None
+    assert apple_service._codigo_status("2") == 2
 
 
 def test_transacao_da_biblioteca_converte_campos():
