@@ -50,6 +50,29 @@ struct LancamentoGastoTests {
         #expect(r.podeSalvar == true)
     }
 
+    // MARK: - Teto de valor do servidor
+
+    /// `max_digits=10, decimal_places=2` no `valor` do gasto: R$ 99.999.999,99
+    /// salva; acima o servidor devolve 422 e o gasto retentaria para sempre,
+    /// então o Salvar desliga e o motivo aparece no formulário.
+    @Test func valorNoTetoDoServidorLiberaSalvar() {
+        let r = RascunhoGasto(dia: DiaSoftex(data: .now, saldo: 100))
+        r.titulo = "Almoço"
+        r.valorTexto = "99.999.999,99"
+
+        #expect(r.podeSalvar == true)
+        #expect(r.erroValor == nil)
+    }
+
+    @Test func valorAcimaDoTetoDoServidorBloqueiaEAvisa() {
+        let r = RascunhoGasto(dia: DiaSoftex(data: .now, saldo: 100))
+        r.titulo = "Almoço"
+        r.valorTexto = "100.000.000,00"
+
+        #expect(r.podeSalvar == false)
+        #expect(r.erroValor == "O valor máximo é R$ 99.999.999,99")
+    }
+
     // MARK: - Leitura por IA (costuras lerLocal/extrair)
 
     /// Liga `Consentimento.leituraAutomatica` (chave real de `.standard`) e

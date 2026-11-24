@@ -145,6 +145,55 @@ struct FormularioViagemTests {
         #expect(invertido.erro == "A volta precisa ser no dia da ida ou depois")
     }
 
+    // MARK: Teto de valor do servidor
+
+    /// `max_digits=10, decimal_places=2` nos DTOs: R$ 99.999.999,99 ainda
+    /// salva; acima disso o servidor devolve 422 e a viagem inteira ficava
+    /// tentando subir para sempre — o formulário bloqueia antes de gravar.
+    @Test func totalNoTetoDoServidorSalva() async throws {
+        let container = try ModelContainer(
+            for: CicloSoftex.self, DiaSoftex.self, GastosDia.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let vm = CiclosViewModel()
+        vm.modelContext = ModelContext(container)
+
+        var f = formulario()
+        f.destino = "Cuiabá, MT"
+        f.editarTotal("99.999.999,99")
+        #expect(f.erro == nil)
+        let total = try #require(f.total)
+
+        try await vm.createNewCiclo(startDate: f.ida, endDate: f.volta, totalValue: total, titulo: f.destino)
+
+        #expect(vm.allCiclos.first?.valor_total == dec("99999999.99"))
+    }
+
+    @Test func totalAcimaDoTetoDoServidorBloqueia() {
+        var f = formulario()
+        f.destino = "Cuiabá, MT"
+        f.editarTotal("100.000.000,00")
+        #expect(f.erro == "O valor máximo é R$ 99.999.999,99")
+    }
+
+    /// O buraco do zero a mais na diária: o total recalculado (diária × dias)
+    /// é o que passa do teto — R$ 5 milhões/dia numa viagem de 30 dias.
+    @Test func diariaQueVezesOsDiasPassaDoTetoBloqueia() {
+        var f = FormularioViagem(ida: d(1), volta: d(30), calendario: cal) // 30 dias
+        f.destino = "Cuiabá, MT"
+        f.editarDiaria("5.000.000")
+        #expect(f.total == dec("150000000"))
+        #expect(f.erro == "O valor máximo é R$ 99.999.999,99")
+    }
+
+    /// Diária alta que, vezes os dias, ainda cabe no teto continua livre.
+    @Test func diariaNoTetoComUmDiaPassa() {
+        var f = FormularioViagem(ida: d(20), volta: d(20), calendario: cal) // 1 dia
+        f.destino = "Cuiabá, MT"
+        f.editarDiaria("99.999.999,99")
+        #expect(f.erro == nil)
+    }
+
     // MARK: Leitura em pt-BR
 
     @Test func leValoresEmPtBR() {

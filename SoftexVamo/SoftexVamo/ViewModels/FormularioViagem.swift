@@ -68,6 +68,12 @@ struct FormularioViagem: Equatable {
         if destino.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Informe o destino" }
         if dias < 1 { return "A volta precisa ser no dia da ida ou depois" }
         guard let total, total > 0 else { return "Informe o total ou a diária" }
+        // Acima do teto o servidor devolve 422 e a viagem inteira ficava
+        // tentando subir para sempre. A diária digitada vira o total
+        // (`diaria × dias`), então basta conferir os dois campos como lidos.
+        if total > LimiteValor.maximo || (diaria ?? 0) > LimiteValor.maximo {
+            return LimiteValor.mensagem
+        }
         return nil
     }
 
