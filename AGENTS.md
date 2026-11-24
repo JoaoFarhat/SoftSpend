@@ -278,6 +278,29 @@ no Keychain com `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`.
 `ComprovanteCrypto` é `nonisolated` porque é acessado de `GastosDia` (que é
 `nonisolated`).
 
+**A chave nunca é trocada por erro passageiro.** O acesso ao Keychain fica atrás
+do protocolo `ArmazemDeChave` (`nonisolated`, `Sendable`): `buscar()` devolve
+`.achou(Data)`, `.naoExiste` (`errSecItemNotFound`) ou `.indisponivel(OSStatus)`
+(qualquer outro status, ex. `errSecInteractionNotAllowed` com o iPhone trancado),
+e `adicionar(_:)` só faz `SecItemAdd`. `ComprovanteCrypto.init(armazem:)`;
+`shared` usa `ArmazemDeChaveKeychain`.
+
+- Chave nova só em `.naoExiste`. `.indisponivel` lança `keyNotAvailable` —
+  criar outra deixaria todas as notas guardadas ilegíveis para sempre.
+- Nunca `SecItemDelete`. `errSecDuplicateItem` no add (outra chamada criou
+  antes) relê e usa a chave que está lá.
+- `GastosDia.lerComprovante(crypto:)` lança com a chave indisponível
+  (`keyNotAvailable`/`invalidKeySize`) e devolve `nil` (com log) quando os bytes
+  não abrem com a chave atual. O getter `comprovanteData` das telas continua
+  devolvendo `nil` nos dois casos.
+- O `SyncActor` recebe o crypto no `init(modelContainer:api:crypto:)` (padrão
+  `.shared`). Em `sincronizarComprovante`, chave indisponível vira
+  `marcarFalha` (backoff, bytes intactos, sem upload); o `concluirGasto` não
+  marca `.synced` enquanto a nota não abre. Bytes ilegíveis seguem como antes
+  ("nada a enviar").
+- Testes em `SoftSpendTests/ComprovanteCryptoTests.swift` e
+  `ChaveIndisponivelSyncTests.swift`, com `ArmazemDeChaveFalso` (em memória).
+
 ### Apple Pay (atalho "Registrar gasto")
 
 Spec: `docs/cartao-sem-open-finance.md` §1 (partes A e B implementadas).

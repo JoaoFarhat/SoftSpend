@@ -180,6 +180,8 @@ actor SyncActor: ModelActor {
     nonisolated let modelExecutor: any ModelExecutor
     nonisolated let modelContainer: ModelContainer
     private let api: any SyncAPI
+    /// Abre as notas guardadas no aparelho. Nos testes, com um armazém de chave falso.
+    private let crypto: ComprovanteCrypto
 
     /// Algum item mudou durante o envio nesta passada: vale rodar outra.
     private var mudouDuranteEnvio = false
@@ -193,11 +195,16 @@ actor SyncActor: ModelActor {
     /// toma mais 429. Vale mesmo com `forcar: true`.
     private var limiteAtingidoNesteSync = false
 
-    init(modelContainer: ModelContainer, api: any SyncAPI = NetworkManager.shared) {
+    init(
+        modelContainer: ModelContainer,
+        api: any SyncAPI = NetworkManager.shared,
+        crypto: ComprovanteCrypto = .shared
+    ) {
         let modelContext = ModelContext(modelContainer)
         self.modelExecutor = DefaultSerialModelExecutor(modelContext: modelContext)
         self.modelContainer = modelContainer
         self.api = api
+        self.crypto = crypto
     }
 
     private let logger = Logger(subsystem: "br.com.softspend", category: "SyncActor")
@@ -760,8 +767,19 @@ actor SyncActor: ModelActor {
     private func concluirGasto(_ atual: GastosDia, mudou: Bool) {
         if mudou {
             marcarMudancaDuranteEnvio(atual)
-        } else if atual.comprovanteData == nil && !atual.comprovanteParaRemover {
+        } else if !temComprovantePendente(atual) {
             marcarSucesso(atual)
+        }
+    }
+
+    /// Nota a enviar ou a apagar. Chave indisponível conta como pendente: a nota
+    /// existe, só não abre agora (o `syncComprovantes` marca a falha).
+    private func temComprovantePendente(_ gasto: GastosDia) -> Bool {
+        if gasto.comprovanteParaRemover { return true }
+        do {
+            return try gasto.lerComprovante(crypto: crypto) != nil
+        } catch {
+            return true
         }
     }
 
@@ -892,10 +910,13 @@ actor SyncActor: ModelActor {
     ///
     /// Só limpa o comprovante local se ele ainda é o que foi enviado: uma foto
     /// nova anexada durante o upload fica para a próxima passada.
+    ///
+    /// Chave da nota indisponível (iPhone trancado) lança: o `syncComprovantes`
+    /// marca a falha com backoff e os bytes guardados ficam intactos.
     private func sincronizarComprovante(_ gasto: GastosDia, backendId: Int, foto: FotoGasto) async throws {
         let gastoUUID = gasto.id
 
-        if let comprovanteData = gasto.comprovanteData {
+        if let comprovanteData = try gasto.lerComprovante(crypto: crypto) {
             let atualizado = try await api.uploadComprovante(
                 gastoId: backendId,
                 imageData: comprovanteData,

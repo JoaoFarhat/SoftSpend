@@ -31,11 +31,10 @@ nonisolated final class GastosDia {
     @Transient
     var comprovanteData: Data? {
         get {
-            guard let comprovanteDataCriptografado else { return nil }
             do {
-                return try ComprovanteCrypto.shared.descriptografar(comprovanteDataCriptografado)
+                return try lerComprovante()
             } catch {
-                GastosDia.logger.error("ComprovanteCrypto: falha ao descriptografar comprovante: \(error.localizedDescription, privacy: .public)")
+                GastosDia.logger.error("ComprovanteCrypto: nota fiscal indisponível: \(error.localizedDescription, privacy: .public)")
                 return nil
             }
         }
@@ -52,6 +51,26 @@ nonisolated final class GastosDia {
             }
         }
     }
+
+    /// Abre a nota guardada no aparelho.
+    ///
+    /// - `nil`: não há nota, ou os bytes não abrem com a chave atual (logado).
+    /// - lança `ComprovanteCryptoError.keyNotAvailable`/`.invalidKeySize`: a
+    ///   chave não está acessível agora (ex.: iPhone trancado). A nota continua
+    ///   guardada e deve ser tentada de novo — o sync não pode tratá-la como
+    ///   "nada a enviar".
+    func lerComprovante(crypto: ComprovanteCrypto = .shared) throws -> Data? {
+        guard let comprovanteDataCriptografado else { return nil }
+        do {
+            return try crypto.descriptografar(comprovanteDataCriptografado)
+        } catch let erro as ComprovanteCryptoError where erro == .keyNotAvailable || erro == .invalidKeySize {
+            throw erro
+        } catch {
+            GastosDia.logger.error("ComprovanteCrypto: falha ao descriptografar comprovante: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
+    }
+
     var comprovanteParaRemover: Bool = false
 
     /// MIME do comprovante pendente de upload.
