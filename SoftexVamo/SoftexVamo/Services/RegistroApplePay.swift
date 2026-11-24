@@ -35,7 +35,8 @@ nonisolated enum ErroRegistro: Error, Equatable {
 }
 
 /// Valor da compra, como texto: "R$ 12,34", "12,34", "12.34", "1.234,56",
-/// "1.234" — o que a automação do Atalhos entrega, no idioma do aparelho.
+/// "1,234.56", "1.234" — o que a automação do Atalhos entrega, no idioma
+/// do aparelho.
 enum ValorDaCompra {
     /// Acima disso é provável erro de leitura; recusa como `.valorInvalido`.
     static let teto: Decimal = 100_000
@@ -48,10 +49,23 @@ enum ValorDaCompra {
         // Compra com sinal negativo vira positiva (algumas automações mandam "-12,34").
         t = t.replacingOccurrences(of: "-", with: "")
 
-        if t.contains(",") {
-            // Vírgula é decimal; o ponto, quando existe, é milhar.
-            t = t.replacingOccurrences(of: ".", with: "")
-            t = t.replacingOccurrences(of: ",", with: ".")
+        if t.contains(","), t.contains(".") {
+            // Com os dois separadores, o mais à direita é o decimal e o outro
+            // é milhar: "1.234,56" (pt-BR) e "1,234.56" (Atalhos em inglês).
+            if t.lastIndex(of: ",")! > t.lastIndex(of: ".")! {
+                t = t.replacingOccurrences(of: ".", with: "")
+                t = t.replacingOccurrences(of: ",", with: ".")
+            } else {
+                t = t.replacingOccurrences(of: ",", with: "")
+            }
+        } else if t.contains(",") {
+            if t.filter({ $0 == "," }).count > 1 {
+                // Duas vírgulas ou mais, sem ponto: milhar ("1,234,567").
+                t = t.replacingOccurrences(of: ",", with: "")
+            } else {
+                // Vírgula sozinha continua decimal ("12,34").
+                t = t.replacingOccurrences(of: ",", with: ".")
+            }
         } else if t.contains(".") {
             let partes = t.split(separator: ".", omittingEmptySubsequences: false)
             // Ponto seguido de exatamente 3 dígitos e de mais nada é milhar

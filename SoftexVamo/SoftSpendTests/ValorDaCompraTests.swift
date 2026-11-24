@@ -18,6 +18,24 @@ struct ValorDaCompraTests {
         #expect(ValorDaCompra.interpretar("1234,56") == d("1234.56"))
     }
 
+    /// Num iPhone em inglês o Atalhos manda "1,234.56": o separador mais à
+    /// direita é o decimal e o outro é milhar (antes toda vírgula era
+    /// decimal e "R$1,234.56" virava R$ 1,23).
+    @Test func formatoInglesComVirgulaEPonto() {
+        #expect(ValorDaCompra.interpretar("R$1,234.56") == d("1234.56"))
+        #expect(ValorDaCompra.interpretar("1,234.56") == d("1234.56"))
+        #expect(ValorDaCompra.interpretar("R$ 12,345.00") == d("12345"))
+        #expect(ValorDaCompra.interpretar("R$ 1.234,56") == d("1234.56"))
+        #expect(ValorDaCompra.interpretar("-1,234.56") == d("1234.56"))
+    }
+
+    /// Duas vírgulas ou mais sem ponto são milhar ("1,234,567" em inglês).
+    /// O valor passa do teto e é recusado — não vira "1,23" como antes.
+    @Test func virgulasRepetidasSaoMilhar() {
+        #expect(ValorDaCompra.interpretar("1,234,567") == nil)
+        #expect(ValorDaCompra.interpretar("R$ 0,99") == d("0.99"))
+    }
+
     @Test func sinalNegativoViraPositivo() {
         #expect(ValorDaCompra.interpretar("-12,34") == d("12.34"))
         #expect(ValorDaCompra.interpretar("-R$ 5,00") == d("5"))
