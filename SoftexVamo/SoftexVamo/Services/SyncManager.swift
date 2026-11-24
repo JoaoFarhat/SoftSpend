@@ -978,17 +978,11 @@ actor SyncActor: ModelActor {
     /// falha. O outro 429 — `daily_ai_limit`, teto diário de leituras por IA —
     /// não entra aqui: só libera no dia seguinte e segue no caminho de falha.
     private func isLimitePorMinuto(_ error: Error) -> Bool {
-        if let apiError = error as? APIError {
-            if case .serverError(_, _, let statusCode) = apiError {
-                return statusCode == 429 && !apiError.limiteDiarioIA
-            }
+        guard let apiError = error as? APIError,
+              case .serverError(_, _, let statusCode) = apiError else {
             return false
         }
-        let nsError = error as NSError
-        if let statusCode = nsError.userInfo["statusCode"] as? Int {
-            return statusCode == 429
-        }
-        return false
+        return statusCode == 429 && !apiError.limiteDiarioIA
     }
 
     /// `error` é o 429 do limite por minuto? Freia este `sync` — liga

@@ -174,6 +174,25 @@ struct LimitePorMinutoTests {
         #expect(local.gasto.proximaTentativaEm != nil)
     }
 
+    /// `NSError` solto com `userInfo["statusCode"] = 429` não é o limite por
+    /// minuto — nada no app cria esse erro (o 429 real chega sempre no
+    /// `APIError.serverError`). Segue a falha comum: `.failed`, tentativa
+    /// contada e backoff, sem ligar o freio do `sync`.
+    @Test func nsErrorComStatusCode429ContinuaFalha() async throws {
+        try criarViagemOffline()
+        api.falhar(.postGasto, com: NSError(
+            domain: "teste", code: 1, userInfo: ["statusCode": 429]))
+
+        _ = await sync(agora: .now)
+
+        #expect(api.chamadas == [.postCiclo, .postDiasLote, .postGasto])
+        let local = try lerLocal()
+        #expect(local.gasto.syncStatus == .failed)
+        #expect(local.gasto.tentativas == 1)
+        #expect(local.gasto.syncError != nil)
+        #expect(local.gasto.proximaTentativaEm != nil)
+    }
+
     /// 500 continua no caminho antigo: `.failed` com backoff.
     @Test func erroQuinhentosContinuaFalha() async throws {
         try criarViagemOffline()
