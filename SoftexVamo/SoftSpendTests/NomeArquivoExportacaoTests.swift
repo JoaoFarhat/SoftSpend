@@ -72,9 +72,12 @@ struct NomeArquivoExportacaoTests {
         vm.atualCiclo = ciclo
         vm.exportarRemoto = { _, _, _ in Data([1, 2, 3]) }
 
-        let url = try await vm.exportarCiclo(formato: .pdf)
+        let resultado = try await vm.exportarCiclo(formato: .pdf)
 
-        let gerado = try #require(url)
+        guard case .arquivo(let gerado) = resultado else {
+            Issue.record("esperava .arquivo, veio \(resultado)")
+            return
+        }
         defer { try? FileManager.default.removeItem(at: gerado) }
         #expect(gerado.lastPathComponent == "relatorio_SP-RJ.pdf")
         #expect(FileManager.default.fileExists(atPath: gerado.path))

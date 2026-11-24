@@ -415,8 +415,14 @@ excluir a conta ficam livres.
   `LeituraComprovante.ler`, `exportarRemoto` no `CiclosViewModel`,
   `api: FaturaAPI` no `ImportarFaturaViewModel`) — os testes provam que sem
   acesso nenhuma chamada sai.
-- `exportarCiclo` devolve `URL?`: `nil` = bloqueado (planos abriram), não
-  erro. `ler()` da fatura bloqueada volta para `.escolhendo`.
+- `exportarCiclo` devolve `ResultadoExportacao`: `.bloqueado` = planos
+  abriram, não erro; `.pendencias(n)` = n dias/gastos ainda não enviados
+  ficariam fora do relatório (montado pelo servidor) e a FecharViagemView
+  pergunta "gerar assim mesmo" (`aceitarPendencias: true` exporta direto);
+  `.arquivo(URL)` = gerado. Com alteração na viagem
+  (`temAlteracaoNaViagem` ou `backendId == nil`), um sync forçado com teto
+  roda antes (`sincronizarAntesDeExportar` + `tetoSyncExportacao`, 20 s).
+  `ler()` da fatura bloqueada volta para `.escolhendo`.
 - `MainView` mostra a faixa (`assinatura.textoFaixa`: "Seu pagamento falhou…"
   em `grace`/`billing_retry`, "Teste grátis até DD/MM" em `trial`) sobre a
   barra de abas e apresenta `PlanosAssinaturaView` em folha ligada a
@@ -731,7 +737,8 @@ em `DetalheViagemView` ("Importar fatura do cartão", `.sheet`):
 - Sem `vencimento` no arquivo (CSV/OFX sem a data), a conferência mostra um
   `DatePicker` (`vencimentoInformado`, padrão = data da última compra) e a
   data vai no envio — sem ela o `POST /api/faturas` responde 422.
-- O `sync(forcar:)` antes da leitura tem teto (`tetoSync`, 20 s): estourado,
+- O `sync(forcar:)` antes da leitura tem teto (`tetoSync`, 20 s, helper
+  `Services/EsperaComTeto.swift`, o mesmo da exportação): estourado,
   a leitura segue e o sync continua em background — **não é cancelado**,
   senão os itens em voo ganhariam `.failed`+backoff no `SyncActor`. A `Task`
   da leitura é cancelada no `onDisappear` da folha (`cancelarLeitura`).
