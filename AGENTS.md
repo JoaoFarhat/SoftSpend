@@ -253,7 +253,14 @@ guardada conta como pendente mesmo quando não abre com a chave atual (olhar o
 campo cifrado basta; decifrar só para checar existência marcava `.synced` e a
 pendência sumia sem registro). `syncGastos` também só marca `.synced` se não
 há comprovante pendente — o gasto permanece `.pending` até o comprovante ser
-processado.
+processado. Nota guardada que a chave atual não abre (`sincronizarComprovante`,
+ramo sem bytes legíveis): `syncError = SyncActor.erroNotaNaoAbre` +
+`marcarFalha` — a tela mostra o motivo e o backoff impede insistir a cada
+passada, com os bytes preservados. A saída é o "Descartar nota" do
+`DetalheGastoView` (mostrado sempre que `comprovanteDataCriptografado != nil`
+e a nota não abre): chama `removerComprovante`, que limpa os bytes e sobe a
+remoção — o gasto destrava na passada seguinte. Testes em
+`SoftSpendTests/DescartarNotaIlegivelTests.swift`.
 
 **Exclusão vinda do servidor (T5)**: no `CiclosViewModel`, com a lista completa
 de dias (`listaCompleta`), `removerSumidos` apaga gasto `.synced` com `backendId`

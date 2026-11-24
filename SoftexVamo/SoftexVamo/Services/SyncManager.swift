@@ -533,6 +533,12 @@ actor SyncActor: ModelActor {
     /// e sobe sozinha depois da compra.
     nonisolated static let erroAssinaturaNecessaria = "Assinatura necessária para enviar esta viagem"
 
+    /// `syncError` da nota guardada no aparelho que a chave atual não abre
+    /// (`sincronizarComprovante`): falha comum, com backoff — os bytes ficam
+    /// guardados (a nota pode voltar a abrir) e a tela mostra o motivo, com
+    /// "Descartar nota" como saída no detalhe do gasto.
+    nonisolated static let erroNotaNaoAbre = "Nota não abre com a chave atual"
+
     /// Viagem nova recusada por falta de assinatura: fica `.pending`, sem
     /// contar tentativa nem backoff (o `sync(forcar: true)` depois da compra a
     /// sobe) e **sem** `mudouDuranteEnvio` (outra passada só repetiria o 403).
@@ -932,9 +938,18 @@ actor SyncActor: ModelActor {
                 concluirGasto(atual, mudou: mudou)
             }
         } else {
-            // Bytes que não descriptografam: nada a enviar.
+            // Bytes guardados que a chave atual não abre: não há o que enviar
+            // nem o que apagar. Falha com o motivo na tela e backoff, em vez
+            // de concluir sem registro nem tentar a cada passada — os bytes
+            // ficam (a nota pode voltar a abrir quando a chave estiver
+            // acessível de novo) e a tela oferece "Descartar nota" como saída.
             gravarGasto(gastoUUID, etapa: "syncComprovantes") { atual in
-                concluirGasto(atual, mudou: FotoGasto(atual) != foto)
+                if FotoGasto(atual) != foto {
+                    marcarMudancaDuranteEnvio(atual)
+                } else {
+                    atual.syncError = SyncActor.erroNotaNaoAbre
+                    marcarFalha(atual)
+                }
             }
         }
     }

@@ -15,6 +15,7 @@ struct DetalheGastoView: View {
     @State private var editando: RascunhoGasto?
     @State private var ampliada = false
     @State private var confirmandoApagar = false
+    @State private var confirmandoDescarte = false
     @State private var adicionandoComprovante = false
     @State private var apagando = false
     /// Falha ao apagar ou anexar. A tela não tem o alerta do ErrorManager, então avisa aqui.
@@ -41,13 +42,20 @@ struct DetalheGastoView: View {
     }
 
     private func conteudo(_ gasto: GastosDia, ciclo: CicloSoftex) -> some View {
-        let imagemLocal = gasto.comprovanteData.flatMap(UIImage.init(data:))
+        let dadosNota = gasto.comprovanteData
+        let imagemLocal = dadosNota.flatMap(UIImage.init(data:))
         // Remoção feita offline (pendente de sync) não conta como anexado.
         let temComprovante = temComprovanteValido(gasto)
+        // Bytes guardados que a chave atual não abre (cifrados por outra chave
+        // ou corrompidos): não há foto para mostrar nem bytes para enviar — a
+        // saída é descartar a nota.
+        let notaIlegivel = gasto.comprovanteDataCriptografado != nil && dadosNota == nil
 
         return ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if temComprovante {
+                if notaIlegivel {
+                    notaIlegivelView
+                } else if temComprovante {
                     foto(gasto, imagemLocal: imagemLocal)
                 } else {
                     semFoto
@@ -64,7 +72,7 @@ struct DetalheGastoView: View {
                 .padding(.horizontal, Espaco.g + 2)
                 .padding(.top, Espaco.g + 4)
 
-                lista(gasto, temComprovante: temComprovante)
+                lista(gasto, temComprovante: temComprovante, notaIlegivel: notaIlegivel)
                     .padding(.top, Espaco.g)
 
                 Button("Apagar gasto", role: .destructive) { confirmandoApagar = true }
@@ -88,6 +96,12 @@ struct DetalheGastoView: View {
             Button("Cancelar", role: .cancel) {}
         } message: {
             Text("\(gasto.titulo), \(formatarBRL(gasto.valor)). O gasto sai da viagem.")
+        }
+        .confirmationDialog("Descartar a nota?", isPresented: $confirmandoDescarte, titleVisibility: .visible) {
+            Button("Descartar nota", role: .destructive) { descartarNota(gasto) }
+            Button("Cancelar", role: .cancel) {}
+        } message: {
+            Text("A nota guardada não abre neste aparelho e sai do gasto. Não tem desfazer.")
         }
         .escolherComprovante(isPresented: $adicionandoComprovante) { resultado in
             anexar(resultado, gasto: gasto)
@@ -187,9 +201,31 @@ struct DetalheGastoView: View {
         .padding(.top, Espaco.p)
     }
 
+    /// Nota guardada que a chave atual não abre: aviso no lugar da foto e a
+    /// saída ("Descartar nota"), que destrava o envio do gasto.
+    private var notaIlegivelView: some View {
+        VStack(spacing: Espaco.p) {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.title2)
+                .foregroundStyle(Tema.alertaTexto)
+                .accessibilityHidden(true)
+            Text("A nota não abre neste aparelho")
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Tema.texto)
+            Button("Descartar nota", role: .destructive) { confirmandoDescarte = true }
+                .font(.body.weight(.semibold))
+                .foregroundStyle(Tema.estouro)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, Espaco.g)
+        .background(Tema.superficie, in: RoundedRectangle(cornerRadius: Raio.lista, style: .continuous))
+        .padding(.horizontal, Espaco.g + 2)
+        .padding(.top, Espaco.p)
+    }
+
     // MARK: Lista
 
-    private func lista(_ gasto: GastosDia, temComprovante: Bool) -> some View {
+    private func lista(_ gasto: GastosDia, temComprovante: Bool, notaIlegivel: Bool) -> some View {
         let data = gasto.dia.map { "\(dataCurta($0.data)), \(horaCurta(gasto.criadoEm))" } ?? horaCurta(gasto.criadoEm)
         return VStack(spacing: 0) {
             linha("Data") {
@@ -201,7 +237,9 @@ struct DetalheGastoView: View {
             }
             divisoria
             linha("Comprovante") {
-                if temComprovante {
+                if notaIlegivel {
+                    Text("não abre").foregroundStyle(Tema.estouro)
+                } else if temComprovante {
                     Label("anexado", systemImage: "checkmark")
                         .labelStyle(RotuloCompacto())
                         .foregroundStyle(Tema.ok)
@@ -276,6 +314,20 @@ struct DetalheGastoView: View {
                 apagando = false
                 erro = "Não foi possível apagar o gasto. Tente novamente."
 
+            }
+        }
+    }
+
+    /// "Descartar nota": a mesma remoção do comprovante — limpa os bytes que
+    /// não abrem e marca a remoção para subir (o DELETE do servidor vale
+    /// mesmo quando a nota nunca chegou lá: o 404 é tratado como removido).
+    private func descartarNota(_ gasto: GastosDia) {
+        let id = gasto.id
+        Task {
+            do {
+                try await viewModel.removerComprovante(gastoId: id)
+            } catch {
+                erro = "Não foi possível descartar a nota. Tente novamente."
             }
         }
     }
