@@ -248,10 +248,9 @@ viagem bloqueada não faz requisição). Na tela, `EstadoEnvio.aguardandoAssinat
 
 **Comprovantes**: `syncComprovantes` filtra por `syncStatusRaw != synced` no
 predicado. Chama `marcarFalha` em falha (backoff) e `marcarSucesso` apenas se
-`comprovanteDataCriptografado == nil && !comprovanteParaRemover` — nota
-guardada conta como pendente mesmo quando não abre com a chave atual (olhar o
-campo cifrado basta; decifrar só para checar existência marcava `.synced` e a
-pendência sumia sem registro). `syncGastos` também só marca `.synced` se não
+`temComprovantePendente` é falso (`comprovanteParaRemover`, ou nota que abre,
+ou chave indisponível contam como pendente; bytes que não abrem com a chave
+atual não têm o que enviar e não seguram o gasto). `syncGastos` também só marca `.synced` se não
 há comprovante pendente — o gasto permanece `.pending` até o comprovante ser
 processado.
 
