@@ -43,6 +43,9 @@ def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: str):
             novo_gasto = gasto_repository.criar_gasto(db, novo_gasto)
             dia_repository.incrementar_saldo(db, dia.id, -gasto.valor)
             ciclo_repository.incrementar_gasto_total(db, dia.ciclo_id, gasto.valor)
+            # UPDATE direto no banco não toca o objeto em sessão; sem expirar,
+            # um ciclo vivo na sessão entregaria o gasto_total velho depois.
+            db.expire(dia.ciclo, ["gasto_total"])
     except IntegrityError:
         existente = (
             gasto_repository.find_by_client_id(
@@ -93,6 +96,9 @@ def atualizar_gasto(db: Session, gasto_id: int, gasto_request: GastoRequest, use
     else:
         dia_repository.incrementar_saldo(db, dia_atual.id, -diferenca)
         ciclo_repository.incrementar_gasto_total(db, dia_atual.ciclo_id, diferenca)
+    # UPDATE direto no banco não toca o objeto em sessão; sem expirar, um ciclo
+    # vivo na sessão entregaria o gasto_total velho para leituras posteriores.
+    db.expire(dia_atual.ciclo, ["gasto_total"])
 
     gasto.titulo = gasto_request.titulo
     gasto.valor = gasto_request.valor
@@ -117,6 +123,9 @@ def remover_gasto(db: Session, gasto_id: int, user_id: str):
 
     dia_repository.incrementar_saldo(db, dia.id, gasto.valor)
     ciclo_repository.incrementar_gasto_total(db, dia.ciclo_id, -gasto.valor)
+    # Mesmo motivo do remover_dia: UPDATE direto no banco não toca o objeto
+    # em sessão; sem expirar, um ciclo vivo entregaria o gasto_total velho.
+    db.expire(dia.ciclo, ["gasto_total"])
 
     gasto_repository.remover_gasto(db, gasto)
 
