@@ -256,10 +256,9 @@ viagem bloqueada não faz requisição). Na tela, `EstadoEnvio.aguardandoAssinat
 
 **Comprovantes**: `syncComprovantes` filtra por `syncStatusRaw != synced` no
 predicado. Chama `marcarFalha` em falha (backoff) e `marcarSucesso` apenas se
-`comprovanteDataCriptografado == nil && !comprovanteParaRemover` — nota
-guardada conta como pendente mesmo quando não abre com a chave atual (olhar o
-campo cifrado basta; decifrar só para checar existência marcava `.synced` e a
-pendência sumia sem registro). `syncGastos` também só marca `.synced` se não
+`temComprovantePendente` é falso (`comprovanteParaRemover`, ou nota que abre,
+ou chave indisponível contam como pendente; bytes que não abrem com a chave
+atual não têm o que enviar e não seguram o gasto). `syncGastos` também só marca `.synced` se não
 há comprovante pendente — o gasto permanece `.pending` até o comprovante ser
 processado. Nota guardada que a chave atual não abre (`sincronizarComprovante`,
 ramo sem bytes legíveis): `syncError = SyncActor.erroNotaNaoAbre` +
@@ -303,6 +302,29 @@ tela — o setter antigo apagava a nota guardada e só logava) e
 
 `ComprovanteCrypto` é `nonisolated` porque é acessado de `GastosDia` (que é
 `nonisolated`).
+
+**A chave nunca é trocada por erro passageiro.** O acesso ao Keychain fica atrás
+do protocolo `ArmazemDeChave` (`nonisolated`, `Sendable`): `buscar()` devolve
+`.achou(Data)`, `.naoExiste` (`errSecItemNotFound`) ou `.indisponivel(OSStatus)`
+(qualquer outro status, ex. `errSecInteractionNotAllowed` com o iPhone trancado),
+e `adicionar(_:)` só faz `SecItemAdd`. `ComprovanteCrypto.init(armazem:)`;
+`shared` usa `ArmazemDeChaveKeychain`.
+
+- Chave nova só em `.naoExiste`. `.indisponivel` lança `keyNotAvailable` —
+  criar outra deixaria todas as notas guardadas ilegíveis para sempre.
+- Nunca `SecItemDelete`. `errSecDuplicateItem` no add (outra chamada criou
+  antes) relê e usa a chave que está lá.
+- `GastosDia.lerComprovante(crypto:)` lança com a chave indisponível
+  (`keyNotAvailable`/`invalidKeySize`) e devolve `nil` (com log) quando os bytes
+  não abrem com a chave atual. O getter `comprovanteData` das telas continua
+  devolvendo `nil` nos dois casos.
+- O `SyncActor` recebe o crypto no `init(modelContainer:api:crypto:)` (padrão
+  `.shared`). Em `sincronizarComprovante`, chave indisponível vira
+  `marcarFalha` (backoff, bytes intactos, sem upload); o `concluirGasto` não
+  marca `.synced` enquanto a nota não abre. Bytes ilegíveis seguem como antes
+  ("nada a enviar").
+- Testes em `SoftSpendTests/ComprovanteCryptoTests.swift` e
+  `ChaveIndisponivelSyncTests.swift`, com `ArmazemDeChaveFalso` (em memória).
 
 ### Apple Pay (atalho "Registrar gasto")
 
