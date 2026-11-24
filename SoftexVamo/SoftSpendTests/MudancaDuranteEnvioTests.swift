@@ -45,10 +45,10 @@ struct MudancaDuranteEnvioTests {
     }
 
     /// Faz o papel da tela (`editGasto`, `deleteGasto`, anexar nota): muda e salva.
-    func editarGasto(_ mudar: (GastosDia) -> Void) throws {
+    func editarGasto(_ mudar: (GastosDia) throws -> Void) throws {
         let ctx = ModelContext(container)
         let gasto = try #require(try ctx.fetch(FetchDescriptor<GastosDia>()).first)
-        mudar(gasto)
+        try mudar(gasto)
         gasto.syncStatus = .pending
         gasto.syncError = nil
         try ctx.save()
@@ -195,14 +195,14 @@ struct MudancaDuranteEnvioTests {
 
         let notaA = Data("nota fiscal A".utf8)
         let notaB = Data("nota fiscal B".utf8)
-        try editarGasto { $0.comprovanteData = notaA }
+        try editarGasto { try $0.gravarComprovante(notaA) }
         try #require(try lerGasto().comprovanteData == notaA, "a nota não foi cifrada (Keychain do simulador)")
 
         let upload1 = api.segurar(.uploadComprovante)
         let tarefa = iniciarSync()
         await upload1.aguardarChegada()
 
-        try editarGasto { $0.comprovanteData = notaB }
+        try editarGasto { try $0.gravarComprovante(notaB) }
         let upload2 = api.segurar(.uploadComprovante)
         await upload1.liberar()
         try #require(await upload2.chegouAntes(doFimDe: tarefa), "a nota anexada durante o upload não foi enviada")
