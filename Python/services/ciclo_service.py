@@ -60,7 +60,9 @@ def get_user_ciclo_by_id(db: Session, ciclo_id: int, user_id: str):
 
 
 def update_ciclo(db: Session, ciclo_id: int, user_id: str, ciclo_request: CicloRequest):
-    ciclo = ciclo_repository.get_user_ciclo_by_id(db, ciclo_id, user_id)
+    ciclo = ciclo_repository.get_user_ciclo_by_id(
+        db, ciclo_id, user_id, para_atualizar=True
+    )
     if not ciclo:
         raise HTTPException(status_code=404, detail="Ciclo não encontrado")
     return ciclo_repository.update_ciclo(db, ciclo, ciclo_request)
