@@ -20,7 +20,7 @@ from sqlalchemy.orm import sessionmaker
 import models
 
 SENHA = "Senha123!"
-ROTA_PROTEGIDA = "/usuario/ciclos"
+ROTA_PROTEGIDA = "/usuario/ciclos/resumo"
 
 
 def _app(monkeypatch):

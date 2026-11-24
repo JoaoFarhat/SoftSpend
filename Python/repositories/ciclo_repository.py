@@ -9,21 +9,6 @@ def criar_ciclo(db: Session, ciclo: models.Ciclo):
     db.refresh(ciclo)
     return ciclo
 
-def get_all_ciclos(db: Session, user_id: str, skip: int = 0, limit: int = 100):
-    return (
-        db.query(models.Ciclo)
-        .options(
-            selectinload(models.Ciclo.dias)
-            .selectinload(models.Dia.gastos)
-            .selectinload(models.Gasto.open_finance_match)
-            .selectinload(models.ExpenseTransactionMatch.transacao)
-        )
-        .filter(models.Ciclo.id_usuario == user_id)
-        .offset(skip)
-        .limit(limit)
-        .all()
-    )
-
 def get_ciclos_resumo(db: Session, user_id: str, antes_de: int | None = None, skip: int = 0, limit: int = 1000):
     query = (
         db.query(models.Ciclo)

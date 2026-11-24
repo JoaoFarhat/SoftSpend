@@ -174,7 +174,7 @@ def test_criar_ciclo_dias_em_lote_gasto_e_ler_de_volta(ambiente):
     assert len(dia_lido["gastos"]) == 1
     assert dia_lido["gastos"][0]["valor"] == 25.50
 
-    ciclos = client.get("/usuario/ciclos")
+    ciclos = client.get("/usuario/ciclos/resumo")
     assert ciclos.status_code == 200
     assert [c["id"] for c in ciclos.json()] == [ciclo["id"]]
 
@@ -187,7 +187,7 @@ def test_reenvio_client_id_ciclo_devolve_registro_existente(ambiente):
     assert segundo.status_code == 200
     assert segundo.json()["id"] == primeiro["id"]
 
-    ciclos = client.get("/usuario/ciclos").json()
+    ciclos = client.get("/usuario/ciclos/resumo").json()
     assert len(ciclos) == 1
 
 
@@ -247,6 +247,15 @@ def test_put_dias_lote_e_put_dia_retornam_405(ambiente):
 
     assert response_lote.status_code == 405
     assert response_dia.status_code == 405
+
+
+def test_get_usuario_ciclos_retorna_404(ambiente):
+    # A lista completa saiu do ar: o app só chama /usuario/ciclos/resumo
+    # (ordenada e com cursor `antes_de`), e a rota velha sem ordem nem cursor
+    # não pode mais ser chamada por engano.
+    client = ambiente.como(USER_A)
+
+    assert client.get("/usuario/ciclos").status_code == 404
 
 
 def test_dias_lote_vazio_ou_com_mais_de_100_dias_retorna_422(ambiente):
@@ -328,7 +337,7 @@ def test_editar_ciclo_alheio_retorna_404(ambiente):
     )
 
     assert response.status_code == 404
-    assert client_b.get("/usuario/ciclos").json() == []
+    assert client_b.get("/usuario/ciclos/resumo").json() == []
     lido_a = ambiente.como(USER_A).get(f"/ciclos/{ciclo['id']}").json()
     assert lido_a["titulo"] == "Semana de teste"
 
@@ -351,7 +360,7 @@ def test_apagar_ciclo_alheio_retorna_404(ambiente):
     response = client_b.delete(f"/ciclos/{ciclo['id']}")
 
     assert response.status_code == 404
-    ciclos_a = ambiente.como(USER_A).get("/usuario/ciclos").json()
+    ciclos_a = ambiente.como(USER_A).get("/usuario/ciclos/resumo").json()
     assert len(ciclos_a) == 1
 
 
@@ -421,7 +430,7 @@ def test_apagar_ciclo_remove_dias_e_gastos(ambiente):
     assert response.status_code == 204
     assert ambiente.session.query(models.Dia).count() == 0
     assert ambiente.session.query(models.Gasto).count() == 0
-    assert client.get("/usuario/ciclos").json() == []
+    assert client.get("/usuario/ciclos/resumo").json() == []
 
 
 def test_valores_monetarios_voltam_com_duas_casas(ambiente):
