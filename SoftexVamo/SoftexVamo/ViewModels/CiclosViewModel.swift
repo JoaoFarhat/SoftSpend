@@ -1279,7 +1279,7 @@ final class CiclosViewModel: ObservableObject {
         }
 
         if !aceitarPendencias {
-            let pendentes = Self.alteracoesNaoEnviadas(atualCiclo)
+            let pendentes = atualCiclo.alteracoesNaoEnviadas
             if pendentes > 0 { return .pendencias(pendentes) }
         }
 
@@ -1296,19 +1296,6 @@ final class CiclosViewModel: ObservableObject {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(nome)
         try data.write(to: url, options: .atomic)
         return .arquivo(url)
-    }
-
-    /// Dias e gastos da viagem com alteração que o servidor ainda não
-    /// conhece — inclusive os apagados cujo `DELETE` não subiu (eles ainda
-    /// entrariam no relatório). A edição da própria viagem não conta.
-    nonisolated static func alteracoesNaoEnviadas(_ ciclo: CicloSoftex) -> Int {
-        (ciclo.dias ?? []).reduce(0) { total, dia in
-            total
-                + (CicloSoftex.temAlteracaoLocal(dia.syncStatus, deletadoEm: dia.deletadoEm) ? 1 : 0)
-                + dia.gastos.filter {
-                    CicloSoftex.temAlteracaoLocal($0.syncStatus, deletadoEm: $0.deletadoEm)
-                }.count
-        }
     }
 }
 
