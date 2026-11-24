@@ -210,7 +210,9 @@ def traduzir_status(status_apple, transacao, renovacao, agora: datetime) -> str:
 
     Com o código de `Get All Subscription Statuses` (§2.4): 1 ativa, 2
     expirada, 3 nova tentativa de cobrança, 4 carência, 5 revogada. Sem o
-    código (Apple fora do ar, só a notificação), deriva das datas.
+    código (Apple fora do ar, só a notificação) ou com um código novo que
+    ainda não conhecemos, deriva das datas — um `ValueError` aqui virava
+    500 no webhook (a Apple repetia por dias) e falha diária no job.
     """
     agora = _utc_naive(agora)
     if status_apple is not None:
@@ -225,7 +227,11 @@ def traduzir_status(status_apple, transacao, renovacao, agora: datetime) -> str:
             return GRACE
         if codigo == 5:
             return REVOKED
-        raise ValueError(f"status da Apple desconhecido: {codigo}")
+        logger.warning(
+            "Status da Apple desconhecido (%s) em %s; derivando pelas datas",
+            codigo,
+            transacao.original_transaction_id,
+        )
 
     if transacao.revogada_em is not None:
         return REVOKED

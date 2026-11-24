@@ -96,7 +96,7 @@ Os nomes vêm dos enums `NotificationTypeV2` e `Subtype` da biblioteca; o Devin 
 | `CONSUMPTION_REQUEST`, `ONE_TIME_CHARGE`, `EXTERNAL_PURCHASE_TOKEN` | | sem mudança | Só registra (não usamos) |
 | `TEST` | | sem mudança | Só confirma que o endereço responde |
 
-Códigos de `Get All Subscription Statuses` (campo `status`) que `reconciliar` traduz: `1` ativa → `active` (ou `trial`, §2.6); `2` expirada → `expired`; `3` em nova tentativa de cobrança → `billing_retry`; `4` em carência → `grace` (com `carencia_ate` = `gracePeriodExpiresDate` do `renewalInfo`); `5` revogada → `revoked`.
+Códigos de `Get All Subscription Statuses` (campo `status`) que `reconciliar` traduz: `1` ativa → `active` (ou `trial`, §2.6); `2` expirada → `expired`; `3` em nova tentativa de cobrança → `billing_retry`; `4` em carência → `grace` (com `carencia_ate` = `gracePeriodExpiresDate` do `renewalInfo`); `5` revogada → `revoked`. Um código fora dessa lista (a Apple pode acrescentar códigos novos) não falha: loga um aviso (código + `original_transaction_id`) e cai na mesma regra por datas usada quando a API está fora do ar — sem isso o webhook responderia 500 e a Apple repetiria a notificação por dias.
 
 ### 2.5 `reconciliar` e o cálculo do acesso
 
