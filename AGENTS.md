@@ -207,12 +207,20 @@ mais uma passada. Uma nota anexada durante o upload não é apagada. Testes em
 `SoftSpendTests/MudancaDuranteEnvioTests.swift`.
 
 **Delete centralizado**: Em `syncDeletions`, o `modelContext.delete` é chamado
-uma única vez após o try/catch. Em sucesso ou 404, o item é deletado localmente.
-Em falha real, `marcarFalha` + `continue` (sem delete).
+uma única vez após o try/catch. Em sucesso ou 404 da API, o item é deletado
+localmente. Em falha real, `marcarFalha` + `continue` (sem delete).
 
 **Descarte por 404 (T4, decisão de 12/11)**: 404 no POST/PUT de `syncGastos`
 ou no POST de `syncDias` (o pai ou o item foi apagado em outro aparelho)
-descarta o item no aparelho, sem nenhuma requisição a mais. `descartarGasto`/
+descarta o item no aparelho, sem nenhuma requisição a mais — mas só o 404
+**vindo da API**: `isNotFoundError` exige `APIError.serverError` com status
+404 **e `requestId != "-"`**. Os "não encontrado" da API saem pelo handler de
+`middlewares.py` (`build_error_response`), sempre com `request_id` no corpo;
+o 404 de rota inexistente do FastAPI vem só com `{"detail": "Not Found"}` e o
+`NetworkManager.execute` monta `serverError` com `requestId "-"`. Esse 404 sem
+`request_id` (deploy quebrado, app novo contra servidor velho) não prova que
+o item sumiu: segue a falha comum (`marcarFalha`, backoff), sem descarte e sem
+apagar no `syncDeletions`. `descartarGasto`/
 `descartarDia` releem por `id` num contexto novo (via `gravar`): o gasto sai
 do `dia.ciclo.gasto_total` e é apagado; o dia tira do total os gastos vivos
 dele (`deletadoEm == nil`) e é apagado (a cascata leva os gastos). Versões
