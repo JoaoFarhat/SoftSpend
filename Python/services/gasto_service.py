@@ -179,7 +179,10 @@ def remover_gasto(db: Session, gasto_id: int, user_id: str):
 
 
 def _buscar_gasto_do_usuario(db: Session, gasto_id: int, user_id: str) -> models.Gasto:
-    gasto = gasto_repository.find_gasto_for_update(db, gasto_id)
+    # Só a conferência de dono, sem trava: nos caminhos de comprovante a
+    # linha não pode ficar presa durante o upload ao bucket (a parte lenta).
+    # A `comprovante_key` é relida com trava em `_travar_gasto_comprovante`.
+    gasto = gasto_repository.find_gasto(db, gasto_id)
 
     if not gasto:
         raise HTTPException(status_code=404, detail="Gasto não encontrado")
@@ -190,16 +193,38 @@ def _buscar_gasto_do_usuario(db: Session, gasto_id: int, user_id: str) -> models
     return gasto
 
 
+def _travar_gasto_comprovante(db: Session, gasto_id: int) -> models.Gasto:
+    """Relê o gasto com trava para usar a `comprovante_key` atual.
+
+    Só a linha do gasto é travada: anexar/remover nota não faz UPDATE de
+    saldo nem de total, então a trava não cruza a ordem ciclo → dia → gasto
+    do resto do servidor. Sem a releitura (REPEATABLE READ mostra a foto
+    antiga), dois uploads ao mesmo tempo marcavam a mesma key para apagar e
+    a nota do primeiro ficava órfã no bucket, sem dono e sem limpeza.
+    """
+    gasto = gasto_repository.find_gasto_for_update(db, gasto_id)
+
+    if not gasto:
+        raise HTTPException(status_code=404, detail="Gasto não encontrado")
+
+    return gasto
+
+
 def anexar_comprovante(db: Session, gasto_id: int, conteudo: bytes, content_type: str, user_id: str):
     """Sobe a nota fiscal e vincula ao gasto, substituindo a anterior se existir."""
     if not storage_service.esta_configurado():
         raise HTTPException(status_code=503, detail="Armazenamento de comprovantes indisponível")
 
-    gasto = _buscar_gasto_do_usuario(db, gasto_id, user_id)
-    key_anterior = gasto.comprovante_key
+    _buscar_gasto_do_usuario(db, gasto_id, user_id)
 
     nova_key = storage_service.salvar_comprovante(user_id, gasto_id, conteudo, content_type)
     marcar_comprovante_para_remover_no_rollback(db, nova_key)
+
+    # Se o gasto sumiu entre o upload e a trava, o 404 leva ao rollback e o
+    # listener de comprovante_cleanup apaga a nota nova do bucket.
+    gasto = _travar_gasto_comprovante(db, gasto_id)
+
+    key_anterior = gasto.comprovante_key
     gasto.comprovante_key = nova_key
     gasto_repository.atualizar_gasto(db, gasto)
 
@@ -212,7 +237,8 @@ def anexar_comprovante(db: Session, gasto_id: int, conteudo: bytes, content_type
 
 
 def remover_comprovante(db: Session, gasto_id: int, user_id: str):
-    gasto = _buscar_gasto_do_usuario(db, gasto_id, user_id)
+    _buscar_gasto_do_usuario(db, gasto_id, user_id)
+    gasto = _travar_gasto_comprovante(db, gasto_id)
     key = gasto.comprovante_key
 
     if key:
