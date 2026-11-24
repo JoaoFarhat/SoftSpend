@@ -238,6 +238,14 @@ ciclo `.synced` ausente sem nenhuma alteração local na viagem. Candidatos são
 tirados antes da busca; nada `pending`/`failed`/`deletadoEm` sai. Testes em
 `SoftSpendTests/ExclusaoNoServidorTests.swift`.
 
+**Total da viagem**: a regra de alteração local mora em `CicloSoftex`
+(`nonisolated`): `temAlteracaoLocal(_:deletadoEm:)` e `temAlteracaoNaViagem`
+(algum dia ou gasto com alteração não enviada). O `gasto_total` do servidor só
+entra por `receberGastoTotalDoServidor(_:)`, que o ignora quando
+`temAlteracaoNaViagem` — vale na leitura da lista (`salvarOuAtualizarCicloLocal`)
+e na resposta do `PUT` da viagem (`sincronizarEdicaoCiclo`); o `POST` nunca
+copia. Testes em `SoftSpendTests/TotalDaViagemTests.swift`.
+
 ### ComprovanteCrypto
 
 `GastosDia.comprovanteData` é uma propriedade `@Transient` que encripta/decripta
