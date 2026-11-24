@@ -77,7 +77,8 @@ struct CiclosViewModelTests {
     /// recriados com clientIds novos (que subiriam como duplicatas).
     @Test func abrirViagemSincronizadaSemDiasNaoRecriaDias() throws {
         let c = viagem(backendId: 42)
-        let vm = CiclosViewModel()
+        // Offline: `abrirViagem` não dispara a busca de dias na rede de verdade.
+        let vm = CiclosViewModel(estaConectado: { false })
         vm.modelContext = ctx
         vm.allCiclos = [c]
 
@@ -101,7 +102,35 @@ struct CiclosViewModelTests {
         #expect(vm.atualCiclo.dias?.count == 6)
     }
 
-    /// Viagem com mais de 20 dias: todas as páginas do servidor são buscadas.
+    /// `diasLimit` é o teto que o servidor aceita em `GET /ciclos/{id}/dias`
+    /// (100): uma viagem de 30 dias sai em uma leitura só. Com páginas de 20
+    /// ela era lida em 2 chamadas, e um dia apagado em outro aparelho entre
+    /// elas fazia a limpeza (T5) tirar um dia vivo daqui até a próxima leitura.
+    @Test func viagemDe30DiasSaiEmUmaLeitura() async throws {
+        let c = viagem(backendId: 7)
+        let vm = CiclosViewModel()
+        vm.modelContext = ctx
+        vm.allCiclos = [c]
+        vm.atualCiclo = c
+        let inicio = Calendar.current.startOfDay(for: .now)
+        var limitesPedidos: [Int] = []
+
+        await vm.carregarDiasDoServidor(cicloId: 7) { skip, limit in
+            limitesPedidos.append(limit)
+            return (skip..<min(skip + limit, 30)).map { i in
+                let dia = DiaSoftex(data: Calendar.current.date(byAdding: .day, value: i, to: inicio)!, saldo: 100)
+                dia.backendId = 1000 + i
+                dia.syncStatus = .synced
+                return dia
+            }
+        }
+
+        #expect(limitesPedidos == [100])
+        #expect(try diasNoBanco().count == 30)
+        #expect(vm.atualCiclo.dias?.count == 30)
+    }
+
+    /// Viagem com mais de 100 dias: todas as páginas do servidor são buscadas.
     @Test func carregaTodasAsPaginasDeDias() async throws {
         let c = viagem(periodo: "01/07 - 14/08", backendId: 7)
         let vm = CiclosViewModel()
@@ -113,7 +142,7 @@ struct CiclosViewModelTests {
 
         await vm.carregarDiasDoServidor(cicloId: 7) { skip, limit in
             pedidos.append(skip)
-            return (skip..<min(skip + limit, 45)).map { i in
+            return (skip..<min(skip + limit, 150)).map { i in
                 let dia = DiaSoftex(data: Calendar.current.date(byAdding: .day, value: i, to: inicio)!, saldo: 100)
                 dia.backendId = 1000 + i
                 dia.syncStatus = .synced
@@ -121,9 +150,9 @@ struct CiclosViewModelTests {
             }
         }
 
-        #expect(pedidos == [0, 20, 40])
-        #expect(try diasNoBanco().count == 45)
-        #expect(vm.atualCiclo.dias?.count == 45)
+        #expect(pedidos == [0, 100])
+        #expect(try diasNoBanco().count == 150)
+        #expect(vm.atualCiclo.dias?.count == 150)
     }
 
     /// Um dia sincronizado que sumiu do servidor deixa de aparecer; um dia

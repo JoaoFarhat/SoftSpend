@@ -371,7 +371,9 @@ struct ExclusaoNoServidorTests {
             (11...15).map(cicloDoServidor),
             (6...10).map(cicloDoServidor),
         ])
-        let vm = CiclosViewModel(api: api)
+        // `estaConectado: { true }`: sem ele, um CI rodando sem rede faria o
+        // teste cair no ramo offline e nunca chamar a API falsa.
+        let vm = CiclosViewModel(api: api, estaConectado: { true })
         vm.modelContext = ctx
 
         vm.fetchCiclosResumo()
@@ -386,6 +388,29 @@ struct ExclusaoNoServidorTests {
         #expect(api.antesDeChamados == [nil, 11, 6])
         #expect(api.limitChamados == [5, 5, 5])
         #expect(try idsDeCiclos().count == 10)
+    }
+
+    /// Sem conexão, `loadMoreCiclos` cai no ramo offline e não chama a rede:
+    /// a API falsa não recebe nenhum pedido de página nem de dias.
+    @Test func offlineLoadMoreCiclosNaoChamaARede() async throws {
+        let usuarioAnterior = AuthService.shared.currentUser
+        AuthService.shared.currentUser = UserModel(
+            id: userId, nome: "Teste", username: "teste", email: "t@t.com"
+        )
+        defer { AuthService.shared.currentUser = usuarioAnterior }
+
+        let api = FakeListasAPI(paginas: [(11...15).map(cicloDoServidor)])
+        let vm = CiclosViewModel(api: api, estaConectado: { false })
+        vm.modelContext = ctx
+
+        vm.fetchCiclosResumo()
+        await vm.loadCiclosTask?.value
+        vm.loadMoreCiclos()
+        await vm.loadCiclosTask?.value
+
+        #expect(api.antesDeChamados.isEmpty)
+        #expect(api.diasBuscados.isEmpty)
+        #expect(!vm.isLoading)
     }
 }
 
