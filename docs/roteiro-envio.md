@@ -4,13 +4,13 @@ Estado: 15/11/2026. Uma lista só, na ordem. Cada passo diz onde fazer (Mac, iPh
 
 Decisão de 15/11: **v1 com iPhone e iPad** (`TARGETED_DEVICE_FAMILY = 1,2`). Isso muda o roteiro em três pontos: o app precisa ser conferido no iPad (passo 11), a ficha leva capturas de iPad 13" (passo 20) e o TestFlight deve ser instalado também num iPad (passo 16).
 
-## Falta antes de enviar à Apple (lista única, 16/11/2026)
+## Falta antes de enviar à Apple (lista única, 23/11/2026)
 
 Resumo do estado por área; o detalhe de cada item está nos passos A a E abaixo. "Feito" = já está na `main` ou confirmado; "Falta" = depende de alguém. Estado conhecido pela nota do projeto em 16/11: nada abaixo marcado como falta foi confirmado como feito.
 
 ### Servidor (EC2)
 
-- Feito: API no ar com HTTPS, deploy a cada merge na `main`, backup diário do banco testado, `TRUST_PROXY=true` conferido, código da assinatura (AS1 e AS2) e das páginas legais na `main`.
+- Feito: API no ar com HTTPS, deploy a cada merge na `main`, backup diário do banco testado, `TRUST_PROXY=true` conferido, código da assinatura (AS1 e AS2) e das páginas legais na `main`; reenvio com o mesmo `client_id` sem erro 500 (PR #93), espaço no fim do e-mail aceito no login (PR #94), limite por minuto por pessoa (PR #106) e foto do comprovante até 10 MB (PR #119).
 - Falta [Você]: criar o ambiente `producao` no GitHub (Settings > Environments, você como revisor); sem ele o deploy sai sem aprovação. (Antes do passo 5.)
 - Falta [Você]: copiar a config do nginx para a EC2 e recarregar (páginas `/termos`, `/privacidade`, `/suporte` e limite do `/health`). (Passo 5.)
 - Falta [Você]: aplicar as migrations nos dois bancos (AS1 e a da fatura S2), se ainda não foram. (Antes do passo 3.)
@@ -46,11 +46,6 @@ Resumo do estado por área; o detalhe de cada item está nos passos A a E abaixo
 - Falta [Você]: TestFlight com conta Sandbox em iPhone e iPad (compra, restaurar, cancelar, excluir conta, sem internet, IA, fatura). (Passos 16 e 17.)
 - Falta [Você]: ligar `BILLING_ENFORCEMENT=on` e conferir os bloqueios (PR #68), inclusive que a conta de demonstração passa em tudo. (Passos 18 e 19.)
 - Falta [Você]: capturas de iPhone 6,9" e iPad 13" (`docs/loja.md` §7). (Passo 20.)
-
-### Em andamento com o Devin (não bloqueiam o envio, mas melhor antes)
-
-- Reenvio com o mesmo `client_id` que dá erro 500 e atrasa a sincronização.
-- Espaço no fim do e-mail que pode impedir o login.
 
 ## A. Antes de abrir o Xcode (servidor e conta)
 
