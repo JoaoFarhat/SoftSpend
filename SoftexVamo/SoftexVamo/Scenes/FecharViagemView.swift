@@ -34,6 +34,8 @@ struct FecharViagemView: View {
     @State private var exportando = false
     @State private var arquivo: URL?
     @State private var tarefa: Task<Void, Never>?
+    @State private var pendencias = 0
+    @State private var confirmandoPendencias = false
 
     private var ciclo: CicloSoftex? { viewModel.ciclo(id: cicloId) }
 
@@ -63,6 +65,16 @@ struct FecharViagemView: View {
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: Binding(get: { arquivo != nil }, set: { if !$0 { arquivo = nil } })) {
             if let arquivo { ActivityViewController(activityItems: [arquivo]) }
+        }
+        .confirmationDialog(
+            pendencias == 1
+                ? "1 alteração ainda não foi enviada e fica fora do relatório"
+                : "\(pendencias) alterações ainda não foram enviadas e ficam fora do relatório",
+            isPresented: $confirmandoPendencias,
+            titleVisibility: .visible
+        ) {
+            Button("Gerar assim mesmo") { exportar(aceitarPendencias: true) }
+            Button("Cancelar", role: .cancel) {}
         }
         .onDisappear {
             // Saiu da tela no meio da geração (voltou ou abriu "Resolver"): cancela
@@ -232,19 +244,30 @@ struct FecharViagemView: View {
         .background(Tema.fundo)
     }
 
-    /// Mesma exportação de antes: `exportarCiclo(formato:)` com as fotos
-    /// embutidas (padrão `.imagem`) e a folha de compartilhar. `nil` = a
-    /// assinatura barrou (§3.5): a tela de planos abriu, nada mais a fazer.
-    private func exportar() {
+    /// `exportarCiclo` decide no enum: `.arquivo` abre a folha de
+    /// compartilhar; `.bloqueado` é a tela de planos (§3.5), sem alerta;
+    /// `.pendencias(n)` abre o diálogo "gerar assim mesmo" — com o
+    /// `exportando` já solto para o botão não ficar girando atrás dele.
+    private func exportar(aceitarPendencias: Bool = false) {
         guard let ciclo, !exportando else { return }
         viewModel.garantirAtual(ciclo)
         exportando = true
         let escolhido = formato
         tarefa = Task {
             do {
-                let url = try await viewModel.exportarCiclo(formato: escolhido)
+                let resultado = try await viewModel.exportarCiclo(
+                    formato: escolhido, aceitarPendencias: aceitarPendencias)
                 guard !Task.isCancelled else { return }
-                arquivo = url
+                exportando = false
+                switch resultado {
+                case .arquivo(let url):
+                    arquivo = url
+                case .bloqueado:
+                    break // a tela de planos já abriu (§3.5)
+                case .pendencias(let n):
+                    pendencias = n
+                    confirmandoPendencias = true
+                }
             } catch is CancellationError {
                 return
             } catch let erro as URLError where erro.code == .notConnectedToInternet {
