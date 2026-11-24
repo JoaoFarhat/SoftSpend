@@ -78,6 +78,11 @@ enum ValorDaCompra {
             }
         }
 
+        // `Decimal(string:)` aceita o começo e ignora o resto: "1.234.5"
+        // (dois pontos sem formar milhar) viraria 1.23. Só dígitos com no
+        // máximo um ponto passam.
+        guard t.range(of: #"^[0-9]+(\.[0-9]+)?$"#, options: .regularExpression) != nil else { return nil }
+
         guard let bruto = Decimal(string: t), !bruto.isZero else { return nil }
 
         var arredondado = Decimal()
