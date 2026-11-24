@@ -60,14 +60,21 @@ def get_user_ciclo_by_id(db: Session, ciclo_id: int, user_id: str):
 
 
 def update_ciclo(db: Session, ciclo_id: int, user_id: str, ciclo_request: CicloRequest):
-    ciclo = ciclo_repository.get_user_ciclo_by_id(db, ciclo_id, user_id)
+    ciclo = ciclo_repository.get_user_ciclo_by_id(
+        db, ciclo_id, user_id, para_atualizar=True
+    )
     if not ciclo:
         raise HTTPException(status_code=404, detail="Ciclo não encontrado")
     return ciclo_repository.update_ciclo(db, ciclo, ciclo_request)
 
 
 def delete_ciclo(db: Session, ciclo_id: int, user_id: str):
-    ciclo = ciclo_repository.get_ciclo_by_id(db, ciclo_id)
-    if not ciclo or ciclo.id_usuario != user_id:
+    # Trava o ciclo antes da cascata do ORM (que apaga gastos e depois dias):
+    # mesma ordem do resto do servidor (ciclo → dia(s) → gasto), então não
+    # cruza com um `DELETE /dias` ou um gasto lançado ao mesmo tempo.
+    ciclo = ciclo_repository.get_user_ciclo_by_id(
+        db, ciclo_id, user_id, para_atualizar=True
+    )
+    if not ciclo:
         raise HTTPException(status_code=404, detail="Ciclo não encontrado")
     return ciclo_repository.delete_ciclo(db, ciclo)

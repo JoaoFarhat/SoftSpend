@@ -40,6 +40,21 @@ struct RefreshRetryTests {
         #expect(!ehFalhaTransitoriaDeRefresh(DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: ""))))
     }
 
+    /// Só o 429 não desloga — o limitador recusou antes de trocar o token,
+    /// então o mesmo refresh token ainda vale. Isso vale para qualquer 429,
+    /// inclusive o `daily_ai_limit` (teto diário de IA).
+    @Test func so429NaoDeslogaAposFalhaDeRefresh() {
+        #expect(!deveDeslogarAposFalhaDeRefresh(erroServidor(429)))
+        #expect(!deveDeslogarAposFalhaDeRefresh(
+            APIError.serverError(message: "daily_ai_limit", requestId: "-", statusCode: 429)))
+
+        #expect(deveDeslogarAposFalhaDeRefresh(erroServidor(401)))
+        #expect(deveDeslogarAposFalhaDeRefresh(erroServidor(403)))
+        #expect(deveDeslogarAposFalhaDeRefresh(erroServidor(500)))
+        #expect(deveDeslogarAposFalhaDeRefresh(URLError(.timedOut)))
+        #expect(deveDeslogarAposFalhaDeRefresh(APIError.authentication))
+    }
+
     @Test func repeteEmURLError() async throws {
         let r = Registro()
         let valor = try await repetindoSeTransitorio(

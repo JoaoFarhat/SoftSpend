@@ -201,3 +201,68 @@ Legenda: **[Você]** = decisão ou ação do usuário; **[Devin]** = código; **
 - Assinatura sem "restaurar compras" ou com tela de planos sem preço, duração, renovação e links.
 - `iOS 17` como mínimo (decidido em 13/11): alcança muito mais aparelhos; vale conferir o visual do app no simulador antes de enviar.
 - Mudar o identificador do app depois de criado na loja: não dá.
+
+## 6. Roteiro do dia de ligar a cobrança
+
+Escrito pelo Claude em 24/11/2026, depois de revisar as PRs #149 (conferidor do servidor), #150 (status da Apple ausente ou em texto) e #151 (freio do 429 no app). Complementa `docs/assinatura.md` §4 e `docs/roteiro-envio.md` passos 18 e 19. **[Você]** faz tudo na EC2; o app não muda nesse dia.
+
+**Antes do dia (não ligue sem isso):**
+
+- Responder as decisões de `docs/assinatura.md` §6 (contas antigas, carência de cobrança, até quando aceitar Sandbox).
+- A notificação de teste da Apple já recebeu 200 do webhook, e a compra Sandbox já foi testada no iPhone com `BILLING_ENFORCEMENT=off` (`docs/roteiro-envio.md` passo 17).
+- Escolher um horário calmo e ficar 2 horas por perto.
+
+### 6.1 Ordem
+
+Na EC2, dentro de `~/SoftSpend/Python`, como o usuário `ubuntu` (o mesmo do serviço).
+
+1. **Conferidor.** `python -m scripts.conferir_servidor`. Cada linha sai `OK` ou `FALTA` (nunca mostra segredo).
+   - Neste ponto o único `FALTA` aceitável é "conta de demonstração" (ainda não criada). Qualquer outro: pare e resolva.
+   - Ele não confere: `APPLE_ACEITA_SANDBOX` (deve ser `true`), faturamento do Gemini (G1), nginx e páginas legais abrindo, nem se a Apple recebeu 200 no webhook. Esses itens estão em "Antes do dia" e em `docs/roteiro-envio.md`.
+2. **Conta de demonstração.** `DEMO_SENHA='...' python -m scripts.criar_conta_demo --email demo@softspend.com.br` imprime o `users.id`.
+   - Pôr o id em `ACESSO_LIBERADO_USUARIOS` no `.env` (vários ids separados por vírgula; maiúsculas não importam).
+   - Reiniciar: `sudo systemctl restart softspend`. O systemd só lê o `.env` ao iniciar; sem o restart, o id não vale.
+3. **Conferidor de novo.** Tem que sair **tudo `OK` e código 0** (`echo $?`). A linha da conta de demonstração mostra `BILLING_ENFORCEMENT=off`: é só informação.
+4. **Ponto de comparação.** `curl -s https://softspend.com.br/health` responde OK. Anote o horário: é daqui que se compara o log.
+5. **Ligar.** Editar o `.env`: `BILLING_ENFORCEMENT=on`. Depois `sudo systemctl restart softspend` e `sudo systemctl status softspend --no-pager` (tem que estar `active (running)`).
+6. **Conferir no iPhone, na hora** (`docs/roteiro-envio.md` passo 19):
+   - Conta de demonstração: nova viagem, ler comprovante com IA, exportar e importar fatura funcionam, sem abrir os planos.
+   - Conta sem assinatura (crie uma nova): as mesmas quatro ações abrem a tela de planos; ver, editar e lançar gasto à mão continuam livres.
+   - Sua conta antiga também fica "sem assinatura" até comprar ou iniciar o teste (decisão em `docs/assinatura.md` §6). Se for assinar com Sandbox, faça agora e veja a faixa "Teste grátis até DD/MM".
+7. **Se a conta de demonstração foi bloqueada:** o id não está em `ACESSO_LIBERADO_USUARIOS` ou faltou o restart. Corrija; se não resolver em poucos minutos, volte a `off` (§6.3).
+
+### 6.2 O que olhar no log nas primeiras horas
+
+O log é `/var/log/softspend/app.log`, uma linha JSON por evento (`message`, `status_code`, `path`, `request_id`). Acompanhe com `tail -f /var/log/softspend/app.log`; para contar, `grep -c`.
+
+| Procure | O que significa | O que fazer |
+|---|---|---|
+| `"message": "subscription_required"` (403) em `/ciclos`, `/gastos/extrair`, `/api/faturas/ler` ou `/ciclos/.../export` | O bloqueio está funcionando. **Esperado** para conta sem assinatura | Se vier da conta de demonstração: o id está errado (§6.1 passo 7) |
+| Esse mesmo 403 para alguém que **pagou** | O servidor ainda não registrou a compra (o app envia a transação e o servidor só grava depois de consultar a Apple) | Procurar as linhas abaixo; o `GET /api/assinatura` da pessoa mostra o `status` real |
+| `Apple indisponível em /transacoes` | A Apple estava fora; quem pagou fica "confirmando com o servidor…" e o app repete sozinho | Se durar mais de 30 minutos, ver o status da Apple; não desligue por isso |
+| `POST /api/assinatura/transacoes sem configuração da Apple` ou `Webhook da Apple sem configuração` | `APPLE_*` ou certificados faltando: ninguém consegue assinar | Voltar a `off` e rodar o conferidor |
+| `Transação recusada` (400) ou `Transação de outra conta recusada` (409) | Comprovante inválido, bundle errado ou compra ligada a outro usuário | Um caso isolado é normal; uma sequência indica ambiente errado (Sandbox x produção) |
+| `Webhook da Apple falhou ao reconciliar` (500) | Erro interno ao gravar. A Apple repete por dias, então nada se perde, mas é bug | Guardar o `request_id` e a linha com o traceback e chamar o Claude |
+| `Webhook da Apple com assinatura inválida` | Certificado raiz faltando ou notificação que não veio da Apple | Conferir `certificados_apple/`; ignorar se for uma vez só |
+| `Status da Apple ausente ou não numérico` ou `Status da Apple desconhecido` | A Apple mandou um status fora do padrão; o servidor segue pelas datas (PRs #148 e #150) | Um aviso por evento é normal; muitos seguidos, avisar o Claude |
+| `"status_code": 500` ou `Request failed` | Erro do servidor em qualquer rota | Mais de 2 em uma hora: investigar pelo `request_id` |
+| `429` | Limite por minuto ou teto diário da IA (`daily_ai_limit`); não é a cobrança | Normal em pico; o app espera sozinho |
+
+No dia seguinte, olhar `/var/log/softspend/assinaturas.log` (o job roda às 07:30 UTC). A linha "Conciliação diária: N linhas, … falhas" deve ter `0 falhas`; saída 2 do job quer dizer "Apple não configurada". O `GET /api/assinatura` da sua conta deve mostrar o `status` esperado (`trial` ou `active`).
+
+### 6.3 Como desligar se der errado
+
+1. Editar o `.env`: `BILLING_ENFORCEMENT=off`.
+2. `sudo systemctl restart softspend`. **Precisa reiniciar**: o valor vem do ambiente do processo, e o systemd só relê o `.env` ao iniciar. Leva alguns segundos.
+3. Conferir: `curl -s https://softspend.com.br/health` e uma nova viagem em conta sem assinatura (deve passar).
+
+O que isso **não** faz: não apaga nada. As linhas de `assinaturas` ficam, quem já pagou continua com o `status` correto, e o webhook e o `POST /transacoes` nunca dependem do interruptor.
+
+Quem tentou criar uma viagem no meio: ela fica no aparelho como "Assinatura necessária" (pendente, sem perder gastos) e **sobe sozinha** na próxima sincronização depois que o acesso volta, seja por `off` ou por compra.
+
+Para tirar só a conta de demonstração do bloqueio, ou parar de liberá-la: editar `ACESSO_LIBERADO_USUARIOS` e reiniciar.
+
+### 6.4 Observações da revisão (24/11)
+
+- O `conferir_servidor` compara o id liberado sem diferenciar maiúsculas, **igual** ao servidor (`usuarios_liberados` põe tudo em minúsculas), então não dá "OK" para um id que não libera.
+- `docs/assinatura.md` §4 e `docs/roteiro-envio.md` passo 18 diziam que voltar a `off` é "instantâneo"; exige o restart (corrigido nos dois).

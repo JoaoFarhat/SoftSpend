@@ -40,18 +40,32 @@ def get_ciclo_by_id(db: Session, ciclo_id: int):
         .first()
     )
 
-def get_user_ciclo_by_id(db: Session, ciclo_id: int, user_id: str):
-    return (
-        db.query(models.Ciclo)
-        .options(
+def get_user_ciclo_by_id(
+    db: Session,
+    ciclo_id: int,
+    user_id: str,
+    para_atualizar: bool = False,
+    carregar_viagem: bool = True,
+):
+    # `para_atualizar` bloqueia a linha do ciclo (SELECT ... FOR UPDATE): duas
+    # edições ao mesmo tempo não partem da mesma diária antiga. Toda escrita
+    # numa viagem trava o ciclo primeiro (ordem: ciclo → dia(s) → gasto).
+    # `carregar_viagem=False` só trava, sem trazer dias e gastos: lançar ou
+    # apagar um gasto não precisa ler a viagem inteira.
+    query = db.query(models.Ciclo)
+    if carregar_viagem:
+        query = query.options(
             selectinload(models.Ciclo.dias)
             .selectinload(models.Dia.gastos)
             .selectinload(models.Gasto.open_finance_match)
             .selectinload(models.ExpenseTransactionMatch.transacao)
         )
-        .filter(models.Ciclo.id == ciclo_id, models.Ciclo.id_usuario == user_id)
-        .first()
+    query = query.filter(
+        models.Ciclo.id == ciclo_id, models.Ciclo.id_usuario == user_id
     )
+    if para_atualizar:
+        query = query.with_for_update()
+    return query.first()
 
 
 def find_by_client_id(db: Session, client_id: str, user_id: str, para_atualizar: bool = False):
@@ -74,18 +88,25 @@ def incrementar_gasto_total(db: Session, ciclo_id: int, valor: Decimal):
 
 def update_ciclo(db: Session, ciclo: models.Ciclo, ciclo_request):
     diaria_mudou = ciclo.diaria != ciclo_request.diaria
+    diferenca = ciclo_request.diaria - (ciclo.diaria or Decimal(0))
     ciclo.titulo = ciclo_request.titulo
     ciclo.periodo = ciclo_request.periodo
     ciclo.diaria = ciclo_request.diaria
     ciclo.valor_total = ciclo_request.valor_total
     if diaria_mudou:
         # O saldo do dia é a diária menos os gastos dele; diária nova sem
-        # recalcular deixaria o relatório e o app com o saldo velho.
+        # recalcular deixaria o relatório e o app com o saldo velho. O ajuste
+        # é relativo e feito no banco: gravar `nova_diaria - gastos lidos`
+        # apagaria o desconto de um gasto gravado por outro pedido depois da
+        # leitura (o `criar_gasto` também desconta com `saldo - valor`).
+        db.query(models.Dia).filter(models.Dia.ciclo_id == ciclo.id).update(
+            {models.Dia.saldo: models.Dia.saldo + diferenca},
+            synchronize_session=False,
+        )
+        # Os dias já carregados guardam o saldo antigo; a resposta do PUT
+        # relê o valor do banco.
         for dia in ciclo.dias:
-            dia.saldo = ciclo_request.diaria - sum(
-                (gasto.valor or Decimal(0) for gasto in dia.gastos or []),
-                Decimal(0),
-            )
+            db.expire(dia, ["saldo"])
     db.flush()
     db.refresh(ciclo)
     return ciclo

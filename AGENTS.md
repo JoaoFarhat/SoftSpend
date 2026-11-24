@@ -207,12 +207,20 @@ mais uma passada. Uma nota anexada durante o upload não é apagada. Testes em
 `SoftSpendTests/MudancaDuranteEnvioTests.swift`.
 
 **Delete centralizado**: Em `syncDeletions`, o `modelContext.delete` é chamado
-uma única vez após o try/catch. Em sucesso ou 404, o item é deletado localmente.
-Em falha real, `marcarFalha` + `continue` (sem delete).
+uma única vez após o try/catch. Em sucesso ou 404 da API, o item é deletado
+localmente. Em falha real, `marcarFalha` + `continue` (sem delete).
 
 **Descarte por 404 (T4, decisão de 12/11)**: 404 no POST/PUT de `syncGastos`
 ou no POST de `syncDias` (o pai ou o item foi apagado em outro aparelho)
-descarta o item no aparelho, sem nenhuma requisição a mais. `descartarGasto`/
+descarta o item no aparelho, sem nenhuma requisição a mais — mas só o 404
+**vindo da API**: `isNotFoundError` exige `APIError.serverError` com status
+404 **e `requestId != "-"`**. Os "não encontrado" da API saem pelo handler de
+`middlewares.py` (`build_error_response`), sempre com `request_id` no corpo;
+o 404 de rota inexistente do FastAPI vem só com `{"detail": "Not Found"}` e o
+`NetworkManager.execute` monta `serverError` com `requestId "-"`. Esse 404 sem
+`request_id` (deploy quebrado, app novo contra servidor velho) não prova que
+o item sumiu: segue a falha comum (`marcarFalha`, backoff), sem descarte e sem
+apagar no `syncDeletions`. `descartarGasto`/
 `descartarDia` releem por `id` num contexto novo (via `gravar`): o gasto sai
 do `dia.ciclo.gasto_total` e é apagado; o dia tira do total os gastos vivos
 dele (`deletadoEm == nil`) e é apagado (a cascata leva os gastos). Versões
@@ -248,9 +256,19 @@ viagem bloqueada não faz requisição). Na tela, `EstadoEnvio.aguardandoAssinat
 
 **Comprovantes**: `syncComprovantes` filtra por `syncStatusRaw != synced` no
 predicado. Chama `marcarFalha` em falha (backoff) e `marcarSucesso` apenas se
-`comprovanteData == nil && !comprovanteParaRemover`. `syncGastos` também só
-marca `.synced` se não há comprovante pendente — o gasto permanece `.pending`
-até o comprovante ser processado.
+`comprovanteDataCriptografado == nil && !comprovanteParaRemover` — nota
+guardada conta como pendente mesmo quando não abre com a chave atual (olhar o
+campo cifrado basta; decifrar só para checar existência marcava `.synced` e a
+pendência sumia sem registro). `syncGastos` também só marca `.synced` se não
+há comprovante pendente — o gasto permanece `.pending` até o comprovante ser
+processado. Nota guardada que a chave atual não abre (`sincronizarComprovante`,
+ramo sem bytes legíveis): `syncError = SyncActor.erroNotaNaoAbre` +
+`marcarFalha` — a tela mostra o motivo e o backoff impede insistir a cada
+passada, com os bytes preservados. A saída é o "Descartar nota" do
+`DetalheGastoView` (mostrado sempre que `comprovanteDataCriptografado != nil`
+e a nota não abre): chama `removerComprovante`, que limpa os bytes e sobe a
+remoção — o gasto destrava na passada seguinte. Testes em
+`SoftSpendTests/DescartarNotaIlegivelTests.swift`.
 
 **Exclusão vinda do servidor (T5)**: no `CiclosViewModel`, com a lista completa
 de dias (`listaCompleta`), `removerSumidos` apaga gasto `.synced` com `backendId`
@@ -272,10 +290,16 @@ copia. Testes em `SoftSpendTests/TotalDaViagemTests.swift`.
 
 ### ComprovanteCrypto
 
-`GastosDia.comprovanteData` é uma propriedade `@Transient` que encripta/decripta
-sob demanda usando `ComprovanteCrypto` (CryptoKit AES-GCM). O bytes criptografados
-ficam em `comprovanteDataCriptografado`. A chave simétrica de 256 bits é armazenada
-no Keychain com `kSecAttrAccessibleWhenUnlockedThisDeviceOnly`.
+`GastosDia.comprovanteData` é uma propriedade `@Transient` de só leitura que
+decripta sob demanda usando `ComprovanteCrypto` (CryptoKit AES-GCM). Os bytes
+criptografados ficam em `comprovanteDataCriptografado`. A chave simétrica de
+256 bits é armazenada no Keychain com
+`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`.
+
+A escrita passa por métodos, não por setter: `gravarComprovante(_:)` lança
+`ComprovanteCryptoError` quando a chave não está acessível (quem chama avisa a
+tela — o setter antigo apagava a nota guardada e só logava) e
+`removerComprovante()` limpa o campo sem passar pela cifra.
 
 `ComprovanteCrypto` é `nonisolated` porque é acessado de `GastosDia` (que é
 `nonisolated`).
@@ -633,7 +657,10 @@ nem de `PLUGGY_*`:
   arquivo e devolve a prévia **sem gravar nada** (nem banco, nem S3).
   `arquivo`: PDF até 10 MB e 20 páginas, OFX ou CSV até 2 MB; `senha?` para
   PDF protegido (regravado sem proteção em memória pelo `pypdfium2`; a senha
-  nunca é guardada nem logada). `services/fatura_arquivo_service.py` detecta
+  nunca é guardada nem logada). Todo uso do `pypdfium2` fica dentro da
+  trava `services/pdfium_seguro.trava_pdfium` — ele não é seguro entre
+  threads e as leituras rodam em threads do FastAPI.
+  `services/fatura_arquivo_service.py` detecta
   o tipo pelos bytes/cabeçalho, faz o parse de OFX e CSV por regex/`csv`
   (sem IA) e aplica a validação e o `soma_confere` compartilhados.
   `services/fatura_ia_service.py` manda o PDF nativo ao Gemini (mesmas
@@ -652,7 +679,13 @@ nem de `PLUGGY_*`:
   descartadas, grava tudo de forma idempotente e roda `conciliar_usuario`.
   `services/fatura_service.py` acha ou cria o cartão por (usuário, emissor,
   final) — `origem = 'FATURA'`, `conexao_id = NULL` — e a fatura por
-  (cartão, vencimento), atualizando o total se mudou. O `transaction_id` é
+  (cartão, vencimento), atualizando o total se mudou. Cartão e fatura novos
+  têm id derivado da chave (`account_id` = `fatura:` + sha256 de usuário,
+  emissor e final; `bill_id` = `fatura:` + sha256 de `account_id` e
+  vencimento): dois `POST` simultâneos batem no único da coluna no `flush`
+  e o refaz do `IntegrityError` acha os do outro pedido, sem nada em dobro
+  (`tests/test_fatura_corrida.py`). A busca segue pelos campos, então
+  cartões e faturas antigos, de id com uuid, continuam achados. O `transaction_id` é
   `fatura:` + sha256 de usuário, cartão, data, valor, descrição
   normalizada, parcela, tipo e ordem entre iguais (duas compras idênticas
   no mesmo dia continuam duas; reimportar não duplica).
@@ -799,6 +832,13 @@ DEMO_SENHA='...' python -m scripts.criar_conta_demo --email demo@softspend.com.b
 com o mesmo e-mail não duplica nada: avisa no stderr e sai sem gravar.
 Testes em `tests/test_conta_demo.py`.
 
+Para conferir se o servidor está pronto para a loja (banco conecta,
+`alembic_version` igual ao head, segredos e `APPLE_*` presentes, `.cer` em
+`certificados_apple/`, conta de demonstração liberada), rode na EC2, de
+dentro de `Python/`: `python -m scripts.conferir_servidor`. Imprime uma
+linha `OK`/`FALTA` por item — nunca o valor de segredos — e sai 1 se faltar
+algo. Testes em `tests/test_conferir_servidor.py`.
+
 | Variável | Default | Descrição |
 | --- | --- | --- |
 | `BILLING_ENFORCEMENT` | `off` | Lida a cada requisição. Só `on` liga o bloqueio; com qualquer outro valor `tem_acesso` é sempre `true` e nada responde `subscription_required` (o `status` real continua no `GET /api/assinatura`) |
@@ -910,6 +950,22 @@ Para evitar criação duplicada quando o app não recebe a resposta do `POST` (e
   devolvem o existente (o gasto passa pelo `conciliar_gasto`), ou relançam se
   não acharem. Os incrementos nunca ficam fora do savepoint (contaria o
   dinheiro duas vezes). Testes em `tests/test_client_id_corrida.py`.
+- Ordem das travas em todo o servidor: ciclo → dia(s) por id crescente → gasto
+  (o `PUT /ciclos` trava o ciclo e faz `UPDATE` em todos os dias; o `UPDATE`
+  relativo do `gasto_total` também trava o ciclo — outra ordem dava deadlock).
+  `DELETE /dias/{id}` e `POST /dias/{id}/gastos` passam por
+  `dia_service.travar_dia_do_usuario`: lê o dia sem trava (dono e ciclo, 404),
+  trava o ciclo (`get_user_ciclo_by_id(..., para_atualizar=True,
+  carregar_viagem=False)`) e só então o dia (`find_dia(..., para_atualizar=True)`;
+  sumiu no meio, 404). O `remover_dia` soma e apaga os gastos de uma leitura com
+  `FOR UPDATE` de `gastos_dia` (`listar_por_dia_para_atualizar`), não de
+  `dia.gastos`. `DELETE`/`PUT /gastos/{id}` (`gasto_service._travar_gasto`) leem
+  o gasto sem trava, conferem o dono e, ao mover, o dia novo (404 se não existe
+  ou é de outro usuário, 400 se é de outro ciclo) **antes** de travar qualquer
+  coisa; então travam o ciclo, os dias (atual e novo) por id crescente e o
+  gasto. Se o gasto mudou de dia no meio, refazem uma vez (o ciclo já travado
+  não é travado de novo) e depois respondem 409. `DELETE /ciclos/{id}` trava o
+  ciclo antes da cascata do ORM. Testes em `tests/test_remover_dia_corrida.py`.
 - As tabelas têm unique constraints por `client_id` + entidade pai:
   - `uix_ciclo_client_id_usuario`
   - `uix_dia_client_id_ciclo`

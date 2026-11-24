@@ -12,6 +12,7 @@ podem repetir um dia e pular outro — e o app apaga localmente o dia que
 "sumiu" da lista completa.
 """
 
+import models
 from sqlalchemy import event
 
 from test_core_api import (  # noqa: F401  (`ambiente` e o fixture do core)
@@ -242,6 +243,35 @@ def test_encurtar_viagem_remove_do_total_gasto_do_dia_cortado(ambiente):
     assert next(
         d for d in corpo["dias"] if d["id"] == dias[0]["id"]
     )["saldo"] == 90.00
+
+
+def test_gasto_total_no_ciclo_vivo_na_sessao_acompanha_operacoes(ambiente):
+    """O UPDATE de `incrementar_gasto_total` vai direto ao banco; sem o
+    `db.expire` do service, um `Ciclo` vivo na sessao entrega o valor velho.
+
+    Segurar a referencia aqui reproduz determinísticamente o que antes so
+    aparecia quando o GC atrasava no meio da suíte inteira.
+    """
+    client = ambiente.como(USER_A)
+    ciclo, dias = _viagem(client, "ciclo-sessao-viva")
+
+    ciclo_vivo = ambiente.session.get(models.Ciclo, ciclo["id"])
+
+    _gasto(client, dias[0]["id"], "gasto-vivo-1")
+    assert ciclo_vivo.gasto_total == 30.00
+
+    gasto = _gasto(client, dias[0]["id"], "gasto-vivo-2", valor="10.00")
+    assert ciclo_vivo.gasto_total == 40.00
+
+    response = client.put(
+        f"/gastos/{gasto['id']}", json=_gasto_payload(valor="25.00")
+    )
+    assert response.status_code == 200
+    assert ciclo_vivo.gasto_total == 55.00
+
+    response = client.delete(f"/gastos/{gasto['id']}")
+    assert response.status_code == 204
+    assert ciclo_vivo.gasto_total == 30.00
 
 
 def test_dias_com_mesma_data_paginam_sem_repetir_nem_pular(ambiente):
