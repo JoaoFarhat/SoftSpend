@@ -1235,6 +1235,28 @@ final class CiclosViewModel: ObservableObject {
         try await NetworkManager.shared.exportarCiclo(cicloId: $0, formato: $1, comprovantes: $2)
     }
 
+    /// Nome do arquivo temporário do relatório. O título pode ter "/" (vira
+    /// subpasta e o `write` falha depois do download) e pode ser comprido
+    /// demais para um nome de arquivo: só letra, número, "-" e "_" ficam,
+    /// o resto vira "-"; repetições e pontas são aparadas e o nome é cortado
+    /// em 60 caracteres (74 no máximo com `relatorio_` e a extensão), usando
+    /// "viagem" quando nada sobra.
+    nonisolated static func nomeArquivoExportacao(titulo: String, formato: ExportFormato) -> String {
+        var nome = ""
+        var ultimoFoiTraco = false
+        for caractere in titulo {
+            let valido = caractere.isLetter || caractere.isNumber
+                || caractere == "-" || caractere == "_"
+            let saida: Character = valido ? caractere : "-"
+            if saida == "-" && ultimoFoiTraco { continue }
+            ultimoFoiTraco = saida == "-"
+            nome.append(saida)
+        }
+        let cortado = String(
+            nome.trimmingCharacters(in: CharacterSet(charactersIn: "-")).prefix(60))
+        return "relatorio_\(cortado.isEmpty ? "viagem" : cortado).\(formato.extensao)"
+    }
+
     /// `nil` quando a assinatura barra a exportação (§3.5): a tela de planos
     /// abre no lugar e nenhum alerta de erro aparece.
     func exportarCiclo(formato: ExportFormato, comprovantes: ExportComprovantes = .imagem) async throws -> URL? {
@@ -1252,7 +1274,7 @@ final class CiclosViewModel: ObservableObject {
             throw error
         }
 
-        let nome = "relatorio_\(atualCiclo.titulo.filter { !$0.isWhitespace }).\(formato.extensao)"
+        let nome = Self.nomeArquivoExportacao(titulo: atualCiclo.titulo, formato: formato)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(nome)
         try data.write(to: url, options: .atomic)
         return url
