@@ -27,6 +27,20 @@ def find_gasto_for_update(db: Session, gasto_id: int):
     )
 
 
+def listar_por_dia_para_atualizar(db: Session, dia_id: int):
+    # Leitura com bloqueio direto da tabela, não pela relação `dia.gastos`: no
+    # MySQL (REPEATABLE READ) a leitura comum usa a foto do começo da
+    # transação e não vê o gasto que outro pedido gravou depois. O
+    # `populate_existing` traz o valor atual mesmo de gasto já na sessão.
+    return (
+        db.query(models.Gasto)
+        .filter(models.Gasto.dia_id == dia_id)
+        .with_for_update()
+        .populate_existing()
+        .all()
+    )
+
+
 def find_by_client_id(db: Session, client_id: str, dia_id: int, para_atualizar: bool = False):
     # `para_atualizar`: leitura com bloqueio, que vê a linha recém-gravada por
     # outro pedido mesmo em REPEATABLE READ (ver `ciclo_repository`).

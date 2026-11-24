@@ -1,10 +1,12 @@
+from decimal import Decimal
+
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from typing import List
 import models
 from dtos.dia import DiaRequest
-from repositories import dia_repository, ciclo_repository
+from repositories import dia_repository, ciclo_repository, gasto_repository
 
 
 def listar_dias_por_ciclo(db: Session, ciclo_id: int, user_id: str, skip: int, limit: int):
@@ -101,7 +103,10 @@ def criar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], user_id:
 
 
 def remover_dia(db: Session, dia_id: int, user_id: str):
-    dia = dia_repository.find_dia(db, dia_id)
+    # Trava o dia: dois DELETE ao mesmo tempo (o app repete quando perde a
+    # resposta) descontariam o total da viagem duas vezes; com a trava o
+    # segundo espera e, com o dia já apagado, recebe 404.
+    dia = dia_repository.find_dia(db, dia_id, para_atualizar=True)
 
     if not dia:
         raise HTTPException(status_code=404, detail="Dia não encontrado")
@@ -109,13 +114,21 @@ def remover_dia(db: Session, dia_id: int, user_id: str):
     if dia.ciclo.id_usuario != user_id:
         raise HTTPException(status_code=404, detail="Dia não encontrado")
 
-    gasto_total_dia = sum(gasto.valor for gasto in dia.gastos)
+    # Soma e apaga a partir da tabela, com bloqueio, e não de `dia.gastos`: um
+    # gasto gravado por outro pedido depois da foto da transação ficaria fora
+    # da soma (total errado para sempre) e sobraria no banco.
+    gastos = gasto_repository.listar_por_dia_para_atualizar(db, dia.id)
+    gasto_total_dia = sum((gasto.valor for gasto in gastos), Decimal("0"))
     ciclo_repository.incrementar_gasto_total(db, dia.ciclo_id, -gasto_total_dia)
     # O UPDATE vai direto ao banco e nao toca o objeto em sessao; sem expirar,
     # um ciclo que continue vivo (o delete mexe em `ciclo.dias`) entregaria o
     # `gasto_total` velho para leituras posteriores na mesma sessao.
     db.expire(dia.ciclo, ["gasto_total"])
 
+    # Um a um pelo ORM, para a limpeza dos comprovantes (`after_delete`) e a
+    # cascata do vínculo com a fatura valerem também para o gasto novo.
+    for gasto in gastos:
+        gasto_repository.remover_gasto(db, gasto)
     dia_repository.remover_dia(db, dia)
 
     return None

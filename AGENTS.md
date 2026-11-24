@@ -935,6 +935,11 @@ Para evitar criação duplicada quando o app não recebe a resposta do `POST` (e
   devolvem o existente (o gasto passa pelo `conciliar_gasto`), ou relançam se
   não acharem. Os incrementos nunca ficam fora do savepoint (contaria o
   dinheiro duas vezes). Testes em `tests/test_client_id_corrida.py`.
+- `DELETE /dias/{id}`, `POST /dias/{id}/gastos` e o `PUT /gastos/{id}` que muda de dia
+  leem o dia com `find_dia(..., para_atualizar=True)` (`FOR UPDATE`, só o dia, não o
+  ciclo); o `remover_dia` soma e apaga os gastos de uma leitura com `FOR UPDATE` de
+  `gastos_dia` (`listar_por_dia_para_atualizar`), não de `dia.gastos`. Testes em
+  `tests/test_remover_dia_corrida.py`.
 - As tabelas têm unique constraints por `client_id` + entidade pai:
   - `uix_ciclo_client_id_usuario`
   - `uix_dia_client_id_ciclo`
