@@ -99,3 +99,30 @@ nonisolated final class CicloSoftex {
     static let example = CicloSoftex(valor_total: 2145, gasto_total: 214, periodo: "10/03 - 17/03", diaria: 180, titulo: "Fortaleza", dias: DiaSoftex.examples)
     static let vazio = CicloSoftex(valor_total: 0, gasto_total: 0, periodo: "", diaria: 0, titulo: "", dias: [])
 }
+
+// `nonisolated` (não `@MainActor`): usado pelo `CiclosViewModel` e pelo `SyncActor`.
+nonisolated extension CicloSoftex {
+    /// Registro com edição ou exclusão ainda não enviada ao servidor: o refresh não pode
+    /// sobrescrever os campos nem marcar `.synced` (o `SyncActor` sobe a versão local depois).
+    static func temAlteracaoLocal(_ status: SyncStatus, deletadoEm: Date?) -> Bool {
+        status != .synced || deletadoEm != nil
+    }
+
+    /// Algum dia ou gasto da viagem (inclusive os apagados ainda não enviados) com
+    /// alteração local que o servidor ainda não conhece.
+    var temAlteracaoNaViagem: Bool {
+        (dias ?? []).contains { dia in
+            Self.temAlteracaoLocal(dia.syncStatus, deletadoEm: dia.deletadoEm)
+                || dia.gastos.contains { Self.temAlteracaoLocal($0.syncStatus, deletadoEm: $0.deletadoEm) }
+        }
+    }
+
+    /// Copia o `gasto_total` que veio do servidor só quando nenhum dia ou gasto da
+    /// viagem tem alteração local pendente. Senão o servidor ainda não conta essa
+    /// mudança (gasto feito sem internet, `DELETE` que não subiu) e o total local,
+    /// que já conta, fica.
+    func receberGastoTotalDoServidor(_ total: Decimal) {
+        guard !temAlteracaoNaViagem else { return }
+        gasto_total = total
+    }
+}

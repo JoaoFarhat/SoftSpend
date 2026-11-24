@@ -404,7 +404,9 @@ actor SyncActor: ModelActor {
                     // Editado durante o envio: os campos locais são os novos.
                     marcarMudancaDuranteEnvio(atual)
                 }
-                atual.gasto_total = cicloEditado.gasto_total
+                // Gasto/dia ainda não enviado (sobe nas etapas seguintes): o
+                // total do servidor não o conta e o local fica.
+                atual.receberGastoTotalDoServidor(cicloEditado.gasto_total)
             }
         } catch {
             if atingiuLimitePorMinuto(error) {

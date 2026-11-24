@@ -335,21 +335,14 @@ final class CiclosViewModel: ObservableObject {
     private func removerCiclosSumidos(candidatos: Set<Int>, mantendo vistos: Set<Int>) -> Set<UUID> {
         let sumidos = ciclosLocaisDoUsuario().filter { ciclo in
             guard let id = ciclo.backendId, candidatos.contains(id), !vistos.contains(id),
-                  !Self.temAlteracaoLocal(ciclo.syncStatus, deletadoEm: ciclo.deletadoEm) else { return false }
-            return !Self.temAlteracaoNaViagem(ciclo)
+                  !CicloSoftex.temAlteracaoLocal(ciclo.syncStatus, deletadoEm: ciclo.deletadoEm) else { return false }
+            return !ciclo.temAlteracaoNaViagem
         }
         guard !sumidos.isEmpty else { return [] }
         let removidos = Set(sumidos.map(\.id))
         for ciclo in sumidos { modelContext?.delete(ciclo) }
         salvarLocal()
         return removidos
-    }
-
-    private static func temAlteracaoNaViagem(_ ciclo: CicloSoftex) -> Bool {
-        (ciclo.dias ?? []).contains { dia in
-            temAlteracaoLocal(dia.syncStatus, deletadoEm: dia.deletadoEm)
-                || dia.gastos.contains { temAlteracaoLocal($0.syncStatus, deletadoEm: $0.deletadoEm) }
-        }
     }
 
     private func deduplicarCiclosLocais() {
@@ -517,7 +510,7 @@ final class CiclosViewModel: ObservableObject {
         /// Sincronizado antes da busca e ausente da lista completa: foi apagado no servidor.
         func sumiu(_ backendId: Int?, status: SyncStatus, deletadoEm: Date?) -> Bool {
             guard let backendId, antes.contains(backendId), !noServidor.contains(backendId) else { return false }
-            return !CiclosViewModel.temAlteracaoLocal(status, deletadoEm: deletadoEm)
+            return !CicloSoftex.temAlteracaoLocal(status, deletadoEm: deletadoEm)
         }
     }
 
@@ -657,7 +650,7 @@ final class CiclosViewModel: ObservableObject {
         if let existente = diaLocal(backendId: dia.backendId) ?? diaLocal(clientId: dia.clientId) {
             // T1: com alteração local ainda não enviada, o servidor traz a versão antiga.
             // Só completa o que falta para casar; campos e status ficam como o usuário deixou.
-            if Self.temAlteracaoLocal(existente.syncStatus, deletadoEm: existente.deletadoEm) {
+            if CicloSoftex.temAlteracaoLocal(existente.syncStatus, deletadoEm: existente.deletadoEm) {
                 if existente.backendId == nil { existente.backendId = dia.backendId }
                 if existente.ciclo == nil { existente.ciclo = ciclo }
                 // Dia com exclusão pendente: nada do servidor entra nele (não revive).
@@ -707,12 +700,6 @@ final class CiclosViewModel: ObservableObject {
         return dias.first(where: { $0.deletadoEm == nil }) ?? dias.first
     }
 
-    /// Registro com edição ou exclusão ainda não enviada ao servidor: o refresh não pode
-    /// sobrescrever os campos nem marcar `.synced` (o `SyncActor` sobe a versão local depois).
-    static func temAlteracaoLocal(_ status: SyncStatus, deletadoEm: Date?) -> Bool {
-        status != .synced || deletadoEm != nil
-    }
-
     /// Duplicatas que já ficaram no aparelho (mesmo clientId, outro registro): os gastos delas
     /// passam para o dia que ficou e elas saem. Roda a cada carga dos dias do servidor.
     private func absorverDuplicatas(de dia: DiaSoftex) {
@@ -755,7 +742,7 @@ final class CiclosViewModel: ObservableObject {
             ?? gastoLocal(clientId: gasto.clientId, no: dia) {
             // T1: edição ou exclusão pendente vence a versão do servidor; só completa
             // o `backendId` para o próximo sync fazer PUT/DELETE em vez de POST.
-            if Self.temAlteracaoLocal(existente.syncStatus, deletadoEm: existente.deletadoEm) {
+            if CicloSoftex.temAlteracaoLocal(existente.syncStatus, deletadoEm: existente.deletadoEm) {
                 if existente.backendId == nil { existente.backendId = gasto.backendId }
                 return
             }
@@ -813,13 +800,14 @@ final class CiclosViewModel: ObservableObject {
             ?? buscarCicloLocal(clientId: ciclo.clientId, userId: userId) {
             // T1: edição ou exclusão pendente vence a versão (antiga) do servidor; só
             // completa o `backendId` para o próximo sync fazer PUT/DELETE em vez de POST.
-            if Self.temAlteracaoLocal(existente.syncStatus, deletadoEm: existente.deletadoEm) {
+            if CicloSoftex.temAlteracaoLocal(existente.syncStatus, deletadoEm: existente.deletadoEm) {
                 if existente.backendId == nil { existente.backendId = ciclo.backendId }
                 return existente
             }
             existente.titulo = ciclo.titulo
             existente.valor_total = ciclo.valor_total
-            existente.gasto_total = ciclo.gasto_total
+            // Gasto/dia local ainda não enviado: o total do servidor não o conta.
+            existente.receberGastoTotalDoServidor(ciclo.gasto_total)
             existente.periodo = ciclo.periodo
             existente.diaria = ciclo.diaria
             existente.backendId = ciclo.backendId ?? existente.backendId
