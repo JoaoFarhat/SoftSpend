@@ -9,7 +9,6 @@ mesmo arquivo não duplica nada.
 """
 
 import hashlib
-import uuid
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
@@ -151,13 +150,34 @@ def _meia_noite(dia: date | None) -> datetime | None:
     return datetime.combine(dia, time.min, tzinfo=timezone.utc) if dia else None
 
 
-def _cartao_importado(
-    session: Session, user_id: str, emissor: str | None, final_cartao: str | None
-) -> models.CreditCardAccount:
-    """Acha ou cria o cartão importado por (user_id, emissor, final)."""
-    emissor = (emissor or "").strip()[:255] or None
-    final = (final_cartao or "").strip()[:4] or None
-    cartao = (
+def _id_derivado(base: str) -> str:
+    """`fatura:` + sha256 da chave, truncado para o VARCHAR(64) da coluna."""
+    return "fatura:" + hashlib.sha256(base.encode("utf-8")).hexdigest()[:57]
+
+
+def _account_id_cartao(
+    user_id: str, emissor: str | None, final: str | None
+) -> str:
+    """`account_id` do cartão importado, derivado de (usuário, emissor, final).
+
+    Duas gravações simultâneas que não acharam o cartão calculam o mesmo id
+    e a segunda bate no único de `account_id` no `flush` — cai no
+    `IntegrityError` de `gravar_fatura`, que refaz e acha o cartão do outro.
+    Recebe `emissor`/`final` já normalizados por `_cartao_importado`.
+    """
+    return _id_derivado(f"{user_id}|{emissor or ''}|{final or ''}")
+
+
+def _bill_id_fatura(account_id: str, vencimento: date) -> str:
+    """`bill_id` da fatura importada, derivado de (cartão, vencimento)."""
+    return _id_derivado(f"{account_id}|{vencimento.isoformat()}")
+
+
+def _buscar_cartao(
+    session: Session, user_id: str, emissor: str | None, final: str | None
+) -> models.CreditCardAccount | None:
+    """Busca pelos campos — acha também cartões antigos, de id com uuid."""
+    return (
         session.query(models.CreditCardAccount)
         .filter(
             models.CreditCardAccount.user_id == user_id,
@@ -167,6 +187,29 @@ def _cartao_importado(
         )
         .first()
     )
+
+
+def _buscar_fatura(
+    session: Session, cartao: models.CreditCardAccount, vencimento: datetime
+) -> models.CreditCardBill | None:
+    """Busca por (cartão, vencimento) — acha também faturas de id com uuid."""
+    return (
+        session.query(models.CreditCardBill)
+        .filter(
+            models.CreditCardBill.cartao_id == cartao.id,
+            models.CreditCardBill.due_date == vencimento,
+        )
+        .first()
+    )
+
+
+def _cartao_importado(
+    session: Session, user_id: str, emissor: str | None, final_cartao: str | None
+) -> models.CreditCardAccount:
+    """Acha ou cria o cartão importado por (user_id, emissor, final)."""
+    emissor = (emissor or "").strip()[:255] or None
+    final = (final_cartao or "").strip()[:4] or None
+    cartao = _buscar_cartao(session, user_id, emissor, final)
     if cartao is None:
         partes = [emissor or "Cartão importado"]
         if final:
@@ -175,7 +218,7 @@ def _cartao_importado(
             user_id=user_id,
             conexao_id=None,
             origem=ORIGEM_FATURA,
-            account_id=f"fatura:{uuid.uuid4()}",
+            account_id=_account_id_cartao(user_id, emissor, final),
             institution_name=emissor,
             number_last4=final,
             name=" ".join(partes)[:255],
@@ -189,21 +232,20 @@ def _cartao_importado(
 def _fatura_importada(
     session: Session, cartao: models.CreditCardAccount, lida: FaturaLida
 ) -> models.CreditCardBill:
-    """Acha a fatura por (cartão, vencimento); se o total mudou, atualiza."""
+    """Acha a fatura por (cartão, vencimento); se o total mudou, atualiza.
+
+    Fatura nova ganha `bill_id` derivado de (cartão, vencimento): numa
+    corrida, a segunda bate no único da coluna no `flush` e `gravar_fatura`
+    refaz, achando a do outro pedido. `gravar_fatura` já recusou
+    `vencimento` vazio.
+    """
     vencimento = _meia_noite(lida.vencimento)
-    fatura = (
-        session.query(models.CreditCardBill)
-        .filter(
-            models.CreditCardBill.cartao_id == cartao.id,
-            models.CreditCardBill.due_date == vencimento,
-        )
-        .first()
-    )
+    fatura = _buscar_fatura(session, cartao, vencimento)
     if fatura is None:
         fatura = models.CreditCardBill(
             cartao_id=cartao.id,
             user_id=cartao.user_id,
-            bill_id=f"fatura:{uuid.uuid4()}",
+            bill_id=_bill_id_fatura(cartao.account_id, lida.vencimento),
         )
         session.add(fatura)
     fatura.due_date = vencimento

@@ -671,7 +671,13 @@ nem de `PLUGGY_*`:
   descartadas, grava tudo de forma idempotente e roda `conciliar_usuario`.
   `services/fatura_service.py` acha ou cria o cartão por (usuário, emissor,
   final) — `origem = 'FATURA'`, `conexao_id = NULL` — e a fatura por
-  (cartão, vencimento), atualizando o total se mudou. O `transaction_id` é
+  (cartão, vencimento), atualizando o total se mudou. Cartão e fatura novos
+  têm id derivado da chave (`account_id` = `fatura:` + sha256 de usuário,
+  emissor e final; `bill_id` = `fatura:` + sha256 de `account_id` e
+  vencimento): dois `POST` simultâneos batem no único da coluna no `flush`
+  e o refaz do `IntegrityError` acha os do outro pedido, sem nada em dobro
+  (`tests/test_fatura_corrida.py`). A busca segue pelos campos, então
+  cartões e faturas antigos, de id com uuid, continuam achados. O `transaction_id` é
   `fatura:` + sha256 de usuário, cartão, data, valor, descrição
   normalizada, parcela, tipo e ordem entre iguais (duas compras idênticas
   no mesmo dia continuam duas; reimportar não duplica).
