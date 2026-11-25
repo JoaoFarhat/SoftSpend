@@ -179,7 +179,24 @@ def setup_exception_handlers(app):
                 "errors": exc.errors(),
             },
         )
-        return build_error_response(request, 422, "Dados de entrada invalidos")
+        # Nome do campo recusado: ultimo item de texto de cada `loc`
+        # (("body", 0, "data") -> "data"), sem repeticao e na ordem dos erros.
+        # O valor enviado (`input`) e o `ctx` nunca vao para o corpo.
+        campos = []
+        for erro in exc.errors():
+            for item in reversed(erro.get("loc") or ()):
+                if isinstance(item, str):
+                    if item not in campos:
+                        campos.append(item)
+                    break
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "Dados de entrada invalidos",
+                "request_id": get_request_id(request),
+                "campos": campos,
+            },
+        )
 
     @app.exception_handler(Exception)
     async def global_exception_handler(request: Request, exc: Exception):
