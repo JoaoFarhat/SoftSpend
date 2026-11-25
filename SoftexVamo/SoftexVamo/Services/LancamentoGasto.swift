@@ -275,7 +275,15 @@ final class RascunhoGasto {
     }
 
     var podeSalvar: Bool {
-        !titulo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && valor > 0 && dia != nil && !salvando
+        !titulo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && valor > 0 && valor <= LimiteValor.maximo && dia != nil && !salvando
+    }
+
+    /// Motivo mostrado no formulário quando o valor passa do teto do servidor:
+    /// sem ele, o Salvar ficava desligado sem explicação e, se o valor
+    /// entrasse por outro caminho, o gasto retentava o 422 para sempre.
+    var erroValor: String? {
+        valor > LimiteValor.maximo ? LimiteValor.mensagem : nil
     }
 
     init(dia: DiaSoftex?) {
