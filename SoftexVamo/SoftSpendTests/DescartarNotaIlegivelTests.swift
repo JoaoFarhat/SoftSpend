@@ -14,6 +14,11 @@ struct DescartarNotaIlegivelTests {
     let container: ModelContainer
     let api = FakeSyncAPI()
     let userId = "usuario-teste"
+    /// Chave em memória, como nos outros testes da cifra: com o Keychain de verdade do
+    /// simulador, uma resposta diferente de "achou" ou "não existe" vira "chave
+    /// indisponível" (desde o `ArmazemDeChave`) e o teste deixava de exercitar os bytes
+    /// que não abrem — no CI os quatro testes da nota ilegível falhavam assim.
+    let crypto = ComprovanteCrypto(armazem: ArmazemDeChaveFalso(chave: ArmazemDeChaveFalso.chaveAleatoria()))
 
     /// Bytes que nenhuma chave abre.
     let ilegiveis = Data([0x01, 0x02, 0x03])
@@ -26,7 +31,7 @@ struct DescartarNotaIlegivelTests {
     }
 
     func sync(forcar: Bool = false) async -> Int {
-        let syncActor = SyncActor(modelContainer: container, api: api)
+        let syncActor = SyncActor(modelContainer: container, api: api, crypto: crypto)
         return await syncActor.sync(agora: .now, userId: userId, forcar: forcar)
     }
 
