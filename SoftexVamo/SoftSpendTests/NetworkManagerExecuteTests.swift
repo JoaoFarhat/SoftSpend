@@ -83,7 +83,7 @@ nonisolated final class URLProtocolDeTeste: URLProtocol {
         }
         client?.urlProtocol(self, didReceive: http, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: resposta.corpo)
-        client?.urlProtocol(self, didFinishLoading: self)
+        client?.urlProtocolDidFinishLoading(self)
     }
 
     override func stopLoading() {}
