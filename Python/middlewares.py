@@ -176,7 +176,13 @@ def setup_exception_handlers(app):
             "Validation error",
             extra={
                 "path": request.url.path,
-                "errors": exc.errors(),
+                # `input` (o valor enviado), `msg`, `ctx` e `url` nunca vao
+                # para o log: o `input` de um erro no corpo traria ate a
+                # senha digitada. So `loc` e `type` identificam o campo.
+                "errors": [
+                    {"loc": erro.get("loc"), "type": erro.get("type")}
+                    for erro in exc.errors()
+                ],
             },
         )
         # Nome do campo recusado: ultimo item de texto de cada `loc`

@@ -6,6 +6,17 @@ from datetime import datetime, timezone
 
 request_id_var: ContextVar[str] = ContextVar("request_id", default="-")
 
+# Atributos que todo LogRecord ja tem (`makeLogRecord({})`), mais os que o
+# Formatter cria ao formatar (`message`, `asctime`) e o `request_id` gravado
+# pelo RequestContextFilter: nenhum deles entra como campo extra — o
+# `extra={...}` do logger.info vira atributo direto do record, e e isso que
+# queremos copiar.
+_ATRIBUTOS_PADRAO = frozenset(logging.makeLogRecord({}).__dict__) | {
+    "message",
+    "asctime",
+    "request_id",
+}
+
 
 class JSONFormatter(logging.Formatter):
     def format(self, record):
@@ -18,8 +29,9 @@ class JSONFormatter(logging.Formatter):
         }
         if record.exc_info:
             log_data["exception"] = self.formatException(record.exc_info)
-        if hasattr(record, "extra"):
-            log_data.update(record.extra)
+        for chave, valor in record.__dict__.items():
+            if chave not in _ATRIBUTOS_PADRAO:
+                log_data.setdefault(chave, valor)
         return json.dumps(log_data, default=str)
 
 
