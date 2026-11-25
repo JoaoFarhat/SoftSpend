@@ -197,4 +197,77 @@ struct ApagarEmCascataTests {
         #expect(apagadosGastos.count == 3)
         #expect(apagadosGastos.allSatisfy { $0.syncStatus == .synced })
     }
+
+    /// (e) `DELETE` do dia com 404 **da API** (corpo com `request_id`): o dia
+    /// já não existe no servidor — apagado em outro aparelho, por exemplo —
+    /// e a exclusão conclui como num sucesso: dia e gastos marcados ficam
+    /// `.synced` e nenhum `DELETE` de gasto sai.
+    @Test func deleteDoDiaCom404DaApiConcluiDiaEGastos() async throws {
+        try await subirViagem(qtdDias: 2, gastosPorDia: 2)
+
+        let ctx = ModelContext(container)
+        let ciclo = try cicloLocal(ctx)
+        let diaApagado = try #require(ciclo.dias?.max { $0.data < $1.data })
+        apagarDia(diaApagado, doCiclo: ciclo)
+        try ctx.save()
+
+        api.falhar(.deleteDia, com: FakeSyncAPI.naoEncontrado)
+        #expect(await sync() == 0)
+
+        // Só o DELETE do dia foi tentado; nenhum DELETE de gasto saiu.
+        #expect(api.chamadas == [.deleteDia])
+
+        let dia = try diasLocais().first { $0.deletadoEm != nil }
+        #expect(dia?.syncStatus == .synced)
+        let marcados = try gastosLocais().filter { $0.deletadoEm != nil }
+        #expect(marcados.count == 2)
+        #expect(marcados.allSatisfy { $0.syncStatus == .synced })
+
+        // Nada ficou "aguardando envio": um novo sync não chama a API.
+        api.limparChamadas()
+        #expect(await sync() == 0)
+        #expect(api.chamadas.isEmpty)
+    }
+
+    /// (f) `DELETE` do dia com 404 **sem `request_id`** (rota inexistente —
+    /// o FastAPI responde só `{"detail": "Not Found"}` e o `NetworkManager`
+    /// monta `requestId "-"`): não prova que o dia sumiu, então segue a falha
+    /// comum — o dia fica `.failed` com uma tentativa e os gastos apagados
+    /// continuam `.pending`, sem `DELETE` próprio. Sem o 404 falso, a
+    /// tentativa seguinte conclui tudo.
+    @Test func deleteDoDiaCom404SemRequestIdFalhaESeguraGastos() async throws {
+        try await subirViagem(qtdDias: 2, gastosPorDia: 2)
+
+        let ctx = ModelContext(container)
+        let ciclo = try cicloLocal(ctx)
+        let diaApagado = try #require(ciclo.dias?.max { $0.data < $1.data })
+        apagarDia(diaApagado, doCiclo: ciclo)
+        try ctx.save()
+
+        api.falhar(.deleteDia, com: FakeSyncAPI.rotaInexistente)
+        #expect(await sync() == 0)
+
+        // O DELETE foi tentado e recusado; nenhum DELETE de gasto saiu.
+        #expect(api.chamadas == [.deleteDia])
+        #expect(api.gastos.count == 4)
+        #expect(api.dias.count == 2)
+
+        let dia = try diasLocais().first { $0.deletadoEm != nil }
+        #expect(dia?.syncStatus == .failed)
+        #expect(dia?.tentativas == 1)
+        let marcados = try gastosLocais().filter { $0.deletadoEm != nil }
+        #expect(marcados.count == 2)
+        #expect(marcados.allSatisfy { $0.syncStatus == .pending && $0.tentativas == 0 })
+
+        // Não é 404 da API: nada foi descartado — sem a falha, a próxima
+        // tentativa conclui o dia e leva os gastos junto.
+        api.pararDeFalhar(.deleteDia)
+        api.limparChamadas()
+        #expect(await sync() == 0)
+
+        #expect(api.chamadas == [.deleteDia])
+        #expect(api.gastos.count == 2)
+        #expect(try diasLocais().first { $0.deletadoEm != nil }?.syncStatus == .synced)
+        #expect(try gastosLocais().allSatisfy { $0.syncStatus == .synced })
+    }
 }
