@@ -452,24 +452,25 @@ def ler_csv(texto: str) -> FaturaBruta:
 # ----------------------------------------------------- validação e DTO
 
 
+def _valor_lido(valor: Decimal | None) -> Decimal | None:
+    """Devolve o valor em 2 casas para a prévia, ou None se inválido.
+
+    O teto e o None são conferidos antes do arredondamento: quantize de
+    mais de ~26 dígitos inteiros lança InvalidOperation. Depois de
+    arredondar (dinheiro não passa de 2 casas: o que segue à prévia e à
+    soma é o que o servidor grava), um valor como 0,004 vira 0,00 e é
+    descartado — antes ele passava no "valor > 0" bruto e entrava na
+    prévia e no banco como R$ 0,00.
+    """
+    if valor is None or not valor.is_finite() or abs(valor) > VALOR_MAXIMO_COMPRA:
+        return None
+    arredondado = valor.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return arredondado if arredondado > 0 else None
+
+
 def _motivo_descarte(
     compra: CompraBruta, limite_inferior: date | None, vencimento: date | None
 ) -> str | None:
-    # O teto e o None são conferidos antes do arredondamento: quantize de
-    # mais de ~26 dígitos inteiros lança InvalidOperation. Depois de
-    # arredondar (dinheiro não passa de 2 casas: o que segue à prévia e à
-    # soma é o que o servidor grava), um valor como 0,004 vira 0,00 e é
-    # descartado — antes ele passava no "valor > 0" bruto e entrava na
-    # prévia e no banco como R$ 0,00.
-    if (
-        compra.valor is None
-        or not compra.valor.is_finite()
-        or abs(compra.valor) > VALOR_MAXIMO_COMPRA
-    ):
-        return "valor inválido"
-    compra.valor = compra.valor.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    if compra.valor <= 0:
-        return "valor inválido"
     if not compra.descricao or not compra.descricao.strip():
         return "descrição vazia"
     if compra.data is None:
@@ -501,7 +502,12 @@ def montar_fatura_lida(bruta: FaturaBruta) -> FaturaLida:
     validas: list[CompraBruta] = []
     descartadas = 0
     for compra in bruta.compras:
-        motivo = _motivo_descarte(compra, limite_inferior, bruta.vencimento)
+        valor = _valor_lido(compra.valor)
+        if valor is None:
+            motivo = "valor inválido"
+        else:
+            compra.valor = valor
+            motivo = _motivo_descarte(compra, limite_inferior, bruta.vencimento)
         if motivo is None:
             validas.append(compra)
             continue
