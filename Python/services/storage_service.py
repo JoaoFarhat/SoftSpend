@@ -87,20 +87,27 @@ def _conteudo_para_jpeg(conteudo: bytes) -> tuple[bytes, str]:
     if not _formato_imagem_permitido(img):
         raise ValueError("Formato de imagem não suportado; use JPEG, PNG ou WEBP")
 
-    # A foto do app chega com a marca de orientacao (EXIF); girar os pixels
-    # antes de medir evita a nota deitada no relatorio e no link.
-    img = ImageOps.exif_transpose(img)
+    # O Image.open so le o cabecalho: um JPEG com inicio bom e dados cortados
+    # (upload interrompido) abre, mas falha na decodificacao dos pixels. Sem
+    # este try o OSError vazava e a rota respondia 500 em vez de 422.
+    try:
+        # A foto do app chega com a marca de orientacao (EXIF); girar os pixels
+        # antes de medir evita a nota deitada no relatorio e no link.
+        img = ImageOps.exif_transpose(img)
 
-    # A camera atual tira fotos maiores que o teto (5712x4284 no iPhone 15/16):
-    # reduzir mantendo a proporcao em vez de recusar — antes a foto nunca subia.
-    if img.width > MAX_IMAGEM_LARGURA or img.height > MAX_IMAGEM_ALTURA:
-        img.thumbnail((MAX_IMAGEM_LARGURA, MAX_IMAGEM_ALTURA), Image.LANCZOS)
+        # A camera atual tira fotos maiores que o teto (5712x4284 no iPhone 15/16):
+        # reduzir mantendo a proporcao em vez de recusar — antes a foto nunca subia.
+        if img.width > MAX_IMAGEM_LARGURA or img.height > MAX_IMAGEM_ALTURA:
+            img.thumbnail((MAX_IMAGEM_LARGURA, MAX_IMAGEM_ALTURA), Image.LANCZOS)
 
-    if img.mode != "RGB":
-        img = img.convert("RGB")
+        if img.mode != "RGB":
+            img = img.convert("RGB")
 
-    buffer = BytesIO()
-    img.save(buffer, format="JPEG", quality=90)
+        buffer = BytesIO()
+        img.save(buffer, format="JPEG", quality=90)
+    except Exception as e:
+        logger.warning("Falha ao decodificar imagem de comprovante: %s", type(e).__name__)
+        raise ValueError("Não foi possível abrir esta imagem; anexe outra foto")
     return buffer.getvalue(), "image/jpeg"
 
 
@@ -146,27 +153,39 @@ def pdf_primeira_pagina_para_jpeg(conteudo: bytes) -> bytes:
             raise ValueError("Não foi possível abrir este PDF; anexe outro arquivo")
 
         try:
-            if len(documento) == 0:
-                raise ValueError("PDF não tem páginas")
+            try:
+                if len(documento) == 0:
+                    raise ValueError("PDF não tem páginas")
 
-            pagina = documento[0]
-            largura_pt, altura_pt = pagina.get_size()
-            if largura_pt <= 0 or altura_pt <= 0:
-                raise ValueError("PDF tem página sem dimensões")
-            escala = min(
-                PDF_ESCALA_RENDER,
-                PDF_MAX_LADO_PX / largura_pt,
-                PDF_MAX_LADO_PX / altura_pt,
-            )
-            imagem = pagina.render(scale=escala).to_pil()
+                pagina = documento[0]
+                largura_pt, altura_pt = pagina.get_size()
+                if largura_pt <= 0 or altura_pt <= 0:
+                    raise ValueError("PDF tem página sem dimensões")
+                escala = min(
+                    PDF_ESCALA_RENDER,
+                    PDF_MAX_LADO_PX / largura_pt,
+                    PDF_MAX_LADO_PX / altura_pt,
+                )
+                imagem = pagina.render(scale=escala).to_pil()
+
+                if imagem.mode != "RGB":
+                    imagem = imagem.convert("RGB")
+
+                buffer = BytesIO()
+                imagem.save(buffer, format="JPEG", quality=90)
+            except ValueError:
+                raise
+            except Exception as erro:
+                # Abrir o PDF so valida a estrutura: um arquivo que abre pode
+                # falhar no render/convert/save — vira 422 como o erro de
+                # abertura, em vez de 500.
+                logger.warning(
+                    "Falha ao rasterizar PDF de comprovante: %s", type(erro).__name__
+                )
+                raise ValueError("Não foi possível abrir este PDF; anexe outro arquivo")
         finally:
             documento.close()
 
-    if imagem.mode != "RGB":
-        imagem = imagem.convert("RGB")
-
-    buffer = BytesIO()
-    imagem.save(buffer, format="JPEG", quality=90)
     return buffer.getvalue()
 
 
