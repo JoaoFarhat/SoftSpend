@@ -791,7 +791,7 @@ em `DetalheViagemView` ("Importar fatura do cartão", `.sheet`):
   local, para casar com `DiaSoftex` por `isDate(_:inSameDayAs:)`.
 - `Network/FaturaAPI.swift` é o protocolo injetável (como `SyncAPI`);
   `NetworkManager` implementa `lerFatura` (multipart `arquivo`/`senha?`/
-  `ciclo_id`, `uploadSession` de 90 s), `gravarFatura`, `conciliarFatura` e os
+  `ciclo_id`, `uploadSession` com teto de 300 s), `gravarFatura`, `conciliarFatura` e os
   confirm/remover de match. Testes usam `SoftSpendTests/FakeFaturaAPI.swift`.
 - Consentimento (§2.8): `Consentimento.leituraAutomatica` vale para
   comprovante **e fatura** (texto da `ConsentimentoLeituraView` e do Perfil
