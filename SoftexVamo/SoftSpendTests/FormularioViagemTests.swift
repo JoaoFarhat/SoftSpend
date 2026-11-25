@@ -232,6 +232,78 @@ struct FormularioViagemTests {
         #expect(fora.erro == "Escolha datas até 4 anos antes ou depois de hoje")
     }
 
+    // MARK: Edição de viagem antiga (a janela só vale para a data que mudou)
+
+    /// Viagem com ida a 4 anos e 6 meses de hoje (o servidor aceita até 5):
+    /// sem mudar nenhuma data, trocar o destino ou o total salva — antes a
+    /// janela barrava a edição inteira.
+    @Test func edicaoDeViagemAntigaSemMudarDatasSalva() {
+        let hoje = d(20)
+        let idaOriginal = cal.date(byAdding: .month, value: -54, to: hoje)! // 4 anos e 6 meses
+        let voltaOriginal = cal.date(byAdding: .day, value: 7, to: idaOriginal)!
+
+        var f = FormularioViagem(ida: idaOriginal, volta: voltaOriginal, total: 2700,
+                                 destino: "Cuiabá, MT", calendario: cal, hoje: hoje,
+                                 datasOriginais: (ida: idaOriginal, volta: voltaOriginal))
+        #expect(f.erro == nil)
+        f.destino = "Recife, PE"
+        f.editarTotal("3.000")
+        #expect(f.erro == nil)
+
+        // Sem as datas originais (como era antes), a mesma viagem não salva.
+        let semOriginal = FormularioViagem(ida: idaOriginal, volta: voltaOriginal, total: 2700,
+                                           destino: "Cuiabá, MT", calendario: cal, hoje: hoje)
+        #expect(semOriginal.erro == "Escolha datas até 4 anos antes ou depois de hoje")
+    }
+
+    /// A exceção cobre só a data gravada: mudar a volta para fora da janela
+    /// bloqueia com a mesma frase.
+    @Test func edicaoDeViagemAntigaMudarVoltaParaForaDaJanelaBloqueia() {
+        let hoje = d(20)
+        let idaOriginal = cal.date(byAdding: .month, value: -54, to: hoje)!
+        let voltaOriginal = cal.date(byAdding: .day, value: 7, to: idaOriginal)!
+
+        var f = FormularioViagem(ida: idaOriginal, volta: voltaOriginal, total: 60.000,
+                                 destino: "Cuiabá, MT", calendario: cal, hoje: hoje,
+                                 datasOriginais: (ida: idaOriginal, volta: voltaOriginal))
+        f.mudarVolta(cal.date(byAdding: .day, value: 1, to: f.intervaloDatas.upperBound)!)
+        #expect(f.erro == "Escolha datas até 4 anos antes ou depois de hoje")
+    }
+
+    /// Mudar a ida para outra data fora da janela bloqueia do mesmo jeito;
+    /// a volta original, que não mudou, não interfere.
+    @Test func edicaoDeViagemAntigaMudarIdaParaForaDaJanelaBloqueia() {
+        let hoje = d(20)
+        let idaOriginal = cal.date(byAdding: .month, value: -54, to: hoje)!
+        let voltaOriginal = cal.date(byAdding: .day, value: 7, to: idaOriginal)!
+
+        var f = FormularioViagem(ida: idaOriginal, volta: voltaOriginal, total: 2700,
+                                 destino: "Cuiabá, MT", calendario: cal, hoje: hoje,
+                                 datasOriginais: (ida: idaOriginal, volta: voltaOriginal))
+        f.mudarIda(cal.date(byAdding: .year, value: -5, to: hoje)!)
+        #expect(f.erro == "Escolha datas até 4 anos antes ou depois de hoje")
+    }
+
+    /// O `DatePicker` da ida precisa conter a data gravada, mesmo fora da
+    /// janela; na viagem nova, `intervaloIda` é a própria janela.
+    @Test func intervaloIdaContemAIdaOriginalForaDaJanela() {
+        let hoje = d(20)
+        let idaOriginal = cal.date(byAdding: .month, value: -54, to: hoje)!
+        let voltaOriginal = cal.date(byAdding: .day, value: 7, to: idaOriginal)!
+
+        let f = FormularioViagem(ida: idaOriginal, volta: voltaOriginal, total: 2700,
+                                 destino: "Cuiabá, MT", calendario: cal, hoje: hoje,
+                                 datasOriginais: (ida: idaOriginal, volta: voltaOriginal))
+        let diaOriginal = cal.startOfDay(for: idaOriginal)
+        #expect(!f.intervaloDatas.contains(diaOriginal))
+        #expect(f.intervaloIda.contains(diaOriginal))
+        #expect(f.intervaloVolta.contains(diaOriginal))
+        #expect(f.intervaloVolta.lowerBound == diaOriginal) // a volta continua começando na ida
+
+        let novo = formulario()
+        #expect(novo.intervaloIda == novo.intervaloDatas)
+    }
+
     // MARK: Diária mínima (servidor: gt=0)
 
     /// R$ 1 em 200 dias arredonda a R$ 0,01 e salva; em 201 dá 0,00 e o
