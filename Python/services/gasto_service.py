@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -9,6 +11,29 @@ from services.comprovante_cleanup import (
     marcar_comprovante_para_remover,
     marcar_comprovante_para_remover_no_rollback,
 )
+
+# Teto da coluna `ciclos.gasto_total` (Numeric(10, 2)): um gasto que levasse o
+# total da viagem além dele fazia o MySQL recusar o UPDATE do
+# `incrementar_gasto_total` e a rota caía com 500, que o app repete sem fim.
+TOTAL_MAXIMO_VIAGEM = Decimal("99999999.99")
+
+
+def _checar_teto_total_viagem(db: Session, ciclo: models.Ciclo, incremento: Decimal):
+    """422 se `gasto_total + incremento` não couber no Numeric(10, 2) da coluna.
+
+    O ciclo já chega travado (SELECT FOR UPDATE) pelos caminhos que chamam —
+    `travar_dia_do_usuario` e `_travar_gasto` —, então o `gasto_total` relido
+    aqui não pode mudar até o commit. Remover gasto nunca passa por aqui:
+    total menor sempre cabe.
+    """
+    if incremento <= 0:
+        return
+    db.refresh(ciclo, ["gasto_total"])
+    if (ciclo.gasto_total or Decimal("0")) + incremento > TOTAL_MAXIMO_VIAGEM:
+        raise HTTPException(
+            status_code=422, detail="total_da_viagem_acima_do_limite"
+        )
+
 
 def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: str):
     # Trava ciclo → dia: um DELETE do mesmo dia ao mesmo tempo espera este
@@ -22,6 +47,8 @@ def criar_gasto(db: Session, dia_id: int, gasto: GastoRequest, user_id: str):
                 db, existente, user_id
             )
             return existente
+
+    _checar_teto_total_viagem(db, dia.ciclo, gasto.valor)
 
     novo_gasto = models.Gasto(
         client_id=gasto.client_id,
@@ -129,6 +156,10 @@ def atualizar_gasto(db: Session, gasto_id: int, gasto_request: GastoRequest, use
     dia_atual = dias[gasto.dia_id]
     novo_dia_id = gasto_request.dia_id
     diferenca = gasto_request.valor - gasto.valor
+
+    # Mesmo teto do `criar_gasto`: subir o valor (em qualquer dia da viagem,
+    # que é sempre o mesmo ciclo) não pode estourar o `gasto_total`.
+    _checar_teto_total_viagem(db, dia_atual.ciclo, diferenca)
 
     if novo_dia_id is not None and novo_dia_id != dia_atual.id:
         # Conferido e travado em `_travar_gasto` (mesma trava do

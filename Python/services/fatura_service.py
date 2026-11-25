@@ -9,6 +9,7 @@ mesmo arquivo não duplica nada.
 """
 
 import hashlib
+import logging
 from collections import Counter
 from dataclasses import dataclass
 from datetime import date, datetime, time, timezone
@@ -25,7 +26,15 @@ from services.fatura_arquivo_service import (
     VALOR_MAXIMO_COMPRA,
 )
 
+logger = logging.getLogger(__name__)
+
 ORIGEM_FATURA = "FATURA"
+
+# Teto do `credit_card_bills.total_amount` (Numeric(14, 2)): um total maior
+# que isso — PDF mal lido pela IA ou OFX/CSV errado — seria recusado pelo
+# banco e derrubaria a importação inteira com 500. O total é só informativo,
+# então acima do limite a fatura é gravada com `total_amount` vazio.
+TOTAL_MAXIMO_FATURA = Decimal("999999999999.99")
 
 # Na tabela, compras viram DEBIT (o filtro de conciliação só aceita DEBIT/NULL,
 # então estornos e encargos nunca casam com gastos).
@@ -229,6 +238,18 @@ def _cartao_importado(
     return cartao
 
 
+def _total_dentro_do_limite(total: Decimal | None) -> Decimal | None:
+    """Devolve o total se couber na coluna; acima do teto, None."""
+    if total is None:
+        return None
+    if abs(total) > TOTAL_MAXIMO_FATURA:
+        logger.warning(
+            "Total da fatura acima do teto da coluna; gravando sem total"
+        )
+        return None
+    return total
+
+
 def _fatura_importada(
     session: Session, cartao: models.CreditCardAccount, lida: FaturaLida
 ) -> models.CreditCardBill:
@@ -250,7 +271,7 @@ def _fatura_importada(
         session.add(fatura)
     fatura.due_date = vencimento
     fatura.closing_date = _meia_noite(lida.fechamento)
-    fatura.total_amount = lida.total_fatura
+    fatura.total_amount = _total_dentro_do_limite(lida.total_fatura)
     fatura.currency_code = lida.moeda
     session.flush()
     return fatura

@@ -112,4 +112,23 @@ struct ChaveIndisponivelSyncTests {
         #expect(!api.chamadas.contains(.uploadComprovante))
         #expect(quebrado.adicionadas.isEmpty)
     }
+
+    /// Bytes que não abrem com a chave atual: nada sobe, e o gasto fica `.failed`
+    /// com `erroNotaNaoAbre` (a saída é o "Descartar nota", ver
+    /// `DescartarNotaIlegivelTests`), em vez de concluir com a nota presa.
+    @Test func bytesIlegiveisFalhamComMotivoSemUpload() async throws {
+        try await criarGastoSincronizado()
+        let ctx = ModelContext(container)
+        let gasto = try #require(try ctx.fetch(FetchDescriptor<GastosDia>()).first)
+        gasto.comprovanteDataCriptografado = Data([0x01, 0x02, 0x03])
+        gasto.syncStatus = .pending
+        try ctx.save()
+
+        #expect(await sync() == 1)
+
+        #expect(!api.chamadas.contains(.uploadComprovante))
+        let falhou = try lerGasto()
+        #expect(falhou.syncStatus == .failed)
+        #expect(falhou.syncError == SyncActor.erroNotaNaoAbre)
+    }
 }

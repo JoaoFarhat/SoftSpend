@@ -790,16 +790,14 @@ actor SyncActor: ModelActor {
         }
     }
 
-    /// Nota a enviar ou a apagar. Chave indisponível conta como pendente: a nota
-    /// existe, só não abre agora (o `syncComprovantes` marca a falha). Bytes que
-    /// não abrem com a chave atual não têm o que enviar e não seguram o gasto.
+    /// Nota a enviar ou a apagar: qualquer nota guardada segura o gasto, abra ela
+    /// ou não. Chave indisponível sobe quando a chave volta; bytes que não abrem
+    /// com a chave atual viram falha com `erroNotaNaoAbre` no `syncComprovantes`,
+    /// e a tela oferece "Descartar nota". Concluir o gasto aqui deixava a nota
+    /// presa no aparelho sem aviso na lista (a regra do #137, que o #134 desfez).
+    /// Olha só o campo cifrado: decifrar a nota inteira para isso era custoso.
     private func temComprovantePendente(_ gasto: GastosDia) -> Bool {
-        if gasto.comprovanteParaRemover { return true }
-        do {
-            return try gasto.lerComprovante(crypto: crypto) != nil
-        } catch {
-            return true
-        }
+        gasto.comprovanteParaRemover || gasto.comprovanteDataCriptografado != nil
     }
 
     private func syncGastos(agora: Date, userId: String, forcar: Bool = false) async {
