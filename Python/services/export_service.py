@@ -9,7 +9,7 @@ import csv
 import io
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from xml.sax.saxutils import escape, quoteattr
 
@@ -30,6 +30,7 @@ from reportlab.platypus import (
 
 import models
 from services import storage_service
+from services.dia_calendario import data_do_dia
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +82,7 @@ def _moeda(valor: Decimal | None) -> str:
     return f"{'-' if negativo else ''}R$ {'.'.join(grupos)},{centavos}"
 
 
-def _data(valor: datetime | None) -> str:
+def _data(valor: date | None) -> str:
     return valor.strftime("%d/%m/%Y") if valor else "-"
 
 
@@ -106,7 +107,16 @@ def _valor_csv(valor) -> str:
 
 
 def _dias_ordenados(ciclo: models.Ciclo) -> list[models.Dia]:
-    return sorted(ciclo.dias or [], key=lambda d: (d.data is None, d.data))
+    # Ordena pelo dia de calendário (`data_dia`, com o fallback do instante
+    # para linha antiga); o `id` desempata dias com a mesma data.
+    return sorted(
+        ciclo.dias or [],
+        key=lambda d: (
+            data_do_dia(d) is None,
+            data_do_dia(d) or date.min,
+            d.id or 0,
+        ),
+    )
 
 
 def _gastos_do_dia(dia: models.Dia) -> list[models.Gasto]:
@@ -142,7 +152,7 @@ def gerar_csv(ciclo: models.Ciclo) -> bytes:
         saldo = _valor_csv(dia.saldo)
         for gasto in _gastos_do_dia(dia):
             writer.writerow([
-                _data(dia.data),
+                _data(data_do_dia(dia)),
                 saldo,
                 _celula_csv(gasto.titulo),
                 _rotulo_categoria(gasto.categoria),
@@ -278,7 +288,7 @@ def gerar_pdf(
         linha_dia = len(linhas)
         linhas.append([
             Paragraph(
-                f"<b>{_data(dia.data)}</b> &nbsp;·&nbsp; saldo do dia: {_moeda(dia.saldo)}",
+                f"<b>{_data(data_do_dia(dia))}</b> &nbsp;·&nbsp; saldo do dia: {_moeda(dia.saldo)}",
                 estilos["celula"],
             ),
             "", "", "", "", "",
@@ -297,7 +307,7 @@ def gerar_pdf(
 
             linhas.append([
                 Paragraph(str(indice), estilos["celula"]),
-                Paragraph(_data(dia.data), estilos["celula"]),
+                Paragraph(_data(data_do_dia(dia)), estilos["celula"]),
                 Paragraph(escape(gasto.titulo or "-"), estilos["celulaNegrito"]),
                 Paragraph(rotulo, estilos["celula"]),
                 Paragraph(_moeda(gasto.valor), estilos["valor"]),
