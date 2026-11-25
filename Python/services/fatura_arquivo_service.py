@@ -455,7 +455,20 @@ def ler_csv(texto: str) -> FaturaBruta:
 def _motivo_descarte(
     compra: CompraBruta, limite_inferior: date | None, vencimento: date | None
 ) -> str | None:
-    if compra.valor is None or compra.valor <= 0 or compra.valor > VALOR_MAXIMO_COMPRA:
+    # O teto e o None são conferidos antes do arredondamento: quantize de
+    # mais de ~26 dígitos inteiros lança InvalidOperation. Depois de
+    # arredondar (dinheiro não passa de 2 casas: o que segue à prévia e à
+    # soma é o que o servidor grava), um valor como 0,004 vira 0,00 e é
+    # descartado — antes ele passava no "valor > 0" bruto e entrava na
+    # prévia e no banco como R$ 0,00.
+    if (
+        compra.valor is None
+        or not compra.valor.is_finite()
+        or abs(compra.valor) > VALOR_MAXIMO_COMPRA
+    ):
+        return "valor inválido"
+    compra.valor = compra.valor.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if compra.valor <= 0:
         return "valor inválido"
     if not compra.descricao or not compra.descricao.strip():
         return "descrição vazia"
@@ -472,9 +485,11 @@ def montar_fatura_lida(bruta: FaturaBruta) -> FaturaLida:
     """Valida o que veio da IA/OFX/CSV e monta o DTO da prévia.
 
     A IA é tratada como não confiável: lançamento com data fora de
-    [fechamento - 40 dias, vencimento], valor <= 0 ou acima de R$ 100.000,
-    ou descrição vazia é descartado com aviso. `soma_confere` compara
-    compras + encargos - estornos com o total (tolerância R$ 0,05).
+    [fechamento - 40 dias, vencimento], valor que arredonda para <= 0 ou
+    acima de R$ 100.000, ou descrição vazia é descartado com aviso.
+    `soma_confere` compara compras + encargos - estornos com o total
+    (tolerância R$ 0,05); um total acima do máximo possível
+    (VALOR_MAXIMO_COMPRA * MAXIMO_COMPRAS) vira None com aviso.
     """
     avisos = list(bruta.avisos)
     limite_inferior = (
@@ -503,15 +518,20 @@ def montar_fatura_lida(bruta: FaturaBruta) -> FaturaLida:
         )
         validas = validas[:MAXIMO_COMPRAS]
 
-    # Dinheiro não passa de 2 casas: o que vai à prévia e à soma é o que o
-    # servidor grava (o DTO não arredonda sozinho).
-    for compra in validas:
-        compra.valor = compra.valor.quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP
-        )
+    # O total não passa pelo teto de compra a compra: um total com mais de
+    # ~26 dígitos inteiros quebraria o quantize (InvalidOperation). Acima
+    # do máximo que MAXIMO_COMPRAS compras de VALOR_MAXIMO_COMPRA podem
+    # somar, o número é ilegível — vira None com aviso, sem exceção.
+    total_bruto = bruta.total_fatura
+    if total_bruto is not None and (
+        not total_bruto.is_finite()
+        or abs(total_bruto) > VALOR_MAXIMO_COMPRA * MAXIMO_COMPRAS
+    ):
+        avisos.append("Total da fatura ilegível; confira a lista")
+        total_bruto = None
     total = (
-        bruta.total_fatura.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        if bruta.total_fatura is not None
+        total_bruto.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if total_bruto is not None
         else None
     )
 
