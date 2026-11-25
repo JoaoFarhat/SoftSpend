@@ -56,7 +56,7 @@ struct NewCicloView: View {
     init(formulario: FormularioViagem? = nil) {
         let hoje = Calendar.current.startOfDay(for: Date())
         let volta = Calendar.current.date(byAdding: .day, value: 7, to: hoje) ?? hoje
-        _form = State(initialValue: formulario ?? FormularioViagem(ida: hoje, volta: volta))
+        _form = State(initialValue: formulario ?? FormularioViagem(ida: hoje, volta: volta, hoje: hoje))
     }
 
     var body: some View {
@@ -183,9 +183,13 @@ struct NewCicloView: View {
         )
         return Group {
             if qual == .volta {
-                DatePicker("Volta", selection: selecao, in: form.ida..., displayedComponents: .date)
+                // A volta continua começando na ida, agora com o teto da
+                // janela (o `max` cobre viagem antiga com ida fora dela).
+                DatePicker("Volta", selection: selecao,
+                           in: form.ida...max(form.ida, form.intervaloDatas.upperBound),
+                           displayedComponents: .date)
             } else {
-                DatePicker("Ida", selection: selecao, displayedComponents: .date)
+                DatePicker("Ida", selection: selecao, in: form.intervaloDatas, displayedComponents: .date)
             }
         }
         .datePickerStyle(.graphical)

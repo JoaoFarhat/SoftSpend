@@ -37,6 +37,22 @@ struct CiclosViewModelTests {
         #expect(dia.saldo == dec("-150.00"))
     }
 
+    /// 100 / 3 = 33,333…: a diária gravada (e o saldo de cada dia) é a mesma
+    /// que o servidor guarda, arredondada a 2 casas — não a divisão crua.
+    @Test func viagemNovaGravaDiariaArredondada() async throws {
+        let vm = CiclosViewModel()
+        vm.modelContext = ctx
+        let hoje = Calendar.current.startOfDay(for: .now)
+        let fim = Calendar.current.date(byAdding: .day, value: 2, to: hoje)!
+
+        try await vm.createNewCiclo(startDate: hoje, endDate: fim, totalValue: 100, titulo: "Cuiabá, MT")
+
+        let ciclo = try #require(vm.allCiclos.first)
+        #expect(ciclo.diaria == dec("33.33"))
+        #expect(ciclo.dias?.count == 3)
+        #expect(ciclo.dias?.allSatisfy { $0.saldo == dec("33.33") } == true)
+    }
+
     /// 10/11: com a cópia do dia que veio do servidor ainda no aparelho, a lista de datas do gasto
     /// mostrava cada dia duas vezes. Fica um por data: o que já está no servidor.
     @Test func listaDeDatasNaoRepeteODia() {
