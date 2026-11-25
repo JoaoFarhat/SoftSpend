@@ -232,7 +232,12 @@ def conferir_timers(ambiente: dict, sessao, pasta: Path) -> Resultado:
         if estado is None:
             return Resultado(False, nome, "systemctl indisponível")
         if estado != ("enabled", "active"):
-            desligados.append(f"{timer} ({estado[0]}/{estado[1]})")
+            resumo = (
+                f"{estado[0]}/{estado[1]}"
+                if estado[0]
+                else "não instalado"
+            )
+            desligados.append(f"{timer} ({resumo})")
     if desligados:
         return Resultado(
             False,

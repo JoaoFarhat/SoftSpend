@@ -127,6 +127,59 @@ def test_update_ciclo_le_o_ciclo_com_bloqueio(ambiente, monkeypatch):  # noqa: F
     assert chamadas == [True]
 
 
+def test_criar_dia_le_o_ciclo_com_bloqueio(ambiente, monkeypatch):  # noqa: F811
+    """POST /dias: o dia novo nasce com a `diaria` lida sob a trava do ciclo."""
+    from repositories import ciclo_repository
+
+    client = ambiente.como(USER_A)
+    ciclo = client.post("/ciclos", json=_ciclo_payload()).json()
+
+    original = ciclo_repository.get_user_ciclo_by_id
+    chamadas = []
+
+    def espia(*args, **kwargs):
+        chamadas.append(kwargs.get("para_atualizar", False))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(ciclo_repository, "get_user_ciclo_by_id", espia)
+
+    response = client.post(
+        f"/ciclos/{ciclo['id']}/dias",
+        json={"client_id": "dia-1", "data": "2026-11-01T00:00:00Z"},
+    )
+
+    assert response.status_code == 200
+    assert chamadas == [True]
+
+
+def test_criar_dias_lote_le_o_ciclo_com_bloqueio(ambiente, monkeypatch):  # noqa: F811
+    """POST /dias/lote: a mesma trava vale para o lote inteiro."""
+    from repositories import ciclo_repository
+
+    client = ambiente.como(USER_A)
+    ciclo = client.post("/ciclos", json=_ciclo_payload()).json()
+
+    original = ciclo_repository.get_user_ciclo_by_id
+    chamadas = []
+
+    def espia(*args, **kwargs):
+        chamadas.append(kwargs.get("para_atualizar", False))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(ciclo_repository, "get_user_ciclo_by_id", espia)
+
+    response = client.post(
+        f"/ciclos/{ciclo['id']}/dias/lote",
+        json=[
+            {"client_id": "dia-1", "data": "2026-11-01T00:00:00Z"},
+            {"client_id": "dia-2", "data": "2026-11-02T00:00:00Z"},
+        ],
+    )
+
+    assert response.status_code == 200
+    assert chamadas == [True]
+
+
 def test_editar_ciclo_de_outro_usuario_continua_404(ambiente):  # noqa: F811
     ciclo = _viagem_dois_dias_um_gasto(ambiente.como(USER_A))
 
