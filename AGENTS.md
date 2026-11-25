@@ -623,6 +623,7 @@ AWS S3, Cloudflare R2, Supabase Storage e MinIO:
 | `S3_REGION` | `auto` | Use a região real na AWS |
 | `S3_PUBLIC_BASE_URL` | — | Se definida, a URL é `{base}/{key}`; senão gera URL assinada |
 | `S3_URL_EXPIRACAO` | `3600` | Validade da URL assinada, em segundos. Recomenda-se 1h em produção |
+| `S3_MAX_IMAGEM_PIXELS` | `70_000_000` | Teto de pixels (largura × altura) das imagens aceitas, conferido no cabeçalho antes de decodificar; acima dele o upload e o OCR respondem 422 |
 
 Open Finance com Pluggy (`services/open_finance_service.py`):
 

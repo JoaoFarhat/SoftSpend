@@ -5,7 +5,7 @@ from io import BytesIO
 
 import boto3
 from botocore.config import Config
-from PIL import Image
+from PIL import Image, ImageOps
 
 from services.pdfium_seguro import trava_pdfium
 
@@ -17,6 +17,11 @@ URL_EXPIRACAO_SEGUNDOS = int(os.getenv("S3_URL_EXPIRACAO", str(3600)))
 
 MAX_IMAGEM_LARGURA = int(os.getenv("S3_MAX_IMAGEM_LARGURA", "5000"))
 MAX_IMAGEM_ALTURA = int(os.getenv("S3_MAX_IMAGEM_ALTURA", "5000"))
+
+# Teto de pixels (largura x altura) conferido logo apos o Image.open, que so
+# le o cabecalho. Um PNG de 10 MB pode ter ~170 Mpx e ocupar ~700 MB ao
+# decodificar; o padrao fica acima do panorama do iPhone.
+MAX_IMAGEM_PIXELS = int(os.getenv("S3_MAX_IMAGEM_PIXELS", "70000000"))
 
 # Lado maior da miniatura usada no relatorio. Grande o suficiente para uma nota
 # ficar legivel ampliada, pequeno o suficiente para o download em paralelo.
@@ -75,8 +80,15 @@ def _conteudo_para_jpeg(conteudo: bytes) -> tuple[bytes, str]:
         logger.warning("Falha ao abrir imagem de comprovante: %s", type(e).__name__)
         raise ValueError("Não foi possível abrir esta imagem; anexe outra foto")
 
+    if img.width * img.height > MAX_IMAGEM_PIXELS:
+        raise ValueError("Imagem grande demais; tire outra foto ou anexe um PDF")
+
     if not _formato_imagem_permitido(img):
         raise ValueError("Formato de imagem não suportado; use JPEG, PNG ou WEBP")
+
+    # A foto do app chega com a marca de orientacao (EXIF); girar os pixels
+    # antes de medir evita a nota deitada no relatorio e no link.
+    img = ImageOps.exif_transpose(img)
 
     # A camera atual tira fotos maiores que o teto (5712x4284 no iPhone 15/16):
     # reduzir mantendo a proporcao em vez de recusar — antes a foto nunca subia.
