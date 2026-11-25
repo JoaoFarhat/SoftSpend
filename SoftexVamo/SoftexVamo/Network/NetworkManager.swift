@@ -406,7 +406,6 @@ final class NetworkManager: Sendable {
         _ request: URLRequest,
         logout401: Bool = true,
         session: URLSession,
-        timeoutSeconds: UInt64,
         allowRefresh: Bool = true,
         refreshDaSessao: String? = nil,
         mensagem422: @Sendable ([String]?) -> String? = CampoRecusado.mensagem
@@ -419,24 +418,11 @@ final class NetworkManager: Sendable {
         // que ele saiu. No 401, só desloga se o cofre ainda tem esse.
         let sessaoDoPedido = allowRefresh ? nil : (refreshDaSessao ?? tokens.lerRefreshToken())
         let start = Date()
-        let requestTimeout: UInt64 = timeoutSeconds * 1_000_000_000
 
-        let (data, response) = try await withThrowingTaskGroup(of: (Data, URLResponse).self) { group in
-            group.addTask {
-                var req = request
-                req.timeoutInterval = TimeInterval(timeoutSeconds)
-                return try await session.data(for: req)
-            }
-            group.addTask {
-                try await Task.sleep(nanoseconds: requestTimeout)
-                throw URLError(.timedOut)
-            }
-            guard let result = try await group.next() else {
-                throw APIError.unknown
-            }
-            group.cancelAll()
-            return result
-        }
+        // Sem corrida contra Task.sleep: o teto total do pedido já é o
+        // `timeoutIntervalForResource` da sessão (8 s na comum, 300 s na de
+        // upload). O teto extra de 90 s cortava relatórios e envios longos.
+        let (data, response) = try await session.data(for: request)
 
         let duration = Date().timeIntervalSince(start)
         logger.info("execute: completed in \(duration, privacy: .public)s")
@@ -474,7 +460,7 @@ final class NetworkManager: Sendable {
                 // Outra renovação da mesma conta já trocou o token.
                 return try await reenviarUmaVez(
                     request, token: token, refreshDaSessao: refreshAtual,
-                    session: session, timeoutSeconds: timeoutSeconds, mensagem422: mensagem422
+                    session: session, mensagem422: mensagem422
                 )
 
             case .renovar:
@@ -493,7 +479,7 @@ final class NetworkManager: Sendable {
                         try await reenviarUmaVez(
                             request, token: token,
                             refreshDaSessao: refreshRenovado.withLock { $0 },
-                            session: session, timeoutSeconds: timeoutSeconds, mensagem422: mensagem422
+                            session: session, mensagem422: mensagem422
                         )
                     },
                     deslogar: { [self] in
@@ -529,7 +515,6 @@ final class NetworkManager: Sendable {
         token: String,
         refreshDaSessao: String?,
         session: URLSession,
-        timeoutSeconds: UInt64,
         mensagem422: @Sendable ([String]?) -> String?
     ) async throws -> Data {
         var retryRequest = request
@@ -538,7 +523,6 @@ final class NetworkManager: Sendable {
             retryRequest,
             logout401: true,
             session: session,
-            timeoutSeconds: timeoutSeconds,
             allowRefresh: false,
             refreshDaSessao: refreshDaSessao,
             mensagem422: mensagem422
@@ -552,7 +536,7 @@ final class NetworkManager: Sendable {
         allowRefresh: Bool = true,
         mensagem422: @Sendable ([String]?) -> String? = CampoRecusado.mensagem
     ) async throws -> Data {
-        try await execute(request, logout401: logout401, session: session, timeoutSeconds: 8, allowRefresh: allowRefresh, mensagem422: mensagem422)
+        try await execute(request, logout401: logout401, session: session, allowRefresh: allowRefresh, mensagem422: mensagem422)
     }
 
     @discardableResult
@@ -562,7 +546,7 @@ final class NetworkManager: Sendable {
         allowRefresh: Bool = true,
         mensagem422: @Sendable ([String]?) -> String? = CampoRecusado.mensagem
     ) async throws -> Data {
-        try await execute(request, logout401: logout401, session: uploadSession, timeoutSeconds: 90, allowRefresh: allowRefresh, mensagem422: mensagem422)
+        try await execute(request, logout401: logout401, session: uploadSession, allowRefresh: allowRefresh, mensagem422: mensagem422)
     }
 
     nonisolated func fetchCicloResumo(antesDe: Int? = nil, skip: Int = 0, limit: Int = 5) async throws -> [CicloSoftex] {
@@ -679,6 +663,35 @@ final class NetworkManager: Sendable {
         try await execute(makeRequest(url: url, method: "DELETE"))
     }
 
+    /// Monta um `multipart/form-data` com campos de texto opcionais e um
+    /// arquivo. O `filename="..."` vai sem `"`, `\r` e `\n`: um nome escolhido
+    /// pela pessoa (`fatura "nov".pdf`) quebraria o cabeçalho da parte e o
+    /// servidor leria outro nome ou recusaria o arquivo.
+    nonisolated private func makeMultipartUploadRequest(
+        url: URL,
+        campoArquivo: String,
+        arquivo: Data,
+        nomeArquivo: String,
+        mime: String,
+        campos: [(String, String)] = []
+    ) -> URLRequest {
+        let boundary = "Boundary-\(UUID().uuidString)"
+        var body = Data()
+        for (nome, valor) in campos {
+            body.append("--\(boundary)\r\n".data(using: .utf8)!)
+            body.append("Content-Disposition: form-data; name=\"\(nome)\"\r\n\r\n".data(using: .utf8)!)
+            body.append("\(valor)\r\n".data(using: .utf8)!)
+        }
+        let nomeSeguro = nomeArquivo.filter { $0 != "\"" && $0 != "\r" && $0 != "\n" }
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append("Content-Disposition: form-data; name=\"\(campoArquivo)\"; filename=\"\(nomeSeguro)\"\r\n".data(using: .utf8)!)
+        body.append("Content-Type: \(mime)\r\n\r\n".data(using: .utf8)!)
+        body.append(arquivo)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+
+        return makeRequest(url: url, method: "POST", body: body, contentType: "multipart/form-data; boundary=\(boundary)")
+    }
+
     nonisolated private func makeImageUploadRequest(
         url: URL,
         imageData: Data,
@@ -687,17 +700,13 @@ final class NetworkManager: Sendable {
         // O backend valida os magic bytes, então o Content-Type da parte precisa
         // corresponder ao conteúdo real (JPEG ou PDF).
         let nomeArquivo = mime == "application/pdf" ? "comprovante.pdf" : "comprovante.jpg"
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var body = Data()
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"imagem\"; filename=\"\(nomeArquivo)\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: \(mime)\r\n\r\n".data(using: .utf8)!)
-        body.append(imageData)
-        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
-
-        var request = makeRequest(url: url, method: "POST", body: body, contentType: "multipart/form-data; boundary=\(boundary)")
-        request.timeoutInterval = 90
-        return request
+        return makeMultipartUploadRequest(
+            url: url,
+            campoArquivo: "imagem",
+            arquivo: imageData,
+            nomeArquivo: nomeArquivo,
+            mime: mime
+        )
     }
 
     nonisolated func extrairGastoDeImagem(imageData: Data) async throws -> GastoExtraidoResponse {
@@ -845,28 +854,21 @@ final class NetworkManager: Sendable {
         senha: String?,
         cicloId: Int?
     ) -> URLRequest {
-        let boundary = "Boundary-\(UUID().uuidString)"
-        var body = Data()
-        func campo(_ nome: String, _ valor: String) {
-            body.append("--\(boundary)\r\n".data(using: .utf8)!)
-            body.append("Content-Disposition: form-data; name=\"\(nome)\"\r\n\r\n".data(using: .utf8)!)
-            body.append("\(valor)\r\n".data(using: .utf8)!)
-        }
-        if let senha, !senha.isEmpty { campo("senha", senha) }
-        if let cicloId { campo("ciclo_id", String(cicloId)) }
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"arquivo\"; filename=\"\(nomeArquivo)\"\r\n".data(using: .utf8)!)
-        body.append("Content-Type: \(mime)\r\n\r\n".data(using: .utf8)!)
-        body.append(arquivo)
-        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
-
-        var request = makeRequest(url: url, method: "POST", body: body, contentType: "multipart/form-data; boundary=\(boundary)")
-        request.timeoutInterval = 90
-        return request
+        var campos: [(String, String)] = []
+        if let senha, !senha.isEmpty { campos.append(("senha", senha)) }
+        if let cicloId { campos.append(("ciclo_id", String(cicloId))) }
+        return makeMultipartUploadRequest(
+            url: url,
+            campoArquivo: "arquivo",
+            arquivo: arquivo,
+            nomeArquivo: nomeArquivo,
+            mime: mime,
+            campos: campos
+        )
     }
 
     /// Só leitura (o servidor não grava nada). A IA pode demorar: sobe pela
-    /// `uploadSession`, com timeout de 90 s (§2.5).
+    /// `uploadSession`, com teto de 300 s no total (§2.5).
     nonisolated func lerFatura(
         arquivo: Data,
         nomeArquivo: String,
