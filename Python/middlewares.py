@@ -6,7 +6,8 @@ import uuid
 
 from fastapi import Request, HTTPException
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
+from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from limiter import get_real_ip
@@ -134,6 +135,27 @@ def build_error_response(request: Request, status_code: int, message: str):
             "error": message,
             "request_id": get_request_id(request),
         },
+    )
+
+
+MENSAGEM_LIMITE_POR_MINUTO = (
+    "Muitas tentativas em pouco tempo. Espere um minuto e tente de novo."
+)
+
+
+async def rate_limit_exceeded_handler(
+    request: Request, exc: RateLimitExceeded
+) -> Response:
+    """429 do limite por minuto no formato dos outros erros da API.
+
+    O handler padrão do slowapi respondia "Rate limit exceeded: ..." em
+    inglês e sem `request_id`; este sai por `build_error_response` e
+    mantém a injeção dos cabeçalhos de limite (`_inject_headers`), como
+    o handler padrão fazia.
+    """
+    response = build_error_response(request, 429, MENSAGEM_LIMITE_POR_MINUTO)
+    return request.app.state.limiter._inject_headers(
+        response, request.state.view_rate_limit
     )
 
 
