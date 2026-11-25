@@ -10,6 +10,10 @@ nonisolated enum APIError: LocalizedError, Sendable {
     case serverError(message: String, requestId: String, statusCode: Int)
     case badURL
     case authentication
+    /// O token está no Keychain, mas não dá para ler agora (iPhone trancado:
+    /// os tokens são `WhenUnlockedThisDeviceOnly`). O pedido nem sai, e a
+    /// sessão continua: não é logout. Ver `CofreDeTokens`.
+    case chaveIndisponivel
     case unknown
 
     var errorDescription: String? {
@@ -23,6 +27,8 @@ nonisolated enum APIError: LocalizedError, Sendable {
             return "URL invalida"
         case .authentication:
             return "Sessao expirada. Faca login novamente."
+        case .chaveIndisponivel:
+            return "Desbloqueie o iPhone para continuar."
         case .unknown:
             return "Erro inesperado"
         }

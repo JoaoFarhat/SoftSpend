@@ -34,9 +34,12 @@ nonisolated func ehFalhaTransitoriaDeRefresh(_ error: Error) -> Bool {
 /// reuso — quem chamou recebe o próprio 429 (o `SyncActor` o trata como
 /// limite por minuto). Cancelamento (`CancellationError`, `URLError(.cancelled)`)
 /// também não desloga: a pessoa cancelou a operação, o login não ficou
-/// inválido. Qualquer outro erro desloga como antes.
+/// inválido. Refresh token ilegível agora (`.chaveIndisponivel`, iPhone
+/// trancado) também não: o token continua lá e volta quando a tela abrir.
+/// Qualquer outro erro desloga como antes.
 nonisolated func deveDeslogarAposFalhaDeRefresh(_ error: Error) -> Bool {
     if error is CancellationError { return false }
+    if case APIError.chaveIndisponivel = error { return false }
     if let urlError = error as? URLError, urlError.code == .cancelled { return false }
     if case APIError.serverError(_, _, let statusCode) = error {
         return statusCode != 429
@@ -100,24 +103,41 @@ nonisolated func renovandoEReenviando<T: Sendable>(
 }
 
 private actor TokenRefresher {
+    private let cofre: any CofreDeTokens
     private var currentTask: Task<AuthResponse, Error>?
 
-    func refresh() async throws -> AuthResponse {
+    init(cofre: any CofreDeTokens) {
+        self.cofre = cofre
+    }
+
+    /// `renovar` faz o `POST /auth/refresh` com o refresh token lido do cofre.
+    /// Refresh token trancado (iPhone bloqueado) lança `.chaveIndisponivel`
+    /// sem chamar a rede — `deveDeslogarAposFalhaDeRefresh` não desloga por ele.
+    /// Só a falta do token (`.naoExiste`) é `.authentication` (logout).
+    func refresh(
+        renovar: @escaping @Sendable (String) async throws -> AuthResponse
+    ) async throws -> AuthResponse {
         if let task = currentTask {
             return try await task.value
         }
 
         // Lido uma vez só: todas as tentativas reenviam este mesmo token.
-        guard let refreshToken = KeychainManager.getRefreshToken() else {
+        let refreshToken: String
+        switch cofre.lerRefreshToken() {
+        case .achou(let token):
+            refreshToken = token
+        case .naoExiste:
             throw APIError.authentication
+        case .indisponivel:
+            throw APIError.chaveIndisponivel
         }
 
+        let cofre = self.cofre
         let task = Task {
             let response = try await repetindoSeTransitorio(esperas: esperasRefreshTransitorio) {
-                try await NetworkManager.shared.refreshAccessToken(refreshToken: refreshToken)
+                try await renovar(refreshToken)
             }
-            KeychainManager.saveAccessToken(response.accessToken)
-            KeychainManager.saveRefreshToken(response.refreshToken)
+            cofre.gravar(accessToken: response.accessToken, refreshToken: response.refreshToken)
             return response
         }
 
@@ -146,33 +166,61 @@ final class NetworkManager: Sendable {
 
     nonisolated static let shared = NetworkManager()
     nonisolated private let logger = Logger(subsystem: "br.com.softspend", category: "NetworkManager")
-    private let refresher = TokenRefresher()
+    private nonisolated let refresher: TokenRefresher
 
-    private nonisolated let session: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.waitsForConnectivity = false
-        config.timeoutIntervalForRequest = 8
-        config.timeoutIntervalForResource = 8
-        return URLSession(
-            configuration: config,
-            delegate: InsecureSessionDelegate(),
-            delegateQueue: nil
-        )
-    }()
+    /// Onde os tokens são lidos e gravados (Keychain em produção).
+    private nonisolated let cofre: any CofreDeTokens
+
+    /// O que fazer quando a sessão cai de vez (refresh recusado). Em produção,
+    /// `deslogarNoApp`; nos testes, um registro.
+    private nonisolated let aoDeslogar: @Sendable () -> Void
+
+    private nonisolated let session: URLSession
 
     /// Sessão dedicada a uploads de imagem (OCR/comprovantes).
     /// O timeout é maior para não abortar envios de notas fiscais.
-    private nonisolated let uploadSession: URLSession = {
+    private nonisolated let uploadSession: URLSession
+
+    nonisolated static let deslogarNoApp: @Sendable () -> Void = {
+        Task { @MainActor in AuthService.shared.logout(revogandoNoServidor: false) }
+    }
+
+    /// `protocolosDeTeste` entra no `protocolClasses` das duas sessões: os
+    /// testes respondem os pedidos com um `URLProtocol` falso, sem rede.
+    nonisolated init(
+        cofre: any CofreDeTokens = CofreDeTokensKeychain(),
+        protocolosDeTeste: [AnyClass] = [],
+        aoDeslogar: @escaping @Sendable () -> Void = NetworkManager.deslogarNoApp
+    ) {
+        self.cofre = cofre
+        self.aoDeslogar = aoDeslogar
+        self.refresher = TokenRefresher(cofre: cofre)
+        self.session = Self.criarSessao(
+            timeoutPedido: 8, timeoutRecurso: 8, protocolos: protocolosDeTeste
+        )
+        self.uploadSession = Self.criarSessao(
+            timeoutPedido: 90, timeoutRecurso: 300, protocolos: protocolosDeTeste
+        )
+    }
+
+    private nonisolated static func criarSessao(
+        timeoutPedido: TimeInterval,
+        timeoutRecurso: TimeInterval,
+        protocolos: [AnyClass]
+    ) -> URLSession {
         let config = URLSessionConfiguration.default
         config.waitsForConnectivity = false
-        config.timeoutIntervalForRequest = 90
-        config.timeoutIntervalForResource = 300
+        config.timeoutIntervalForRequest = timeoutPedido
+        config.timeoutIntervalForResource = timeoutRecurso
+        if !protocolos.isEmpty {
+            config.protocolClasses = protocolos
+        }
         return URLSession(
             configuration: config,
             delegate: InsecureSessionDelegate(),
             delegateQueue: nil
         )
-    }()
+    }
 
     private nonisolated let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -219,7 +267,7 @@ final class NetworkManager: Sendable {
         body: Data? = nil,
         contentType: String = "application/json",
         includeToken: Bool = true
-    ) -> URLRequest {
+    ) throws -> URLRequest {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.httpBody = body
@@ -228,8 +276,20 @@ final class NetworkManager: Sendable {
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
 
-        if includeToken, let token = KeychainManager.getAccessToken() {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if includeToken {
+            switch cofre.lerAccessToken() {
+            case .achou(let token):
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            case .naoExiste:
+                // Sem login: o pedido sai sem token, o 401 leva ao refresh e,
+                // sem refresh token, ao logout — como sempre foi.
+                break
+            case .indisponivel(let status):
+                // iPhone trancado: mandar sem token daria 401 e logout. O
+                // pedido não sai; a sessão fica e o envio tenta de novo depois.
+                logger.info("makeRequest: token ilegível agora (status \(status, privacy: .public)), pedido não enviado")
+                throw APIError.chaveIndisponivel
+            }
         }
 
         return request
@@ -280,7 +340,9 @@ final class NetworkManager: Sendable {
                 // falha dele não é falha de login e não desloga.
                 return try await renovandoEReenviando(
                     renovar: { [self] in
-                        try await refresher.refresh().accessToken
+                        try await refresher.refresh { [self] refreshToken in
+                            try await refreshAccessToken(refreshToken: refreshToken)
+                        }.accessToken
                     },
                     reenviar: { [self] token in
                         var retryRequest = request
@@ -297,12 +359,10 @@ final class NetworkManager: Sendable {
                             mensagem422: mensagem422
                         )
                     },
-                    deslogar: {
-                        Task { @MainActor in AuthService.shared.logout(revogandoNoServidor: false) }
-                    }
+                    deslogar: aoDeslogar
                 )
             } else {
-                Task { @MainActor in AuthService.shared.logout(revogandoNoServidor: false) }
+                aoDeslogar()
                 throw APIError.authentication
             }
         }
@@ -391,7 +451,7 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos") else {
             throw URLError(.badURL)
         }
-        let req = makeRequest(url: url, method: "POST", body: try encoder.encode(request))
+        let req = try makeRequest(url: url, method: "POST", body: encoder.encode(request))
         let response = try decoder.decode(CicloResponse.self, from: try await execute(req))
         return CicloSoftex(from: response)
     }
@@ -401,7 +461,7 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)") else {
             throw URLError(.badURL)
         }
-        let req = makeRequest(url: url, method: "PUT", body: try encoder.encode(request))
+        let req = try makeRequest(url: url, method: "PUT", body: encoder.encode(request))
         let response = try decoder.decode(CicloResponse.self, from: try await execute(req))
         return CicloSoftex(from: response)
     }
@@ -419,7 +479,7 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/ciclos/\(cicloId)/dias/lote") else {
             throw URLError(.badURL)
         }
-        let request = makeRequest(url: url, method: "POST", body: try encoder.encode(dias))
+        let request = try makeRequest(url: url, method: "POST", body: encoder.encode(dias))
         let response = try decoder.decode([DiaSoftexResponse].self, from: try await execute(request))
         return response.map { DiaSoftex(from: $0) }
     }
@@ -436,7 +496,7 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/dias/\(request.dia_id)/gastos") else {
             throw URLError(.badURL)
         }
-        let req = makeRequest(url: url, method: "POST", body: try encoder.encode(request))
+        let req = try makeRequest(url: url, method: "POST", body: encoder.encode(request))
         let response = try decoder.decode(GastosDiaResponse.self, from: try await execute(req))
         return GastosDia(from: response)
     }
@@ -445,7 +505,7 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/gastos/\(gastoId)") else {
             throw URLError(.badURL)
         }
-        let req = makeRequest(url: url, method: "PUT", body: try encoder.encode(request))
+        let req = try makeRequest(url: url, method: "PUT", body: encoder.encode(request))
         let response = try decoder.decode(GastosDiaResponse.self, from: try await execute(req))
         return GastosDia(from: response)
     }
@@ -462,7 +522,7 @@ final class NetworkManager: Sendable {
         url: URL,
         imageData: Data,
         mime: String = "image/jpeg"
-    ) -> URLRequest {
+    ) throws -> URLRequest {
         // O backend valida os magic bytes, então o Content-Type da parte precisa
         // corresponder ao conteúdo real (JPEG ou PDF).
         let nomeArquivo = mime == "application/pdf" ? "comprovante.pdf" : "comprovante.jpg"
@@ -474,7 +534,7 @@ final class NetworkManager: Sendable {
         body.append(imageData)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
 
-        var request = makeRequest(url: url, method: "POST", body: body, contentType: "multipart/form-data; boundary=\(boundary)")
+        var request = try makeRequest(url: url, method: "POST", body: body, contentType: "multipart/form-data; boundary=\(boundary)")
         request.timeoutInterval = 90
         return request
     }
@@ -484,7 +544,7 @@ final class NetworkManager: Sendable {
             throw URLError(.badURL)
         }
 
-        let request = makeImageUploadRequest(url: url, imageData: imageData)
+        let request = try makeImageUploadRequest(url: url, imageData: imageData)
 
         return try decoder.decode(GastoExtraidoResponse.self, from: try await executeUpload(request))
     }
@@ -498,7 +558,7 @@ final class NetworkManager: Sendable {
             throw URLError(.badURL)
         }
 
-        let request = makeImageUploadRequest(url: url, imageData: imageData, mime: mime)
+        let request = try makeImageUploadRequest(url: url, imageData: imageData, mime: mime)
 
         let response = try decoder.decode(GastosDiaResponse.self, from: try await executeUpload(request))
         return GastosDia(from: response)
@@ -623,7 +683,7 @@ final class NetworkManager: Sendable {
         mime: String,
         senha: String?,
         cicloId: Int?
-    ) -> URLRequest {
+    ) throws -> URLRequest {
         let boundary = "Boundary-\(UUID().uuidString)"
         var body = Data()
         func campo(_ nome: String, _ valor: String) {
@@ -639,7 +699,7 @@ final class NetworkManager: Sendable {
         body.append(arquivo)
         body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
 
-        var request = makeRequest(url: url, method: "POST", body: body, contentType: "multipart/form-data; boundary=\(boundary)")
+        var request = try makeRequest(url: url, method: "POST", body: body, contentType: "multipart/form-data; boundary=\(boundary)")
         request.timeoutInterval = 90
         return request
     }
@@ -656,7 +716,7 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/faturas/ler") else {
             throw URLError(.badURL)
         }
-        let request = makeFaturaUploadRequest(
+        let request = try makeFaturaUploadRequest(
             url: url, arquivo: arquivo, nomeArquivo: nomeArquivo,
             mime: tipo.mime, senha: senha, cicloId: cicloId
         )
@@ -670,7 +730,7 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/faturas") else {
             throw URLError(.badURL)
         }
-        let request = makeRequest(url: url, method: "POST", body: try encoder.encode(lida))
+        let request = try makeRequest(url: url, method: "POST", body: encoder.encode(lida))
         return try decoder.decode(CreditCardBillDetailResponse.self, from: try await executeUpload(request))
     }
 
@@ -718,7 +778,7 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/api/assinatura/transacoes") else {
             throw URLError(.badURL)
         }
-        let request = makeRequest(
+        let request = try makeRequest(
             url: url,
             method: "POST",
             body: try encoder.encode(TransacaoAssinaturaRequest(jws: jws))
@@ -731,7 +791,7 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/login") else {
             throw URLError(.badURL)
         }
-        let request = makeRequest(
+        let request = try makeRequest(
             url: url,
             method: "POST",
             body: try encoder.encode(dados),
@@ -747,7 +807,7 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/register") else {
             throw URLError(.badURL)
         }
-        let request = makeRequest(
+        let request = try makeRequest(
             url: url,
             method: "POST",
             body: try encoder.encode(dados),
@@ -763,7 +823,7 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/refresh") else {
             throw URLError(.badURL)
         }
-        let request = makeRequest(
+        let request = try makeRequest(
             url: url,
             method: "POST",
             body: try encoder.encode(RefreshTokenRequest(refreshToken: refreshToken)),
@@ -776,7 +836,7 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/logout") else {
             throw URLError(.badURL)
         }
-        let request = makeRequest(
+        let request = try makeRequest(
             url: url,
             method: "POST",
             body: try encoder.encode(LogoutRequest(refreshToken: refreshToken)),
