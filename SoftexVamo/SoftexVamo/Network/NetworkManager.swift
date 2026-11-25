@@ -277,7 +277,14 @@ final class NetworkManager: Sendable {
 
         guard 200...299 ~= http.statusCode else {
             let decoded = try? decoder.decode(APIErrorResponse.self, from: data)
-            let message = decoded?.error ?? "Erro no servidor"
+            // O 422 de validação traz `campos` com o que o servidor recusou:
+            // a frase gravada no item diz o que editar em vez do genérico
+            // "Dados de entrada invalidos". Sem `campos` nada muda — o
+            // `total_da_viagem_acima_do_limite` (#166), que não traz a chave,
+            // segue com a frase própria do `errorDescription`.
+            let message = (http.statusCode == 422 ? CampoRecusado.mensagem(campos: decoded?.campos) : nil)
+                ?? decoded?.error
+                ?? "Erro no servidor"
             let requestId = decoded?.request_id ?? "-"
             throw APIError.serverError(message: message, requestId: requestId, statusCode: http.statusCode)
         }
