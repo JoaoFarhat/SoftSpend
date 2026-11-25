@@ -16,7 +16,6 @@ from controllers.auth_controller import router as auth_router
 from controllers.open_finance_controller import router as open_finance_router
 from controllers.fatura_controller import router as fatura_router
 from controllers.assinatura_controller import router as assinatura_router
-from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from limiter import limiter, get_real_ip
@@ -25,6 +24,7 @@ from middlewares import (
     RequestIDMiddleware,
     LoggingMiddleware,
     EnforceHTTPSMiddleware,
+    rate_limit_exceeded_handler,
     setup_exception_handlers,
 )
 from services import ocr_service
@@ -80,7 +80,7 @@ if OPEN_FINANCE_ENABLED:
     app.include_router(open_finance_router)
 
 app.state.limiter = limiter
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 setup_exception_handlers(app)
 
 
