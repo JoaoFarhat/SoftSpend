@@ -87,6 +87,21 @@ hop para o MainActor e bloqueiem a UI. Sem isso, todo `await
 NetworkManager.shared.postCiclo(...)` executado pelo `SyncActor` era
 serializado no MainActor, congelando a UI durante a sincronização.
 
+**`NetworkManager` testável**: o `init(session:uploadSession:tokens:aoDeslogar:)`
+recebe as duas `URLSession`, o `CofreDeTokens` (protocolo `nonisolated` +
+`Sendable` que lê/grava/apaga access e refresh token; o padrão
+`CofreDeTokensKeychain` delega para o `KeychainManager`) e a closure
+`aoDeslogar` (padrão: `AuthService.shared.logout(revogandoNoServidor: false)`
+num `Task` no MainActor). O `TokenRefresher` usa esse cofre e o próprio
+`NetworkManager` (recebido no `refresh(atravesDe:)`, não no `init`, porque o
+refresher nasce junto com o manager). `shared` segue com os padrões de sempre.
+O `execute` está coberto em `SoftSpendTests/NetworkManagerExecuteTests.swift`:
+`URLSession` de `URLProtocol` falso (`URLProtocolDeTeste`, estado estático —
+suíte `.serialized`) + cofre em memória (`CofreEmMemoria`), incluindo o 404
+sem `request_id` que vira `requestId "-"` (o que protege o descarte por 404,
+ver T4 abaixo). O `DELETE /auth/conta` vai pela `uploadSession` (90 s), não
+pelos 8 s comuns — o pedido sai com `timeoutInterval` 90.
+
 ### Componentes
 
 - `CiclosViewModel` — operações de ciclo/dia/gasto com persistência local.
@@ -186,6 +201,31 @@ quando A entrar de novo. O `SyncManager.sync` relê o usuário no começo de cad
 volta do `repeat` (sai do laço sem ninguém logado) e só publica
 `pendentesRestantes` da conta que está logada. Testes em
 `SoftSpendTests/TrocaDeContaSyncTests.swift` (`UsuarioFalso`).
+
+A mesma regra vale **dentro** da chamada, no `NetworkManager`: um pedido de
+uma conta nunca é reenviado com o login de outra nem derruba o login dela.
+
+- O `execute` guarda o token do `Authorization` enviado. No 401, compara com
+  o access token do cofre (`decidirApos401`): igual → renova e reenvia como
+  antes; diferente com o mesmo `sub` no JWT (`subDoJWT` lê só o payload
+  base64url, sem conferir assinatura) → reenvia uma vez com o token atual,
+  sem renovar; outro `sub`, ilegível ou sem token → `APIError.sessaoTrocada`
+  ("Sua conta mudou durante o envio. Tente de novo."), sem renovar, sem
+  reenviar e sem deslogar.
+- O `TokenRefresher` recebe do `execute` o refresh token da sessão (lido
+  junto com o access) e só grava a resposta se o cofre ainda tem esse
+  refresh token; senão lança `.sessaoTrocada` sem gravar. Falha com o cofre
+  trocado também vira `.sessaoTrocada`. Pedido de outra sessão não pega
+  carona na renovação em voo (`.sessaoTrocada`).
+- Grava o refresh token **antes** do access: app fechado entre as duas
+  gravações deixaria o refresh antigo, já trocado, e reenviá-lo depois de
+  1 minuto é reuso (derruba todas as sessões).
+- `deveDeslogarAposFalhaDeRefresh(.sessaoTrocada)` é `false`. Nenhum caminho
+  desloga se o refresh token do cofre não é mais o da sessão que falhou —
+  nem o 401 do reenvio (`refreshDaSessao`; com o cofre trocado, lança
+  `.sessaoTrocada`).
+- Testes em `SoftSpendTests/SessaoTrocadaRedeTests.swift` (JWTs falsos com
+  `sub` "A"/"B", `URLProtocol` e cofre próprios do arquivo).
 
 Cada stage só processa itens cujo pai já tem `backendId`. Itens órfãos aguardam
 na fila (`continue`) para a próxima passada.

@@ -10,6 +10,11 @@ nonisolated enum APIError: LocalizedError, Sendable {
     case serverError(message: String, requestId: String, statusCode: Int)
     case badURL
     case authentication
+    /// O pedido foi enviado com o login de uma conta e, antes da resposta, a
+    /// conta do aparelho mudou (saiu e outra entrou). O pedido não é
+    /// reenviado com o login da outra conta, o token não é renovado e
+    /// ninguém é deslogado (`NetworkManager.execute`, `TokenRefresher`).
+    case sessaoTrocada
     case unknown
 
     var errorDescription: String? {
@@ -20,9 +25,11 @@ nonisolated enum APIError: LocalizedError, Sendable {
             }
             return message
         case .badURL:
-            return "URL invalida"
+            return "URL inválida"
         case .authentication:
-            return "Sessao expirada. Faca login novamente."
+            return "Sessão expirada. Faça login novamente."
+        case .sessaoTrocada:
+            return "Sua conta mudou durante o envio. Tente de novo."
         case .unknown:
             return "Erro inesperado"
         }

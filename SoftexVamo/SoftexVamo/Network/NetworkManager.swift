@@ -37,6 +37,9 @@ nonisolated func ehFalhaTransitoriaDeRefresh(_ error: Error) -> Bool {
 /// inválido. Qualquer outro erro desloga como antes.
 nonisolated func deveDeslogarAposFalhaDeRefresh(_ error: Error) -> Bool {
     if error is CancellationError { return false }
+    // A conta do aparelho mudou durante a renovação: a falha é da sessão
+    // antiga, não da que está logada agora.
+    if case APIError.sessaoTrocada = error { return false }
     if let urlError = error as? URLError, urlError.code == .cancelled { return false }
     if case APIError.serverError(_, _, let statusCode) = error {
         return statusCode != 429
@@ -99,36 +102,158 @@ nonisolated func renovandoEReenviando<T: Sendable>(
     return try await reenviar(token)
 }
 
+/// Onde o `NetworkManager` lê e grava os tokens da sessão. Existe para o
+/// `execute` poder ser testado sem mexer no Keychain: em produção a
+/// implementação é o `CofreDeTokensKeychain` (delega para o
+/// `KeychainManager`); nos testes, um cofre em memória.
+nonisolated protocol CofreDeTokens: Sendable {
+    func lerAccessToken() -> String?
+    func lerRefreshToken() -> String?
+    func gravarAccessToken(_ token: String)
+    func gravarRefreshToken(_ token: String)
+    func apagarTokens()
+}
+
+/// `CofreDeTokens` padrão do app: cada chamada delega para o
+/// `KeychainManager`, que continua lendo/gravando no mesmo lugar de antes.
+nonisolated struct CofreDeTokensKeychain: CofreDeTokens {
+    init() {}
+
+    func lerAccessToken() -> String? { KeychainManager.getAccessToken() }
+    func lerRefreshToken() -> String? { KeychainManager.getRefreshToken() }
+    func gravarAccessToken(_ token: String) { KeychainManager.saveAccessToken(token) }
+    func gravarRefreshToken(_ token: String) { KeychainManager.saveRefreshToken(token) }
+    func apagarTokens() { KeychainManager.deleteAllTokens() }
+}
+
+/// O `sub` (id do usuário) do payload de um JWT. Lê só o meio do token
+/// (base64url) e **não confere a assinatura**: serve apenas para o app saber
+/// se dois tokens são da mesma conta, nunca para autorizar nada. Token
+/// ilegível ou sem `sub` devolve `nil`.
+nonisolated func subDoJWT(_ token: String) -> String? {
+    let partes = token.split(separator: ".", omittingEmptySubsequences: false)
+    guard partes.count == 3 else { return nil }
+    var base64 = partes[1]
+        .replacingOccurrences(of: "-", with: "+")
+        .replacingOccurrences(of: "_", with: "/")
+    let resto = base64.count % 4
+    if resto == 1 { return nil }
+    if resto > 0 {
+        base64 += String(repeating: "=", count: 4 - resto)
+    }
+    guard let dados = Data(base64Encoded: base64),
+          let objeto = (try? JSONSerialization.jsonObject(with: dados)) as? [String: Any],
+          let sub = objeto["sub"] as? String,
+          !sub.isEmpty else {
+        return nil
+    }
+    return sub
+}
+
+/// O que fazer com um `401` de um pedido que podia renovar o token.
+nonisolated enum DecisaoApos401: Equatable, Sendable {
+    /// O cofre ainda tem o token enviado: renovar e reenviar, como sempre.
+    case renovar
+    /// Outra renovação da MESMA conta já trocou o token: reenviar uma vez
+    /// com o token atual, sem renovar de novo.
+    case reenviarCom(String)
+    /// A conta mudou (outro `sub`, token ilegível ou ninguém logado): o
+    /// pedido não sai de novo com o login de outra conta.
+    case sessaoTrocada
+}
+
+/// Compara o token que foi no pedido (`tokenEnviado`, sem o "Bearer ") com o
+/// que está no cofre agora (`tokenAtual`). Sem isso, um pedido de A que
+/// volta 401 depois de A sair e B entrar renovava o login de B e era
+/// reenviado com ele — o `POST /ciclos` de A criava a viagem na conta de B.
+nonisolated func decidirApos401(tokenEnviado: String?, tokenAtual: String?) -> DecisaoApos401 {
+    if tokenEnviado == tokenAtual { return .renovar }
+    guard let tokenEnviado, let tokenAtual,
+          let subEnviado = subDoJWT(tokenEnviado),
+          let subAtual = subDoJWT(tokenAtual),
+          subEnviado == subAtual else {
+        return .sessaoTrocada
+    }
+    return .reenviarCom(tokenAtual)
+}
+
+/// O token de um cabeçalho `Authorization: Bearer <token>`.
+nonisolated func tokenDoCabecalho(_ valor: String?) -> String? {
+    guard let valor, valor.hasPrefix("Bearer ") else { return nil }
+    return String(valor.dropFirst("Bearer ".count))
+}
+
 private actor TokenRefresher {
-    private var currentTask: Task<AuthResponse, Error>?
+    /// A renovação em voo e o refresh token que ela enviou.
+    private var emVoo: (refreshToken: String, task: Task<AuthResponse, Error>)?
+    private let cofre: any CofreDeTokens
 
-    func refresh() async throws -> AuthResponse {
-        if let task = currentTask {
-            return try await task.value
-        }
+    init(cofre: any CofreDeTokens) {
+        self.cofre = cofre
+    }
 
-        // Lido uma vez só: todas as tentativas reenviam este mesmo token.
-        guard let refreshToken = KeychainManager.getRefreshToken() else {
+    /// `manager` é o `NetworkManager` dono do refresher — injetado na chamada
+    /// (e não no `init`) porque o refresher é criado junto com o manager,
+    /// quando ainda não existe `self` para passar. Antes o refresh ia sempre
+    /// pelo `NetworkManager.shared`, o que impedia testar o fluxo.
+    ///
+    /// `refreshToken` é o refresh token da sessão do pedido que levou o 401,
+    /// lido pelo `execute` junto com a comparação do access token (antes o
+    /// refresher lia o cofre por conta própria, depois de um salto de actor,
+    /// e podia renovar a conta que entrou nesse meio-tempo).
+    func refresh(atravesDe manager: NetworkManager, refreshToken: String?) async throws -> AuthResponse {
+        guard let refreshToken else {
             throw APIError.authentication
         }
 
-        let task = Task {
-            let response = try await repetindoSeTransitorio(esperas: esperasRefreshTransitorio) {
-                try await NetworkManager.shared.refreshAccessToken(refreshToken: refreshToken)
+        if let emVoo {
+            // A renovação em voo é de outra sessão: o resultado dela não
+            // serve para este pedido.
+            guard emVoo.refreshToken == refreshToken else {
+                throw APIError.sessaoTrocada
             }
-            KeychainManager.saveAccessToken(response.accessToken)
-            KeychainManager.saveRefreshToken(response.refreshToken)
+            return try await emVoo.task.value
+        }
+
+        let cofre = self.cofre
+        // Todas as tentativas reenviam este mesmo token.
+        let task = Task {
+            let response: AuthResponse
+            do {
+                response = try await repetindoSeTransitorio(esperas: esperasRefreshTransitorio) {
+                    try await manager.refreshAccessToken(refreshToken: refreshToken)
+                }
+            } catch {
+                // A conta mudou enquanto a renovação estava fora: a falha
+                // é da sessão antiga e não pode deslogar a nova.
+                guard cofre.lerRefreshToken() == refreshToken else {
+                    throw APIError.sessaoTrocada
+                }
+                throw error
+            }
+            // Só grava se o cofre ainda é da sessão que renovou: senão os
+            // tokens de A iriam por cima dos de B (ou de volta depois do
+            // logout de A).
+            guard cofre.lerRefreshToken() == refreshToken else {
+                throw APIError.sessaoTrocada
+            }
+            // Refresh antes do access: com o app fechado entre as duas
+            // gravações, o refresh antigo (já trocado no servidor) ficaria
+            // no cofre e, passado 1 minuto, reenviá-lo seria reuso — o
+            // servidor derrubaria todas as sessões do usuário.
+            cofre.gravarRefreshToken(response.refreshToken)
+            cofre.gravarAccessToken(response.accessToken)
             return response
         }
 
-        currentTask = task
+        emVoo = (refreshToken, task)
 
         do {
             let response = try await task.value
-            currentTask = nil
+            emVoo = nil
             return response
         } catch {
-            currentTask = nil
+            emVoo = nil
             throw error
         }
     }
@@ -146,32 +271,80 @@ final class NetworkManager: Sendable {
 
     nonisolated static let shared = NetworkManager()
     nonisolated private let logger = Logger(subsystem: "br.com.softspend", category: "NetworkManager")
-    private let refresher = TokenRefresher()
+    private nonisolated let refresher: TokenRefresher
+    private nonisolated let session: URLSession
 
-    private nonisolated let session: URLSession = {
+    /// Sessão dedicada a uploads de imagem (OCR/comprovantes) e a chamadas
+    /// que podem demorar no servidor (o `DELETE /auth/conta`, por exemplo).
+    /// O timeout é maior para não abortar envios de notas fiscais.
+    private nonisolated let uploadSession: URLSession
+
+    /// Onde os tokens da sessão são lidos e gravados (Keychain no app,
+    /// cofre em memória nos testes).
+    private nonisolated let tokens: any CofreDeTokens
+
+    /// O que rodar quando a sessão morre de vez — no app, o logout sem
+    /// revogar no servidor; nos testes, uma closure que só conta a chamada.
+    private nonisolated let aoDeslogar: @Sendable () -> Void
+
+    /// Configuração das duas sessões do app: sem `waitsForConnectivity` e
+    /// com o `InsecureSessionDelegate` (que só confia no certificado do
+    /// `.local` em DEBUG). Nos testes as sessões são substituídas por uma
+    /// `URLSession` de `URLProtocol` falso.
+    nonisolated static func sessaoPadrao(
+        timeoutRequisicao: TimeInterval,
+        timeoutRecurso: TimeInterval
+    ) -> URLSession {
         let config = URLSessionConfiguration.default
         config.waitsForConnectivity = false
-        config.timeoutIntervalForRequest = 8
-        config.timeoutIntervalForResource = 8
+        config.timeoutIntervalForRequest = timeoutRequisicao
+        config.timeoutIntervalForResource = timeoutRecurso
         return URLSession(
             configuration: config,
             delegate: InsecureSessionDelegate(),
             delegateQueue: nil
         )
+    }
+
+    nonisolated init(
+        session: URLSession = NetworkManager.sessaoPadrao(timeoutRequisicao: 8, timeoutRecurso: 8),
+        uploadSession: URLSession = NetworkManager.sessaoPadrao(timeoutRequisicao: 90, timeoutRecurso: 300),
+        tokens: any CofreDeTokens = CofreDeTokensKeychain(),
+        aoDeslogar: @escaping @Sendable () -> Void = {
+            Task { @MainActor in AuthService.shared.logout(revogandoNoServidor: false) }
+        }
+    ) {
+        self.session = session
+        self.uploadSession = uploadSession
+        self.tokens = tokens
+        self.aoDeslogar = aoDeslogar
+        self.refresher = TokenRefresher(cofre: tokens)
+    }
+
+    /// Formatadores de data criados uma vez só: antes um
+    /// `ISO8601DateFormatter`/`DateFormatter` novo era montado para CADA data
+    /// decodificada — uma lista de 100 dias com gastos criava centenas.
+    /// Compartilhar é seguro: `ISO8601DateFormatter` é thread-safe e
+    /// `DateFormatter` é thread-safe (iOS 7+/macOS 10.9+, 64 bits) desde que
+    /// a configuração não mude depois de criado — e aqui nunca muda.
+    nonisolated private static let isoComFracao: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
     }()
 
-    /// Sessão dedicada a uploads de imagem (OCR/comprovantes).
-    /// O timeout é maior para não abortar envios de notas fiscais.
-    private nonisolated let uploadSession: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.waitsForConnectivity = false
-        config.timeoutIntervalForRequest = 90
-        config.timeoutIntervalForResource = 300
-        return URLSession(
-            configuration: config,
-            delegate: InsecureSessionDelegate(),
-            delegateQueue: nil
-        )
+    nonisolated private static let isoSemFracao: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    nonisolated private static let utcSemFuso: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return f
     }()
 
     private nonisolated let decoder: JSONDecoder = {
@@ -180,22 +353,15 @@ final class NetworkManager: Sendable {
             let container = try decoder.singleValueContainer()
             let value = try container.decode(String.self)
 
-            let isoFormatter = ISO8601DateFormatter()
-            isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = isoFormatter.date(from: value) {
+            if let date = NetworkManager.isoComFracao.date(from: value) {
                 return date
             }
 
-            isoFormatter.formatOptions = [.withInternetDateTime]
-            if let date = isoFormatter.date(from: value) {
+            if let date = NetworkManager.isoSemFracao.date(from: value) {
                 return date
             }
 
-            let utcFormatter = DateFormatter()
-            utcFormatter.locale = Locale(identifier: "en_US_POSIX")
-            utcFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-            utcFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-            if let date = utcFormatter.date(from: value) {
+            if let date = NetworkManager.utcSemFuso.date(from: value) {
                 return date
             }
 
@@ -228,7 +394,7 @@ final class NetworkManager: Sendable {
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
 
-        if includeToken, let token = KeychainManager.getAccessToken() {
+        if includeToken, let token = tokens.lerAccessToken() {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
@@ -242,9 +408,16 @@ final class NetworkManager: Sendable {
         session: URLSession,
         timeoutSeconds: UInt64,
         allowRefresh: Bool = true,
+        refreshDaSessao: String? = nil,
         mensagem422: @Sendable ([String]?) -> String? = CampoRecusado.mensagem
     ) async throws -> Data {
         logger.info("execute: \(request.httpMethod ?? "?", privacy: .private) \(request.url?.absoluteString ?? "?", privacy: .private)")
+        // O `Authorization` que vai neste pedido: no 401, decide se o cofre
+        // ainda é da mesma sessão (`decidirApos401`).
+        let tokenEnviado = tokenDoCabecalho(request.value(forHTTPHeaderField: "Authorization"))
+        // Pedido que não renova (o reenvio): o refresh token da sessão com
+        // que ele saiu. No 401, só desloga se o cofre ainda tem esse.
+        let sessaoDoPedido = allowRefresh ? nil : (refreshDaSessao ?? tokens.lerRefreshToken())
         let start = Date()
         let requestTimeout: UInt64 = timeoutSeconds * 1_000_000_000
 
@@ -275,35 +448,60 @@ final class NetworkManager: Sendable {
         logger.info("execute: status \(http.statusCode, privacy: .public) for \(request.url?.absoluteString ?? "?", privacy: .private)")
 
         if deveRenovarToken(statusCode: http.statusCode, logout401: logout401) {
-            if allowRefresh {
+            guard allowRefresh else {
+                // 401 do reenvio: a sessão que falhou é a do pedido. Se o
+                // cofre já tem outra (a conta mudou no meio), não desloga
+                // quem está logado agora.
+                guard tokens.lerRefreshToken() == sessaoDoPedido else {
+                    throw APIError.sessaoTrocada
+                }
+                aoDeslogar()
+                throw APIError.authentication
+            }
+
+            // Lidos juntos, sem `await` no meio: o refresh token entregue ao
+            // refresher é da mesma sessão do access token comparado.
+            let tokenAtual = tokens.lerAccessToken()
+            let refreshAtual = tokens.lerRefreshToken()
+
+            switch decidirApos401(tokenEnviado: tokenEnviado, tokenAtual: tokenAtual) {
+            case .sessaoTrocada:
+                // Sem renovar, sem reenviar e sem deslogar: o pedido era de
+                // outra conta.
+                throw APIError.sessaoTrocada
+
+            case .reenviarCom(let token):
+                // Outra renovação da mesma conta já trocou o token.
+                return try await reenviarUmaVez(
+                    request, token: token, refreshDaSessao: refreshAtual,
+                    session: session, timeoutSeconds: timeoutSeconds, mensagem422: mensagem422
+                )
+
+            case .renovar:
+                // O refresh token que a renovação devolveu: é a sessão do
+                // reenvio (o 401 dele só desloga se o cofre ainda a tem).
+                let refreshRenovado = OSAllocatedUnfairLock<String?>(initialState: nil)
                 // O reenvio com o token novo roda fora do catch do refresh:
                 // falha dele não é falha de login e não desloga.
                 return try await renovandoEReenviando(
                     renovar: { [self] in
-                        try await refresher.refresh().accessToken
+                        let par = try await refresher.refresh(atravesDe: self, refreshToken: refreshAtual)
+                        refreshRenovado.withLock { $0 = par.refreshToken }
+                        return par.accessToken
                     },
                     reenviar: { [self] token in
-                        var retryRequest = request
-                        retryRequest.setValue(
-                            "Bearer \(token)",
-                            forHTTPHeaderField: "Authorization"
-                        )
-                        return try await execute(
-                            retryRequest,
-                            logout401: true,
-                            session: session,
-                            timeoutSeconds: timeoutSeconds,
-                            allowRefresh: false,
-                            mensagem422: mensagem422
+                        try await reenviarUmaVez(
+                            request, token: token,
+                            refreshDaSessao: refreshRenovado.withLock { $0 },
+                            session: session, timeoutSeconds: timeoutSeconds, mensagem422: mensagem422
                         )
                     },
-                    deslogar: {
-                        Task { @MainActor in AuthService.shared.logout(revogandoNoServidor: false) }
+                    deslogar: { [self] in
+                        // A conta mudou entre a falha e aqui: não desloga a nova.
+                        guard tokens.lerRefreshToken() == refreshAtual else { return }
+                        aoDeslogar()
                     }
                 )
-            } else {
-                Task { @MainActor in AuthService.shared.logout(revogandoNoServidor: false) }
-                throw APIError.authentication
             }
         }
 
@@ -322,6 +520,29 @@ final class NetworkManager: Sendable {
         }
 
         return data
+    }
+
+    /// Reenvia `request` uma vez com `token`, sem nova renovação. O 401 dele
+    /// desloga só se o cofre ainda tem `refreshDaSessao`.
+    nonisolated private func reenviarUmaVez(
+        _ request: URLRequest,
+        token: String,
+        refreshDaSessao: String?,
+        session: URLSession,
+        timeoutSeconds: UInt64,
+        mensagem422: @Sendable ([String]?) -> String?
+    ) async throws -> Data {
+        var retryRequest = request
+        retryRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        return try await execute(
+            retryRequest,
+            logout401: true,
+            session: session,
+            timeoutSeconds: timeoutSeconds,
+            allowRefresh: false,
+            refreshDaSessao: refreshDaSessao,
+            mensagem422: mensagem422
+        )
     }
 
     @discardableResult
@@ -789,7 +1010,12 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/conta") else {
             throw URLError(.badURL)
         }
-        try await execute(makeRequest(url: url, method: "DELETE"))
+        // Apagar a conta demora no servidor (apaga viagens, dias, gastos e
+        // comprovantes em cascata): vai pela sessão de 90 s. Com os 8 s de
+        // antes o app estourava com o servidor ainda apagando, mostrava erro
+        // e a limpeza local (`apagarDadosLocais`, exigência da Apple) não
+        // rodava.
+        try await executeUpload(makeRequest(url: url, method: "DELETE"))
     }
 }
 
