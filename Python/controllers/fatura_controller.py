@@ -13,7 +13,7 @@ from dtos.open_finance import (
     ExpenseTransactionMatchResponse,
 )
 from limiter import limiter
-from repositories import open_finance_repository
+from repositories import ciclo_repository, open_finance_repository
 from services import (
     fatura_arquivo_service,
     fatura_ia_service,
@@ -51,6 +51,20 @@ async def ler_fatura(
     """
     dia_contado = None
     try:
+        if ciclo_id is not None:
+            # A viagem é conferida antes de ler o arquivo e chamar a IA:
+            # um ciclo apagado em outro aparelho (ou de outro usuário)
+            # termina em 404 sem gastar a leitura diária nem a chamada ao
+            # Gemini. O `marcar_previa` repete a checagem ao marcar a prévia.
+            ciclo = await run_in_threadpool(
+                ciclo_repository.get_user_ciclo_by_id,
+                db,
+                ciclo_id,
+                user_id,
+                carregar_viagem=False,
+            )
+            if ciclo is None:
+                raise HTTPException(status_code=404, detail="Ciclo não encontrado")
         tipo, conteudo = await fatura_arquivo_service.ler_upload(arquivo)
 
         if tipo == "pdf":
