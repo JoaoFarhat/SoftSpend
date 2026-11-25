@@ -312,16 +312,20 @@ class ClienteApple:
     """`AppStoreServerAPIClient` de um ambiente (só `Get All Subscription Statuses`)."""
 
     def __init__(self, ambiente: str):
+        self.ambiente = ambiente
+        self._verificador = obter_verificador(ambiente)
+        self._cliente = self._novo_cliente()
+
+    def _novo_cliente(self):
+        """`AppStoreServerAPIClient` do ambiente. Os testes substituem."""
         bundle_id = _obrigatoria("APPLE_BUNDLE_ID")
         issuer_id = _obrigatoria("APPLE_ISSUER_ID")
         key_id = _obrigatoria("APPLE_KEY_ID")
         chave = _chave_privada()
         from appstoreserverlibrary.api_client import AppStoreServerAPIClient
 
-        self.ambiente = ambiente
-        self._verificador = obter_verificador(ambiente)
-        self._cliente = AppStoreServerAPIClient(
-            chave, key_id, issuer_id, bundle_id, _ambiente_biblioteca(ambiente)
+        return AppStoreServerAPIClient(
+            chave, key_id, issuer_id, bundle_id, _ambiente_biblioteca(self.ambiente)
         )
 
     def status(self, original_transaction_id: str) -> EstadoApple | None:
@@ -338,13 +342,18 @@ class ClienteApple:
         except Exception as exc:  # rede, timeout
             raise AppleIndisponivel(type(exc).__name__) from None
 
-        escolhido = None
-        for grupo in getattr(resposta, "data", None) or []:
-            for item in getattr(grupo, "lastTransactions", None) or []:
-                if escolhido is None or str(getattr(item, "originalTransactionId", "")) == str(
-                    original_transaction_id
-                ):
-                    escolhido = item
+        # Só a compra pedida: num grupo com outra (Compartilhamento Familiar),
+        # o primeiro item seria o estado de outra assinatura na linha do usuário.
+        pedido = str(original_transaction_id)
+        escolhido = next(
+            (
+                item
+                for grupo in getattr(resposta, "data", None) or []
+                for item in getattr(grupo, "lastTransactions", None) or []
+                if str(getattr(item, "originalTransactionId", "")) == pedido
+            ),
+            None,
+        )
         if escolhido is None or not getattr(escolhido, "signedTransactionInfo", None):
             return None
         transacao = self._verificador.verificar_transacao(escolhido.signedTransactionInfo)
