@@ -4,11 +4,13 @@
 banco e sem relógio, coberta por teste de tabela. A AS2 (JWS, webhook e App
 Store Server API) só atualiza os campos da linha; quem decide é esta função.
 
-`BILLING_ENFORCEMENT` é lido a cada chamada (padrão `off`): com `off`, todo
-mundo tem acesso e nada bloqueia.
+`BILLING_ENFORCEMENT` é lido do ambiente do processo (padrão `off`): na EC2
+o systemd só lê o `.env` ao iniciar, então mudar exige `sudo systemctl
+restart softspend`. Com `off`, todo mundo tem acesso e nada bloqueia.
 
-`ACESSO_LIBERADO_USUARIOS` (ids de `users.id` separados por vírgula, lida a
-cada chamada, padrão vazia) libera o acesso de contas específicas — a conta
+`ACESSO_LIBERADO_USUARIOS` (ids de `users.id` separados por vírgula, lida do
+ambiente do processo como `BILLING_ENFORCEMENT`, padrão vazia) libera o
+acesso de contas específicas — a conta
 de demonstração da revisão da Apple (`scripts/criar_conta_demo.py`). O id
 liberado não muda `calcular_acesso` nem grava nada na tabela `assinaturas`:
 o `status` do `GET /api/assinatura` continua o real, só `tem_acesso` sobe.
@@ -90,15 +92,18 @@ def calcular_acesso(assinatura, agora: datetime) -> tuple[str, bool]:
 
 
 def cobranca_ligada() -> bool:
-    """`BILLING_ENFORCEMENT=on` liga o bloqueio. Lido a cada requisição."""
+    """`BILLING_ENFORCEMENT=on` liga o bloqueio. Lido do ambiente do
+    processo; na EC2 o systemd só lê o `.env` ao iniciar, então mudar exige
+    `sudo systemctl restart softspend`."""
     return os.getenv("BILLING_ENFORCEMENT", "off").strip().lower() == "on"
 
 
 def usuarios_liberados() -> frozenset:
     """Ids com acesso liberado por `ACESSO_LIBERADO_USUARIOS` (conta demo).
 
-    Lida a cada chamada: dá para liberar ou tirar um id sem restart. Sem
-    diferenciação de maiúsculas, para um UUID colado em outra forma funcionar.
+    Lida do ambiente do processo; na EC2 o systemd só lê o `.env` ao iniciar,
+    então mudar exige `sudo systemctl restart softspend`. Sem diferenciação
+    de maiúsculas, para um UUID colado em outra forma funcionar.
     """
     bruto = os.getenv("ACESSO_LIBERADO_USUARIOS", "")
     return frozenset(

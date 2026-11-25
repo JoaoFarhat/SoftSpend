@@ -221,6 +221,37 @@ def _estado_timer(nome: str) -> tuple[str, str] | None:
     return (estados[0], estados[1])
 
 
+def _inicio_servico() -> int | str | None:
+    """Horário Unix em que o `softspend.service` iniciou pela última vez.
+
+    `None` se não há `systemctl`; "desconhecido" em outro erro de
+    `subprocess` ou saída ilegível; `""` se o serviço está parado (saída
+    vazia). Com `--timestamp=unix` o valor vem como `@1732530000`.
+    """
+    try:
+        saida = subprocess.run(
+            [
+                "systemctl", "show", "softspend",
+                "--property=ActiveEnterTimestamp",
+                "--value", "--timestamp=unix",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except FileNotFoundError:
+        return None
+    except (OSError, subprocess.TimeoutExpired):
+        return "desconhecido"
+    texto = saida.stdout.strip()
+    if not texto:
+        return ""
+    try:
+        return int(texto.lstrip("@"))
+    except ValueError:
+        return "desconhecido"
+
+
 def conferir_timers(ambiente: dict, sessao, pasta: Path) -> Resultado:
     """Os timers diários (conciliação das assinaturas e backup) ficam
     desligados quando o `setup.sh` rodou antes das `APPLE_*`/`backup.env`;
@@ -247,6 +278,35 @@ def conferir_timers(ambiente: dict, sessao, pasta: Path) -> Resultado:
     return Resultado(True, nome, "assinaturas e backup enabled/active")
 
 
+def conferir_reinicio(ambiente: dict, sessao, pasta: Path) -> Resultado:
+    """O `softspend.service` lê o `.env` só ao iniciar (`EnvironmentFile`),
+    mas este script lê o `.env` direto do arquivo: quem edita as `APPLE_*`
+    ou `ACESSO_LIBERADO_USUARIOS` e esquece o restart veria tudo OK com a
+    API rodando os valores antigos."""
+    nome = "reinício do serviço"
+    inicio = _inicio_servico()
+    if inicio is None:
+        return Resultado(False, nome, "systemctl indisponível")
+    if inicio == "":
+        return Resultado(False, nome, "serviço softspend parado")
+    if not isinstance(inicio, int):
+        return Resultado(False, nome, "início do serviço desconhecido")
+    try:
+        mudanca_env = (pasta / ".env").stat().st_mtime
+    except OSError:
+        return Resultado(False, nome, ".env não encontrado")
+    if mudanca_env > inicio:
+        return Resultado(
+            False,
+            nome,
+            "o .env mudou depois que a API iniciou — "
+            "rodar sudo systemctl restart softspend",
+        )
+    return Resultado(
+        True, nome, "API iniciada depois da última mudança do .env"
+    )
+
+
 CHECAGENS = (
     conferir_banco,
     conferir_migracoes,
@@ -256,6 +316,7 @@ CHECAGENS = (
     conferir_certificados,
     conferir_liberacao,
     conferir_timers,
+    conferir_reinicio,
 )
 
 
