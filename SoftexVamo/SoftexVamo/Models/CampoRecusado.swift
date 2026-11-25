@@ -47,4 +47,36 @@ nonisolated enum CampoRecusado {
             : nomes.dropLast().joined(separator: ", ") + " e " + nomes.last!
         return "O servidor não aceitou \(lista). Edite ou apague este item."
     }
+
+    /// Frase do 422 no login e no cadastro: diz o que corrigir, sem falar
+    /// de "item" — nessa tela ainda não existe nada gravado. `email` e
+    /// `username` viram a mesma frase (o `username` enviado sai do e-mail,
+    /// ver `usernameDoEmail`). Vários campos juntam as frases com um
+    /// espaço, sem repetir, na ordem recebida; campo desconhecido é
+    /// ignorado — sozinho, com `nil` ou vazio, sai o genérico "Confira os
+    /// dados digitados.". Sempre devolve frase: o formulário precisa
+    /// mostrar algo.
+    static func mensagemConta(campos: [String]?) -> String {
+        let generica = "Confira os dados digitados."
+        guard let campos else { return generica }
+        var vistos = Set<String>()
+        var frases: [String] = []
+        for campo in campos {
+            let frase: String
+            switch campo {
+            case "email", "username":
+                frase = "Confira o e-mail digitado."
+            case "nome":
+                frase = "O nome pode ter até 100 caracteres."
+            case "senha":
+                frase = "A senha precisa ter de 8 a 128 caracteres, com letra maiúscula, minúscula, número e caractere especial."
+            default:
+                continue
+            }
+            if vistos.insert(frase).inserted {
+                frases.append(frase)
+            }
+        }
+        return frases.isEmpty ? generica : frases.joined(separator: " ")
+    }
 }
