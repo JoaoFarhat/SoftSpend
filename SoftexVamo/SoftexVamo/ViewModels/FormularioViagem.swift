@@ -48,13 +48,27 @@ struct FormularioViagem: Equatable {
     let calendario: Calendar
     /// Referência da janela de datas; injetável para os testes.
     let hoje: Date
+    /// Datas gravadas do ciclo em edição (`nil` = viagem nova). A janela de
+    /// anos só barra a data que mudou em relação à original: a viagem antiga
+    /// que o servidor já aceitou (hoje ± 5 anos) continua editável.
+    let idaOriginal: Date?
+    let voltaOriginal: Date?
 
-    init(ida: Date, volta: Date, total: Decimal? = nil, destino: String = "", calendario: Calendar = .current, hoje: Date = Date()) {
+    /// Computada (e não tupla armazenada) porque tupla não conforma a
+    /// `Equatable` e a síntese do `struct` pararia de funcionar.
+    var datasOriginais: (ida: Date, volta: Date)? {
+        guard let idaOriginal, let voltaOriginal else { return nil }
+        return (ida: idaOriginal, volta: voltaOriginal)
+    }
+
+    init(ida: Date, volta: Date, total: Decimal? = nil, destino: String = "", calendario: Calendar = .current, hoje: Date = Date(), datasOriginais: (ida: Date, volta: Date)? = nil) {
         self.ida = ida
         self.volta = volta
         self.destino = destino
         self.calendario = calendario
         self.hoje = hoje
+        self.idaOriginal = datasOriginais?.ida
+        self.voltaOriginal = datasOriginais?.volta
         if let total, total > 0 {
             totalTexto = formatarValorSemSimbolo(total)
             diariaTexto = dias > 0 ? formatarValorSemSimbolo(ValoresViagem.diaria(total: total, dias: dias)) : ""
@@ -80,6 +94,27 @@ struct FormularioViagem: Equatable {
         return ini...fim
     }
 
+    /// Intervalo do `DatePicker` da ida: a janela normal, estendida até a ida
+    /// original quando ela já está fora — sem isso a edição de uma viagem
+    /// antiga abriria o calendário com a seleção fora do `in:`.
+    var intervaloIda: ClosedRange<Date> {
+        let janela = intervaloDatas
+        guard let original = datasOriginais?.ida else { return janela }
+        let dia = calendario.startOfDay(for: original)
+        return min(janela.lowerBound, dia)...max(janela.upperBound, dia)
+    }
+
+    /// Intervalo do `DatePicker` da volta: começa na ida e, como na ida,
+    /// estende o teto até a volta original quando ela está fora da janela.
+    var intervaloVolta: ClosedRange<Date> {
+        let ini = calendario.startOfDay(for: ida)
+        var fim = max(ini, intervaloDatas.upperBound)
+        if let original = datasOriginais?.volta {
+            fim = max(fim, calendario.startOfDay(for: original))
+        }
+        return ini...fim
+    }
+
     /// Primeiro problema que impede salvar; `nil` quando pode salvar.
     var erro: String? {
         if destino.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Informe o destino" }
@@ -93,9 +128,12 @@ struct FormularioViagem: Equatable {
         }
         // Ano digitado errado (2062): o servidor recusa dia fora de hoje ± 5
         // anos e a viagem, com dias e gastos, ficava tentando subir para sempre.
+        // Na edição a janela só barra a data que mudou: a viagem antiga que o
+        // servidor já aceitou continua podendo ser renomeada ou ter o total
+        // alterado (a checagem sem essa exceção barrava até isso, #169).
         let janela = intervaloDatas
-        if !janela.contains(calendario.startOfDay(for: ida))
-            || !janela.contains(calendario.startOfDay(for: volta)) {
+        if dataMudadaForaDaJanela(ida, original: datasOriginais?.ida, janela: janela)
+            || dataMudadaForaDaJanela(volta, original: datasOriginais?.volta, janela: janela) {
             return "Escolha datas até \(Self.anosPermitidos) anos antes ou depois de hoje"
         }
         // Diária que arredonda a 0,00 o servidor recusa (`gt=0`): R$ 1 para
@@ -143,6 +181,14 @@ struct FormularioViagem: Equatable {
     }
 
     // MARK: Privado
+
+    /// `true` se a data está fora da janela e mudou em relação à gravada
+    /// (comparando o início do dia no `calendario`); sem data original
+    /// (viagem nova), toda data conta como mudada.
+    private func dataMudadaForaDaJanela(_ data: Date, original: Date?, janela: ClosedRange<Date>) -> Bool {
+        if let original, calendario.isDate(data, inSameDayAs: original) { return false }
+        return !janela.contains(calendario.startOfDay(for: data))
+    }
 
     /// O campo que a pessoa digitou por último fica e o outro acompanha as datas: quem tem diária
     /// fixa (R$ 450/dia) quer ver o total subir ao ganhar um dia, não a diária cair (decisão do João, 09/11).
