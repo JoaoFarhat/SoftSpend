@@ -52,7 +52,9 @@ final class SyncManager: ObservableObject {
     }
 
     func configure(container: ModelContainer) {
-        syncActor = SyncActor(modelContainer: container)
+        // `usuarioLogado`: o actor confere o dono do sync antes e depois de
+        // cada chamada à API (troca de conta no meio do envio).
+        syncActor = SyncActor(modelContainer: container, usuarioAtual: SyncActor.usuarioLogado)
         if estaConectado() {
             Task {
                 await sync(forcar: true)
@@ -140,12 +142,32 @@ final class SyncManager: ObservableObject {
         defer { isSyncing = false }
         var forcarAtual = forcar
         repeat {
+            // O usuário pode ter trocado durante a volta anterior (logout, ou
+            // logout + login de outra conta): cada volta usa quem está logado
+            // agora, e sem ninguém logado o laço para — os pedidos guardados
+            // de uma conta não rodam com o login de outra.
+            let userId = AuthService.shared.currentUser?.id ?? ""
+            guard !userId.isEmpty else {
+                logger.info("SyncManager: ninguém logado, voltas restantes canceladas")
+                pedidoPendente = false
+                forcarPendente = false
+                break
+            }
             pedidoPendente = false
             lastSyncError = nil
             let agora = Date()
             logger.info("SyncManager: iniciando sync para userId \(userId, privacy: .private), forcar=\(forcarAtual, privacy: .public)")
             let restantes = await syncActor.sync(agora: agora, userId: userId, forcar: forcarAtual)
-            pendentesRestantes = restantes
+            // A contagem é das alterações de `userId`: com outra conta já
+            // logada, a faixa não pode mostrar as pendências da anterior.
+            let logadoAgora = AuthService.shared.currentUser?.id ?? ""
+            if logadoAgora == userId {
+                pendentesRestantes = restantes
+            } else if logadoAgora.isEmpty {
+                pendentesRestantes = 0
+            } else {
+                pendentesRestantes = await syncActor.pendentes(userId: logadoAgora)
+            }
             logger.info("SyncManager: sync finalizado, pendentes restantes=\(restantes, privacy: .public)")
             // O forcar da próxima rodada vem dos pedidos guardados durante
             // ESTA rodada (OU) — não pode ser lido no início da volta, senão
@@ -196,16 +218,62 @@ actor SyncActor: ModelActor {
     /// toma mais 429. Vale mesmo com `forcar: true`.
     private var limiteAtingidoNesteSync = false
 
+    /// O usuário logado deixou de ser o dono deste `sync` (logout, ou logout +
+    /// login de outra conta no meio do envio). O `NetworkManager` lê o token
+    /// a cada pedido: seguir mandaria os dados de uma conta com o login da
+    /// outra. Como o `limiteAtingidoNesteSync`, as etapas param de chamar a API
+    /// e as passadas restantes não rodam; nada é marcado.
+    private var usuarioTrocouNesteSync = false
+
+    /// `userId` do `sync` em andamento, comparado com `usuarioAtual`.
+    private var userIdDoSync = ""
+
+    /// Consulta o usuário logado agora. `nil` (padrão do `init`, usado pelos
+    /// testes que não tratam de troca de conta) não confere nada; o
+    /// `SyncManager.configure` passa `SyncActor.usuarioLogado`.
+    private let usuarioAtual: (@Sendable () async -> String?)?
+
+    /// O usuário logado no `AuthService`, lido no MainActor.
+    nonisolated static let usuarioLogado: @Sendable () async -> String? = {
+        await MainActor.run { AuthService.shared.currentUser?.id }
+    }
+
     init(
         modelContainer: ModelContainer,
         api: any SyncAPI = NetworkManager.shared,
-        crypto: ComprovanteCrypto = .shared
+        crypto: ComprovanteCrypto = .shared,
+        usuarioAtual: (@Sendable () async -> String?)? = nil
     ) {
         let modelContext = ModelContext(modelContainer)
         self.modelExecutor = DefaultSerialModelExecutor(modelContext: modelContext)
         self.modelContainer = modelContainer
         self.api = api
         self.crypto = crypto
+        self.usuarioAtual = usuarioAtual
+    }
+
+    /// Alguma trava deste `sync` (429 por minuto ou troca de conta) mandou
+    /// parar de chamar a API.
+    private var deveParar: Bool {
+        limiteAtingidoNesteSync || usuarioTrocouNesteSync
+    }
+
+    /// O usuário logado ainda é o dono deste `sync`? Chamado **antes** de cada
+    /// chamada à API e **depois** de cada `await` dela (com sucesso ou erro):
+    /// `false` liga `usuarioTrocouNesteSync` e quem chamou sai sem marcar nada —
+    /// nem falha, nem sucesso, nem descarte. O item fica como estava e sobe
+    /// quando o dono entrar de novo. O pedido que já estava em voo na troca
+    /// não tem volta: ele saiu com o token que o `NetworkManager` leu.
+    private func mesmoUsuario() async -> Bool {
+        if usuarioTrocouNesteSync { return false }
+        guard let usuarioAtual else { return true }
+        let atual = await usuarioAtual()
+        // Outra checagem pode ter ligado a trava durante o `await` acima.
+        if usuarioTrocouNesteSync { return false }
+        if atual == userIdDoSync { return true }
+        usuarioTrocouNesteSync = true
+        logger.warning("SyncActor: o usuário logado mudou durante o envio, sync interrompido sem marcar nada")
+        return false
     }
 
     private let logger = Logger(subsystem: "br.com.softspend", category: "SyncActor")
@@ -325,6 +393,8 @@ actor SyncActor: ModelActor {
         descartarAntigosApagadosEmOutroAparelho(userId: userId)
         aguardandoAssinaturaNesteSync = []
         limiteAtingidoNesteSync = false
+        usuarioTrocouNesteSync = false
+        userIdDoSync = userId
 
         var pendentesDepois = 0
         for passada in 0..<maxPassadas {
@@ -340,6 +410,10 @@ actor SyncActor: ModelActor {
             logger.info("SyncActor: passada \(passada, privacy: .public), pendentesDepois=\(pendentesDepois, privacy: .public), mudouDuranteEnvio=\(self.mudouDuranteEnvio, privacy: .public)")
             if limiteAtingidoNesteSync {
                 logger.info("SyncActor: limite por minuto (429) atingido, passadas restantes canceladas")
+                break
+            }
+            if usuarioTrocouNesteSync {
+                logger.info("SyncActor: usuário trocou, passadas restantes canceladas")
                 break
             }
             if mudouDuranteEnvio { continue }
@@ -411,12 +485,14 @@ actor SyncActor: ModelActor {
             periodo: ciclo.periodo
         )
 
+        guard await mesmoUsuario() else { return }
         do {
             // A edição do ciclo não envia mais a lista de dias: o PUT /dias/lote
             // apagava no servidor (com os gastos) os dias que este aparelho não
             // conhecia. Dia novo sobe pelo syncDias e dia removido pelo
             // syncDeletions. Ver T3 em docs/revisao-sync-offline-ios.md.
             let cicloEditado = try await api.putCiclo(cicloId: backendId, request: updateRequest)
+            guard await mesmoUsuario() else { return }
             logger.info("sincronizarEdicaoCiclo: PUT ok backendId=\(backendId, privacy: .public)")
 
             gravarCiclo(cicloUUID, etapa: "sincronizarEdicaoCiclo") { atual, _ in
@@ -435,6 +511,7 @@ actor SyncActor: ModelActor {
                 atual.receberGastoTotalDoServidor(cicloEditado.gasto_total)
             }
         } catch {
+            guard await mesmoUsuario() else { return }
             if atingiuLimitePorMinuto(error) {
                 gravarCiclo(cicloUUID, etapa: "sincronizarEdicaoCiclo-limite") { atual, _ in
                     marcarAguardandoLimite(atual, agora: agora)
@@ -594,7 +671,7 @@ actor SyncActor: ModelActor {
     }
 
     private func syncCiclos(agora: Date, userId: String, forcar: Bool = false) async {
-        guard !limiteAtingidoNesteSync else { return }
+        guard !deveParar else { return }
         let contexto = contextoNovo()
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<CicloSoftex>(
@@ -606,7 +683,7 @@ actor SyncActor: ModelActor {
         logger.info("syncCiclos: \(ciclos.count, privacy: .public) ciclo(s) pendente(s) para userId \(userId, privacy: .private)")
 
         for ciclo in ciclos {
-            if limiteAtingidoNesteSync { break }
+            if deveParar { break }
             if ciclo.backendId != nil {
                 await sincronizarEdicaoCiclo(ciclo, contexto: contexto, agora: agora, forcar: forcar)
                 continue
@@ -623,8 +700,10 @@ actor SyncActor: ModelActor {
                 diaria: ciclo.diaria,
                 periodo: ciclo.periodo
             )
+            guard await mesmoUsuario() else { break }
             do {
                 let response = try await api.postCiclo(request: createRequest)
+                guard await mesmoUsuario() else { break }
                 gravarCiclo(cicloUUID, etapa: "syncCiclos") { atual, _ in
                     atual.backendId = response.backendId
                     // O `gasto_total` local fica: a viagem acabou de nascer no
@@ -640,6 +719,7 @@ actor SyncActor: ModelActor {
                 }
                 logger.info("syncCiclos: POST ok, backendId=\(response.backendId.map(String.init) ?? "nil", privacy: .public)")
             } catch {
+                guard await mesmoUsuario() else { break }
                 if isAssinaturaNecessaria(error) {
                     // §3.4 de docs/assinatura.md: sem assinatura, a viagem nova
                     // espera na fila (sem backoff, sem descarte, sem logout).
@@ -675,7 +755,7 @@ actor SyncActor: ModelActor {
     nonisolated static let maxDiasPorLote = 60
 
     private func syncDias(agora: Date, userId: String, forcar: Bool = false) async {
-        guard !limiteAtingidoNesteSync else { return }
+        guard !deveParar else { return }
         let contexto = contextoNovo()
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<DiaSoftex>(
@@ -701,10 +781,10 @@ actor SyncActor: ModelActor {
         logger.info("syncDias: \(dias.count, privacy: .public) dia(s) pendente(s) em \(ordemCiclos.count, privacy: .public) viagem(ns)")
 
         for cicloId in ordemCiclos {
-            if limiteAtingidoNesteSync { break }
+            if deveParar { break }
             let lote = porCiclo[cicloId] ?? []
             for inicio in stride(from: 0, to: lote.count, by: Self.maxDiasPorLote) {
-                if limiteAtingidoNesteSync { break }
+                if deveParar { break }
                 let parte = Array(lote[inicio..<min(inicio + Self.maxDiasPorLote, lote.count)])
                 await enviarDiasEmLote(parte, cicloId: cicloId, agora: agora)
             }
@@ -726,8 +806,10 @@ actor SyncActor: ModelActor {
             Envio(uuid: $0.id, clientId: $0.clientId, foto: FotoDia($0), saldoEnviado: $0.saldo)
         }
         let pedidos = dias.map { DiaLoteRequest(clientId: $0.clientId, data: $0.data) }
+        guard await mesmoUsuario() else { return }
         do {
             let resposta = try await api.postDiasLote(cicloId: cicloId, dias: pedidos)
+            guard await mesmoUsuario() else { return }
             var porClientId: [String: DiaSoftex] = [:]
             for remoto in resposta { porClientId[remoto.clientId] = remoto }
             for envio in envios {
@@ -754,6 +836,7 @@ actor SyncActor: ModelActor {
                 }
             }
         } catch {
+            guard await mesmoUsuario() else { return }
             if atingiuLimitePorMinuto(error) {
                 for envio in envios {
                     gravarDia(envio.uuid, etapa: "syncDias-limite") { atual in
@@ -801,7 +884,7 @@ actor SyncActor: ModelActor {
     }
 
     private func syncGastos(agora: Date, userId: String, forcar: Bool = false) async {
-        guard !limiteAtingidoNesteSync else { return }
+        guard !deveParar else { return }
         let contexto = contextoNovo()
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<GastosDia>(
@@ -818,13 +901,14 @@ actor SyncActor: ModelActor {
         }
 
         for gasto in gastos {
-            if limiteAtingidoNesteSync { break }
+            if deveParar { break }
             guard let diaIdReal = gasto.dia?.backendId else {
                 continue
             }
 
             let gastoUUID = gasto.id
             let foto = FotoGasto(gasto)
+            guard await mesmoUsuario() else { break }
             do {
                 let response: GastosDia
                 if let backendId = gasto.backendId {
@@ -848,6 +932,7 @@ actor SyncActor: ModelActor {
                         throw URLError(.cannotParseResponse)
                     }
                 }
+                guard await mesmoUsuario() else { break }
                 gravarGasto(gastoUUID, etapa: "syncGastos") { atual in
                     // Sempre grava o backendId, mesmo se mudou: senão o POST se repetiria.
                     if let novoId = response.backendId { atual.backendId = novoId }
@@ -856,6 +941,7 @@ actor SyncActor: ModelActor {
                     concluirGasto(atual, mudou: FotoGasto(atual) != foto)
                 }
             } catch {
+                guard await mesmoUsuario() else { break }
                 if atingiuLimitePorMinuto(error) {
                     gravarGasto(gastoUUID, etapa: "syncGastos-limite") { atual in
                         marcarAguardandoLimite(atual, agora: agora)
@@ -878,7 +964,7 @@ actor SyncActor: ModelActor {
     }
 
     private func syncComprovantes(agora: Date, userId: String, forcar: Bool = false) async {
-        guard !limiteAtingidoNesteSync else { return }
+        guard !deveParar else { return }
         let contexto = contextoNovo()
         let synced = SyncStatus.synced.rawValue
         let descriptor = FetchDescriptor<GastosDia>(
@@ -901,13 +987,14 @@ actor SyncActor: ModelActor {
         }
 
         for gasto in gastos {
-            if limiteAtingidoNesteSync { break }
+            if deveParar { break }
             guard let backendId = gasto.backendId else { continue }
             let gastoUUID = gasto.id
             let foto = FotoGasto(gasto)
             do {
                 try await sincronizarComprovante(gasto, backendId: backendId, foto: foto, agora: agora)
             } catch {
+                guard await mesmoUsuario() else { break }
                 if atingiuLimitePorMinuto(error) {
                     gravarGasto(gastoUUID, etapa: "syncComprovantes-limite") { atual in
                         marcarAguardandoLimite(atual, agora: agora)
@@ -951,11 +1038,14 @@ actor SyncActor: ModelActor {
         }
 
         if let comprovanteData = dadosNota {
+            guard await mesmoUsuario() else { return }
             let atualizado = try await api.uploadComprovante(
                 gastoId: backendId,
                 imageData: comprovanteData,
                 mime: gasto.comprovanteMime
             )
+            // Erro do upload: o `catch` do `syncComprovantes` confere o usuário.
+            guard await mesmoUsuario() else { return }
             gravarGasto(gastoUUID, etapa: "syncComprovantes-upload") { atual in
                 let mudou = FotoGasto(atual) != foto
                 atual.comprovanteUrl = atualizado.comprovanteUrl
@@ -967,6 +1057,7 @@ actor SyncActor: ModelActor {
                 concluirGasto(atual, mudou: mudou)
             }
         } else if gasto.comprovanteParaRemover {
+            guard await mesmoUsuario() else { return }
             do {
                 _ = try await api.deleteComprovante(gastoId: backendId)
             } catch {
@@ -974,6 +1065,9 @@ actor SyncActor: ModelActor {
                     throw error
                 }
             }
+            // O 404 engolido acima também passa por aqui: com outra conta
+            // logada, ele não prova que a nota sumiu.
+            guard await mesmoUsuario() else { return }
             gravarGasto(gastoUUID, etapa: "syncComprovantes-delete") { atual in
                 let mudou = FotoGasto(atual) != foto
                 // O servidor ficou sem comprovante. Um anexo novo feito durante o
@@ -1069,6 +1163,9 @@ actor SyncActor: ModelActor {
         case aguardandoLimite
         /// Não deu para saber agora: fica para a próxima, com backoff.
         case falhou(String)
+        /// Outra conta entrou antes ou durante o POST (`mesmoUsuario`): a
+        /// resposta não vale, e o item fica como estava, sem nenhuma marca.
+        case usuarioTrocou
     }
 
     /// 404 da API: o pai não existe no servidor. `403 subscription_required`: com o
@@ -1093,11 +1190,14 @@ actor SyncActor: ModelActor {
             categoria: gasto.categoria,
             dia_id: diaId
         )
+        guard await mesmoUsuario() else { return .usuarioTrocou }
         do {
             let resposta = try await api.postGasto(request: request)
+            guard await mesmoUsuario() else { return .usuarioTrocou }
             guard let id = resposta.backendId else { return .falhou("Resposta do servidor sem id do gasto") }
             return .encontrado(id)
         } catch {
+            guard await mesmoUsuario() else { return .usuarioTrocou }
             return classificar(error)
         }
     }
@@ -1105,12 +1205,15 @@ actor SyncActor: ModelActor {
     private func recuperarBackendId(_ dia: DiaSoftex) async -> Recuperacao {
         guard dia.podeTerSidoCriadoNoServidor, let cicloId = dia.ciclo?.backendId else { return .naoExiste }
         let request = DiaLoteRequest(clientId: dia.clientId, data: dia.data)
+        guard await mesmoUsuario() else { return .usuarioTrocou }
         do {
             // POST /dias/lote deduplica por client_id (o PUT, por data, não é usado aqui).
             let resposta = try await api.postDiasLote(cicloId: cicloId, dias: [request])
+            guard await mesmoUsuario() else { return .usuarioTrocou }
             guard let id = resposta.first?.backendId else { return .falhou("Resposta do servidor sem id do dia") }
             return .encontrado(id)
         } catch {
+            guard await mesmoUsuario() else { return .usuarioTrocou }
             return classificar(error)
         }
     }
@@ -1124,17 +1227,20 @@ actor SyncActor: ModelActor {
             diaria: ciclo.diaria,
             periodo: ciclo.periodo
         )
+        guard await mesmoUsuario() else { return .usuarioTrocou }
         do {
             let resposta = try await api.postCiclo(request: request)
+            guard await mesmoUsuario() else { return .usuarioTrocou }
             guard let id = resposta.backendId else { return .falhou("Resposta do servidor sem id da viagem") }
             return .encontrado(id)
         } catch {
+            guard await mesmoUsuario() else { return .usuarioTrocou }
             return classificar(error)
         }
     }
 
     private func syncDeletions(agora: Date, userId: String, forcar: Bool = false) async {
-        guard !limiteAtingidoNesteSync else { return }
+        guard !deveParar else { return }
         let modelContext = contextoNovo()
         let synced = SyncStatus.synced.rawValue
 
@@ -1149,7 +1255,7 @@ actor SyncActor: ModelActor {
         logger.info("syncDeletions: \(gastos.count, privacy: .public) gasto(s) para deletar")
 
         for gasto in gastos {
-            if limiteAtingidoNesteSync { break }
+            if deveParar { break }
             let backendId: Int
             if let id = gasto.backendId {
                 backendId = id
@@ -1170,12 +1276,17 @@ actor SyncActor: ModelActor {
                     marcarFalha(gasto)
                     gasto.syncError = erro
                     continue
+                case .usuarioTrocou:
+                    // `deveParar` ligado: a volta seguinte sai do laço.
+                    continue
                 }
             }
 
+            guard await mesmoUsuario() else { break }
             do {
                 try await api.deleteGasto(gastoId: backendId)
             } catch {
+                guard await mesmoUsuario() else { break }
                 if atingiuLimitePorMinuto(error) {
                     marcarAguardandoLimite(gasto, agora: agora)
                     continue
@@ -1186,6 +1297,7 @@ actor SyncActor: ModelActor {
                     continue
                 }
             }
+            guard await mesmoUsuario() else { break }
             marcarSucesso(gasto)
         }
 
@@ -1199,7 +1311,7 @@ actor SyncActor: ModelActor {
         logger.info("syncDeletions: \(dias.count, privacy: .public) dia(s) para deletar")
 
         for dia in dias {
-            if limiteAtingidoNesteSync { break }
+            if deveParar { break }
             let backendId: Int
             if let id = dia.backendId {
                 backendId = id
@@ -1219,12 +1331,16 @@ actor SyncActor: ModelActor {
                     marcarFalha(dia)
                     dia.syncError = erro
                     continue
+                case .usuarioTrocou:
+                    continue
                 }
             }
 
+            guard await mesmoUsuario() else { break }
             do {
                 try await api.deleteDia(diaId: backendId)
             } catch {
+                guard await mesmoUsuario() else { break }
                 if atingiuLimitePorMinuto(error) {
                     marcarAguardandoLimite(dia, agora: agora)
                     continue
@@ -1235,6 +1351,7 @@ actor SyncActor: ModelActor {
                     continue
                 }
             }
+            guard await mesmoUsuario() else { break }
             marcarSucesso(dia)
         }
 
@@ -1247,7 +1364,7 @@ actor SyncActor: ModelActor {
         logger.info("syncDeletions: \(ciclos.count, privacy: .public) ciclo(s) para deletar")
 
         for ciclo in ciclos {
-            if limiteAtingidoNesteSync { break }
+            if deveParar { break }
             let backendId: Int
             if let id = ciclo.backendId {
                 backendId = id
@@ -1267,12 +1384,16 @@ actor SyncActor: ModelActor {
                     marcarFalha(ciclo)
                     ciclo.syncError = erro
                     continue
+                case .usuarioTrocou:
+                    continue
                 }
             }
 
+            guard await mesmoUsuario() else { break }
             do {
                 try await api.deleteCiclo(cicloId: backendId)
             } catch {
+                guard await mesmoUsuario() else { break }
                 if atingiuLimitePorMinuto(error) {
                     marcarAguardandoLimite(ciclo, agora: agora)
                     continue
@@ -1283,6 +1404,7 @@ actor SyncActor: ModelActor {
                     continue
                 }
             }
+            guard await mesmoUsuario() else { break }
             marcarSucesso(ciclo)
         }
 

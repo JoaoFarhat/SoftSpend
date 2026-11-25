@@ -167,6 +167,26 @@ antes de sair — a faixa "N alterações aguardando envio" do `MainView` aparec
 expõe o `contarPendentes` que o `sync` já usa. Testes em
 `SoftSpendTests/SyncManagerPedidoTests.swift`.
 
+**Troca de conta no meio do envio**: o `NetworkManager` lê o token a cada
+pedido, então um `sync` de A que seguisse depois de A sair e B entrar mandaria
+os dados de A com o login de B (viagem de A criada na conta de B; 404 de B
+descartando gasto de A). O `SyncActor` recebe no
+`init(modelContainer:api:crypto:usuarioAtual:)` a consulta do usuário logado;
+o `SyncManager.configure` passa `SyncActor.usuarioLogado`
+(`AuthService.shared.currentUser?.id` no MainActor). O padrão `nil` não
+confere nada (é o que os testes antigos usam). `mesmoUsuario()` roda
+**antes** de cada chamada à `api` (todas as etapas, `recuperarBackendId`,
+upload/DELETE de comprovante) e **depois** de cada `await` dela, com sucesso ou
+erro: se o usuário não é mais o `userId` do `sync`, liga
+`usuarioTrocouNesteSync` (zerado no começo do `sync`). Daí em diante nenhuma etapa
+chama a API (`deveParar`, junto com o `limiteAtingidoNesteSync`), as passadas
+restantes não rodam e a resposta em voo é ignorada — nada é marcado (sem
+`marcarFalha`, sem sucesso, sem descarte). O item fica como estava e sobe
+quando A entrar de novo. O `SyncManager.sync` relê o usuário no começo de cada
+volta do `repeat` (sai do laço sem ninguém logado) e só publica
+`pendentesRestantes` da conta que está logada. Testes em
+`SoftSpendTests/TrocaDeContaSyncTests.swift` (`UsuarioFalso`).
+
 Cada stage só processa itens cujo pai já tem `backendId`. Itens órfãos aguardam
 na fila (`continue`) para a próxima passada.
 
