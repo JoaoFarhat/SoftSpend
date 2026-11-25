@@ -37,6 +37,27 @@ final class AuthService: ObservableObject {
         try ApagarDadosLocais.apagar(userId: userId, contexto: BancoLocal.container.mainContext)
     }
 
+    /// Mensagem de erro dos formulários de entrada (login e cadastro).
+    /// `APIError` devolve a frase que o servidor mandou (como sempre foi);
+    /// `URLError` de falta de rede vira "sem conexão" — antes o login dizia
+    /// "Email ou senha invalidos" até sem internet, e a pessoa podia trocar
+    /// a senha à toa; qualquer outro erro recebe a frase genérica.
+    nonisolated static func mensagemDeErroDeEntrada(_ erro: Error) -> String {
+        if let apiError = erro as? APIError {
+            return apiError.localizedDescription
+        }
+        if let urlError = erro as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .timedOut,
+                 .cannotFindHost, .cannotConnectToHost, .dataNotAllowed:
+                return "Sem conexão com o servidor. Confira a internet e tente de novo."
+            default:
+                break
+            }
+        }
+        return "Não foi possível entrar agora. Tente de novo."
+    }
+
     private let userKey = "user_data"
 
     init() {
@@ -64,9 +85,8 @@ final class AuthService: ObservableObject {
             let authResponse = try await NetworkManager.shared.login(dados: dados)
             await saveUser(authResponse)
         } catch {
-            let message = (error as? APIError)?.localizedDescription ?? "Email ou senha invalidos"
             // Só no formulário (LoginView mostra `errorMessage`): sem alerta em dobro.
-            errorMessage = message
+            errorMessage = Self.mensagemDeErroDeEntrada(error)
         }
 
         isLoading = false
@@ -81,9 +101,8 @@ final class AuthService: ObservableObject {
             let authResponse = try await NetworkManager.shared.register(dados: dados)
             await saveUser(authResponse)
         } catch {
-            let message = (error as? APIError)?.localizedDescription ?? error.localizedDescription
             // Só no formulário (RegisterView mostra `errorMessage`): sem alerta em dobro.
-            errorMessage = message
+            errorMessage = Self.mensagemDeErroDeEntrada(error)
         }
 
         isLoading = false
