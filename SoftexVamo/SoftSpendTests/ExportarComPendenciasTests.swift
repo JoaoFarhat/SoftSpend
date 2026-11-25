@@ -150,12 +150,11 @@ struct ExportarComPendenciasTests {
         }
         vm.exportarRemoto = { _, _, _ in rede += 1; return Data([1]) }
 
-        let inicio = Date.now
         let resultado = try await vm.exportarCiclo(formato: .pdf)
 
-        // Folga larga: o simulador do CI é lento com os testes em paralelo;
-        // o que importa é não ter esperado os 60 s do sync.
-        #expect(Date.now.timeIntervalSince(inicio) < 30)
+        // Sem medir o relógio: com os testes em paralelo, o simulador do CI
+        // chegou a levar mais de 30 s só para voltar à MainActor (PR #164).
+        // `!syncTerminou` já prova que a exportação não esperou os 60 s.
         #expect(resultado == .pendencias(1))
         #expect(!syncTerminou)
         #expect(rede == 0)
