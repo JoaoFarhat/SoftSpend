@@ -21,7 +21,7 @@ import pytest
 from PIL import Image
 
 import models
-from services import ocr_service, storage_service
+from services import limite_ia, ocr_service, storage_service
 
 from test_core_api import (
     USER_A,
@@ -84,6 +84,22 @@ def _original(falso: _S3Falso) -> bytes:
     return falso.objetos[key]
 
 
+def _thumb(falso: _S3Falso) -> bytes:
+    """A miniatura gravada (`...-thumb.jpg`): e ela que vai no PDF do relatorio."""
+    key = next(
+        k for k in falso.objetos if k.endswith(storage_service.SUFIXO_THUMB)
+    )
+    return falso.objetos[key]
+
+
+def _post_extrair(client, conteudo: bytes, content_type: str = "image/png"):
+    nome = "nota.pdf" if content_type == "application/pdf" else "nota.png"
+    return client.post(
+        "/gastos/extrair",
+        files={"imagem": (nome, conteudo, content_type)},
+    )
+
+
 def test_foto_com_exif_sobe_na_orientacao_certa(ambiente, monkeypatch):
     """JPEG 400x200 com EXIF orientation 6: o original gravado fica 200x400."""
     falso = _s3_falso(monkeypatch)
@@ -107,6 +123,64 @@ def test_foto_sem_exif_mantem_dimensoes(ambiente, monkeypatch):
 
     assert resposta.status_code == 200
     assert _dimensoes(_original(falso)) == (400, 200)
+
+
+def test_miniatura_sobe_na_orientacao_certa(ambiente, monkeypatch):
+    """JPEG 400x200 com EXIF 6: a miniatura (a que vai no PDF) fica 200x400."""
+    falso = _s3_falso(monkeypatch)
+    client = ambiente.como(USER_A)
+    _, _, gasto = _criar_ciclo_dia_gasto(client)
+
+    resposta = _post_comprovante(
+        client, gasto["id"], _jpeg(400, 200, orientacao=6), "image/jpeg"
+    )
+
+    assert resposta.status_code == 200
+    assert _dimensoes(_thumb(falso)) == (200, 400)
+
+
+def test_foto_grande_gira_antes_de_reduzir(ambiente, monkeypatch):
+    """JPEG 6000x3000 com EXIF 6: o giro vem antes do teto de 5000 px.
+
+    Reduzir antes de girar deixaria a foto deitada (3000x5000 em vez de
+    2500x5000 em pe). A miniatura acompanha: 700x1400 (`THUMB_LADO_MAIOR`).
+    """
+    falso = _s3_falso(monkeypatch)
+    client = ambiente.como(USER_A)
+    _, _, gasto = _criar_ciclo_dia_gasto(client)
+
+    resposta = _post_comprovante(
+        client, gasto["id"], _jpeg(6000, 3000, orientacao=6), "image/jpeg"
+    )
+
+    assert resposta.status_code == 200
+    assert _dimensoes(_original(falso)) == (2500, 5000)
+    assert _dimensoes(_thumb(falso)) == (700, 1400)
+
+
+def test_extrair_com_imagem_acima_do_teto_devolve_a_vaga_do_dia(
+    ambiente, monkeypatch
+):
+    """PNG 200x200 com o teto de pixels em 10.000 e cota diaria de 1: as
+    duas respostas sao 422 (nunca 429) — a vaga do `contar` volta no
+    `except SemRespostaGemini` da rota."""
+    monkeypatch.delenv("BILLING_ENFORCEMENT", raising=False)
+    monkeypatch.setenv("IA_LIMITE_DIARIO_COMPROVANTE", "1")
+    monkeypatch.setattr(storage_service, "MAX_IMAGEM_PIXELS", 10_000)
+    # Sem um client, a rota responde "indisponivel" antes de abrir a imagem.
+    monkeypatch.setattr(ocr_service, "_client", object())
+    client = ambiente.como(USER_A)
+
+    limite_ia._contadores.clear()
+    try:
+        for _ in range(2):
+            resposta = _post_extrair(client, _png(200, 200))
+            assert resposta.status_code == 422
+            assert resposta.json()["error"] == (
+                "Imagem grande demais; tire outra foto ou anexe um PDF"
+            )
+    finally:
+        limite_ia._contadores.clear()
 
 
 def test_imagem_acima_do_teto_de_pixels_da_422(ambiente, monkeypatch):
