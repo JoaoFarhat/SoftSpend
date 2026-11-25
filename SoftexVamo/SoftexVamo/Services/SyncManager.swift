@@ -765,6 +765,14 @@ actor SyncActor: ModelActor {
                     if atual.saldo == envio.saldoEnviado {
                         atual.saldo = remoto.saldo
                     }
+                    // `data_local` da resposta manda (docs/data-do-dia.md):
+                    // `remoto.data` é o início daquele dia no fuso do aparelho.
+                    // Só substitui se o usuário não mexeu na data no meio do
+                    // envio — a foto abaixo marca o que difere do enviado, e a
+                    // passada seguinte converge (o `data_local` reenviado é o mesmo).
+                    if atual.data == envio.foto.data {
+                        atual.data = remoto.data
+                    }
                     // diaId dos gastos é derivado de dia?.backendId — não precisa atualizar manualmente
                     if FotoDia(atual) == envio.foto {
                         marcarSucesso(atual)

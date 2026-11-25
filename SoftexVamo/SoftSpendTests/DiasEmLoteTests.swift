@@ -92,6 +92,22 @@ struct DiasEmLoteTests {
         }
     }
 
+    /// Cada pedido do lote leva `data_local` — a data de calendário do dia no
+    /// `Calendar.current` (`docs/data-do-dia.md`) — e o servidor a grava e a
+    /// devolve na resposta.
+    @Test func loteEnviaDataLocalDeCadaDia() async throws {
+        try criarViagemOffline(dias: 3)
+
+        #expect(await sync() == 0)
+
+        let lote = try #require(api.lotesDias.first)
+        #expect(lote.count == 3)
+        for pedido in lote {
+            #expect(pedido.dataLocal == DiaDoCalendario.texto(de: pedido.data))
+        }
+        #expect(Set(api.dias.map(\.dataLocal)) == Set(lote.map(\.dataLocal)))
+    }
+
     /// Acima de 60, em partes de 60: 70 dias viram duas chamadas (60 + 10).
     @Test func setentaDiasSobemEmDoisLotes() async throws {
         try criarViagemOffline(dias: 70)
