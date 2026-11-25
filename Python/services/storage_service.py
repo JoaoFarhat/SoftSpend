@@ -72,13 +72,16 @@ def _conteudo_para_jpeg(conteudo: bytes) -> tuple[bytes, str]:
     try:
         img = Image.open(BytesIO(conteudo))
     except Exception as e:
-        raise ValueError(f"Arquivo nao e uma imagem valida: {e}")
+        logger.warning("Falha ao abrir imagem de comprovante: %s", type(e).__name__)
+        raise ValueError("Não foi possível abrir esta imagem; anexe outra foto")
 
     if not _formato_imagem_permitido(img):
-        raise ValueError("Formato de imagem nao suportado. Use JPEG, PNG ou WEBP")
+        raise ValueError("Formato de imagem não suportado; use JPEG, PNG ou WEBP")
 
+    # A camera atual tira fotos maiores que o teto (5712x4284 no iPhone 15/16):
+    # reduzir mantendo a proporcao em vez de recusar — antes a foto nunca subia.
     if img.width > MAX_IMAGEM_LARGURA or img.height > MAX_IMAGEM_ALTURA:
-        raise ValueError(f"Imagem excede as dimensoes maximas de {MAX_IMAGEM_LARGURA}x{MAX_IMAGEM_ALTURA}px")
+        img.thumbnail((MAX_IMAGEM_LARGURA, MAX_IMAGEM_ALTURA), Image.LANCZOS)
 
     if img.mode != "RGB":
         img = img.convert("RGB")
@@ -126,16 +129,17 @@ def pdf_primeira_pagina_para_jpeg(conteudo: bytes) -> bytes:
         try:
             documento = pdfium.PdfDocument(conteudo)
         except Exception as erro:
-            raise ValueError(f"PDF invalido: {erro}")
+            logger.warning("Falha ao abrir PDF de comprovante: %s", type(erro).__name__)
+            raise ValueError("Não foi possível abrir este PDF; anexe outro arquivo")
 
         try:
             if len(documento) == 0:
-                raise ValueError("PDF nao tem paginas")
+                raise ValueError("PDF não tem páginas")
 
             pagina = documento[0]
             largura_pt, altura_pt = pagina.get_size()
             if largura_pt <= 0 or altura_pt <= 0:
-                raise ValueError("PDF tem pagina sem dimensoes")
+                raise ValueError("PDF tem página sem dimensões")
             escala = min(
                 PDF_ESCALA_RENDER,
                 PDF_MAX_LADO_PX / largura_pt,
