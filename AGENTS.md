@@ -272,11 +272,13 @@ a gravação de token devolve `ResultadoGravacaoToken` (`.gravou`/
 `ParDeTokensPendente` em memória no `NetworkManager` — o pedido segue com o
 token novo, as leituras olham o pendente antes do Keychain e a gravação é
 retentada no começo de cada pedido, na volta ao primeiro plano e antes de
-uma nova renovação; logout/troca/`deleteAccount` o descartam. Na entrada
-(`saveUser`), a recusa fecha o acesso: apaga o que gravou, revoga a sessão
-nova em segundo plano e mostra a mensagem própria. `.ilegivel` na leitura
-lança `APIError.loginIlegivel` e chama o logout local (sem revogar) uma vez
-só. Testes em `SoftSpendTests/FalhaDoKeychainLoginTests.swift`.
+uma nova renovação; logout/troca/`deleteAccount` o descartam — e a revogação
+do logout lê o refresh do pendente (o atual) antes de descartar, nunca o
+antigo já trocado do Keychain. Na entrada (`saveUser`), a recusa fecha o
+acesso: apaga o que gravou, revoga a sessão nova em segundo plano e mostra a
+mensagem própria. `.ilegivel` na leitura lança `APIError.loginIlegivel` e
+chama `logoutPorLoginIlegivel` (logout local sem revogar + mensagem na tela
+de entrada) uma vez só. Testes em `SoftSpendTests/FalhaDoKeychainLoginTests.swift`.
 
 - Access token `.indisponivel`: o `makeRequest` (agora `throws`) lança
   `APIError.chaveIndisponivel` ("Desbloqueie o iPhone para continuar.") e o

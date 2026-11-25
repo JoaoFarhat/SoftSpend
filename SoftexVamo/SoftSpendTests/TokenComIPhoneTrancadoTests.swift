@@ -216,7 +216,8 @@ struct TokenComIPhoneTrancadoTests {
             session: sessao,
             uploadSession: sessao,
             tokens: cofre,
-            aoDeslogar: { registro.deslogar() }
+            aoDeslogar: { registro.deslogar() },
+            aoDeslogarPorLoginIlegivel: { registro.deslogar() }
         )
         return (rede, registro)
     }

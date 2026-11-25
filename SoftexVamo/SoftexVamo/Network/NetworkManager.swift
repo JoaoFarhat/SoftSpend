@@ -405,6 +405,12 @@ final class NetworkManager: Sendable {
     /// revogar no servidor; nos testes, uma closure que só conta a chamada.
     private nonisolated let aoDeslogar: @Sendable () -> Void
 
+    /// O que rodar quando a LEITURA do login morre de vez (`.ilegivel`): no
+    /// app, o logout local que também deixa a mensagem na tela de entrada
+    /// (§2.2 de docs/keychain-login.md); nos testes, conta a chamada como o
+    /// `aoDeslogar`.
+    private nonisolated let aoDeslogarPorLoginIlegivel: @Sendable () -> Void
+
     /// Par renovado que o Keychain recusou gravar, esperando nova tentativa
     /// (§1.1 de docs/keychain-login.md). Com pendente, as leituras o
     /// devolvem e o Keychain nem é consultado — lá dentro o refresh já
@@ -441,12 +447,16 @@ final class NetworkManager: Sendable {
         tokens: any CofreDeTokens = CofreDeTokensKeychain(),
         aoDeslogar: @escaping @Sendable () -> Void = {
             Task { @MainActor in AuthService.shared.logout(revogandoNoServidor: false) }
+        },
+        aoDeslogarPorLoginIlegivel: @escaping @Sendable () -> Void = {
+            Task { @MainActor in AuthService.shared.logoutPorLoginIlegivel() }
         }
     ) {
         self.session = session
         self.uploadSession = uploadSession
         self.tokens = tokens
         self.aoDeslogar = aoDeslogar
+        self.aoDeslogarPorLoginIlegivel = aoDeslogarPorLoginIlegivel
         self.refresher = TokenRefresher(cofre: tokens)
     }
 
@@ -571,7 +581,7 @@ final class NetworkManager: Sendable {
             ja = true
             return true
         }
-        if chamar { aoDeslogar() }
+        if chamar { aoDeslogarPorLoginIlegivel() }
     }
 
     nonisolated private func makeRequest(

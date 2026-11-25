@@ -91,7 +91,8 @@ struct FalhaDoKeychainLoginTests {
             session: sessao,
             uploadSession: sessao,
             tokens: cofre,
-            aoDeslogar: { registro.deslogar() }
+            aoDeslogar: { registro.deslogar() },
+            aoDeslogarPorLoginIlegivel: { registro.deslogar() }
         )
     }
 
@@ -225,6 +226,37 @@ struct FalhaDoKeychainLoginTests {
         #expect(rede.buscarRefreshToken() == .achou("refresh-1"))
     }
 
+    /// O refresh revogado no logout é o do par pendente — o atual. O
+    /// Keychain ainda tem o antigo, já trocado no servidor: revogá-lo
+    /// contaria como reuso e derrubaria as sessões nos outros aparelhos.
+    /// A leitura tem que vir antes do descarte (revisão do arquiteto).
+    @MainActor
+    @Test func logoutComParPendenteRevogaORefreshNovo() async throws {
+        rotear401AteRenovar()
+        let cofre = CofreDeTokensFalso(access: "access-vencido", refresh: "refresh-1")
+        cofre.recusarGravacaoRefresh = errSecInteractionNotAllowed
+        let registro = RegistroDeLogout()
+        let rede = redeDeTeste(cofre: cofre, registro: registro)
+
+        _ = try await rede.fetchFeatures()
+        try #require(rede.parDeTokensPendente != nil)
+
+        let auth = AuthService()
+        var revogadas: [String] = []
+        // As costuras de produção: a leitura pendente-primeiro e o descarte
+        // do par do manager — se o logout descartasse antes de ler, o
+        // revogado seria o "refresh-1" do cofre.
+        auth.lerRefreshTokenParaRevogar = { rede.buscarRefreshToken().token }
+        auth.descartarTokensEmMemoria = { rede.descartarParDeTokensPendente() }
+        auth.apagarTokensDoKeychain = {}
+        auth.revogarSessaoNoServidor = { revogadas.append($0) }
+
+        auth.logout()
+
+        #expect(revogadas == ["refresh-novo"])
+        #expect(rede.parDeTokensPendente == nil)
+    }
+
     @MainActor
     @Test func logoutEDeleteAccountDescartamTokensEmMemoria() async {
         let auth = AuthService()
@@ -279,6 +311,22 @@ struct FalhaDoKeychainLoginTests {
         #expect(comLoginIlegivel == 3)
         #expect(registro.vezes == 1)
         #expect(ProtocoloComRota.estado.pedidos.isEmpty)
+    }
+
+    /// A tela de entrada explica por que a sessão acabou: o logout local por
+    /// `.ilegivel` deixa a mensagem da §2.2 no `errorMessage` (revisão do
+    /// arquiteto — antes a tela aparecia sem explicação).
+    @MainActor
+    @Test func logoutPorLoginIlegivelDeixaAMensagemNaTelaDeEntrada() {
+        let auth = AuthService()
+        auth.apagarTokensDoKeychain = {}
+        auth.lerRefreshTokenParaRevogar = { nil }
+        auth.descartarTokensEmMemoria = {}
+
+        auth.logoutPorLoginIlegivel()
+
+        #expect(auth.isAuthenticated == false)
+        #expect(auth.errorMessage == "Não foi possível ler seu login neste iPhone. Entre de novo.")
     }
 
     /// `.ilegivel` no refresh num pedido que saiu e voltou 401: mesmo efeito

@@ -74,10 +74,12 @@ final class AuthService: ObservableObject {
     }
 
     /// Costura de teste: a leitura do refresh token para a revogação do
-    /// logout (§1.3). Só `.achou` devolve um token — `.indisponivel`,
-    /// `.ilegivel` e `.naoExiste` não têm o que mandar ao servidor.
+    /// logout (§1.3). Olha o par pendente ANTES do Keychain (§1.1): com
+    /// pendente, o Keychain ainda tem o refresh antigo — já trocado no
+    /// servidor — e revogá-lo seria reuso. Só `.achou` devolve um token —
+    /// `.indisponivel`, `.ilegivel` e `.naoExiste` não têm o que mandar.
     var lerRefreshTokenParaRevogar: () -> String? = {
-        KeychainManager.lerRefreshToken().token
+        NetworkManager.shared.buscarRefreshToken().token
     }
 
     /// Mensagem de erro dos formulários de entrada (login e cadastro).
@@ -199,10 +201,12 @@ final class AuthService: ObservableObject {
     /// Toda saída de sessão descarta o par pendente em memória antes de
     /// apagar o Keychain (§1.1, regra 5), e a revogação no servidor só sai
     /// quando o refresh token pôde ser lido — `.indisponivel` não tem o que
-    /// mandar (§1.3).
+    /// mandar (§1.3). A leitura vem ANTES do descarte: o pendente vale como
+    /// o cofre e o refresh que ele guarda é o atual — o do Keychain já foi
+    /// trocado, e revogá-lo contaria como reuso.
     func logout(revogandoNoServidor: Bool = true) {
-        descartarTokensEmMemoria()
         let refreshToken = lerRefreshTokenParaRevogar()
+        descartarTokensEmMemoria()
 
         apagarTokensDoKeychain()
         UserDefaults.standard.removeObject(forKey: userKey)
@@ -213,6 +217,15 @@ final class AuthService: ObservableObject {
         guard revogandoNoServidor, let refreshToken else { return }
 
         revogarSessaoNoServidor(refreshToken)
+    }
+
+    /// Logout local por `.ilegivel` (§2.2 de docs/keychain-login.md): a
+    /// mesma limpeza do `logout(revogandoNoServidor: false)` — quem falhou
+    /// foi a leitura local, não o servidor — mais a mensagem que a tela de
+    /// entrada mostra para explicar a saída.
+    func logoutPorLoginIlegivel() {
+        logout(revogandoNoServidor: false)
+        errorMessage = APIError.loginIlegivel.localizedDescription
     }
 
     /// Grava o par de tokens ANTES de marcar a pessoa como autenticada
