@@ -60,21 +60,21 @@ def test_monetary_limits_are_enforced_after_rounding():
 def test_receipt_cleanup_follows_transaction_outcome():
     engine = create_engine("sqlite://")
 
-    with patch("services.comprovante_cleanup.storage_service.remover_comprovante") as remover:
+    with patch("services.comprovante_cleanup.storage_service.remover_comprovantes") as remover:
         session = Session(engine)
         session.execute(text("SELECT 1"))
         marcar_comprovante_para_remover(session, "old-key")
         marcar_comprovante_para_remover_no_rollback(session, "new-key")
         session.rollback()
-        remover.assert_called_once_with("new-key")
+        remover.assert_called_once_with({"new-key"})
 
-    with patch("services.comprovante_cleanup.storage_service.remover_comprovante") as remover:
+    with patch("services.comprovante_cleanup.storage_service.remover_comprovantes") as remover:
         session = Session(engine)
         session.execute(text("SELECT 1"))
         marcar_comprovante_para_remover(session, "old-key")
         marcar_comprovante_para_remover_no_rollback(session, "new-key")
         session.commit()
-        remover.assert_called_once_with("old-key")
+        remover.assert_called_once_with({"old-key"})
 
 
 def test_refresh_token_rotation_reuse_detection_and_logout(monkeypatch):

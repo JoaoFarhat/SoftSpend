@@ -1,6 +1,7 @@
 import logging
 import os
 import uuid
+from collections.abc import Iterable
 from io import BytesIO
 
 import boto3
@@ -228,25 +229,56 @@ def salvar_comprovante(user_id: str, gasto_id: int, conteudo: bytes, content_typ
     return key
 
 
-def remover_comprovante(key: str | None) -> None:
-    """
-    Apaga o original e a miniatura do bucket.
+# Teto do delete_objects da API do S3: ate 1000 objetos por chamada.
+MAX_OBJETOS_POR_DELETE = 1000
 
-    Falhas sao apenas logadas: um objeto orfao no bucket e menos grave que
-    impedir o usuario de deletar/atualizar o gasto dele.
+
+def remover_comprovantes(keys: Iterable[str | None]) -> None:
+    """Apaga os originais e as miniaturas de varias keys de uma vez.
+
+    Uma chamada por nota, dentro do `db.commit()` do `get_db`, passava dos 8 s
+    de tempo limite do app ao excluir uma viagem ou a conta com centenas de
+    comprovantes. A falha de uma parte so e logada (nunca a key inteira) e nao
+    impede as seguintes — um objeto orfao no bucket e menos grave que impedir
+    o usuario de deletar.
     """
-    if not key or not _client:
+    if not _client:
         return
 
-    keys = keys_do_comprovante(key)
-
-    try:
-        _client.delete_objects(
-            Bucket=S3_BUCKET,
-            Delete={"Objects": [{"Key": k} for k in keys], "Quiet": True},
+    objetos = list(
+        dict.fromkeys(
+            objeto
+            for key in keys
+            if key
+            for objeto in keys_do_comprovante(key)
         )
-    except Exception as erro:
-        logger.warning("Falha ao remover comprovante %s: %s", key, type(erro).__name__)
+    )
+
+    for inicio in range(0, len(objetos), MAX_OBJETOS_POR_DELETE):
+        lote = objetos[inicio : inicio + MAX_OBJETOS_POR_DELETE]
+        try:
+            resposta = _client.delete_objects(
+                Bucket=S3_BUCKET,
+                Delete={"Objects": [{"Key": k} for k in lote], "Quiet": True},
+            )
+        except Exception as erro:
+            logger.warning(
+                "Falha ao remover lote de %d comprovante(s): %s",
+                len(lote),
+                type(erro).__name__,
+            )
+            continue
+
+        erros = resposta.get("Errors") or []
+        if erros:
+            logger.warning(
+                "Remocao em lote devolveu erro em %d objeto(s)", len(erros)
+            )
+
+
+def remover_comprovante(key: str | None) -> None:
+    """Apaga o original e a miniatura do bucket (ver `remover_comprovantes`)."""
+    remover_comprovantes([key])
 
 
 def _baixar(key: str) -> bytes | None:
