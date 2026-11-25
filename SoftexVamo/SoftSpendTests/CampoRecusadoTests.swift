@@ -47,6 +47,33 @@ struct CampoRecusadoTests {
         #expect(resposta.campos == ["data"])
     }
 
+    // MARK: - mensagemConta (login e cadastro)
+
+    @Test func contaEmail() {
+        #expect(CampoRecusado.mensagemConta(campos: ["email"])
+            == "Confira o e-mail digitado.")
+    }
+
+    @Test func contaDoisCamposNaOrdem() {
+        #expect(CampoRecusado.mensagemConta(campos: ["nome", "senha"])
+            == "O nome pode ter até 100 caracteres. A senha precisa ter de 8 a 128 caracteres, com letra maiúscula, minúscula, número e caractere especial.")
+    }
+
+    @Test func contaEmailEUsernameUmaFraseSo() {
+        // O `username` enviado sai do e-mail (`usernameDoEmail`): os dois
+        // recusados juntos são um problema só, de e-mail.
+        #expect(CampoRecusado.mensagemConta(campos: ["email", "username"])
+            == "Confira o e-mail digitado.")
+    }
+
+    @Test func contaGenerica() {
+        // Sem campo conhecido o formulário mostra o pedido genérico —
+        // `mensagemConta` sempre devolve frase.
+        #expect(CampoRecusado.mensagemConta(campos: nil) == "Confira os dados digitados.")
+        #expect(CampoRecusado.mensagemConta(campos: []) == "Confira os dados digitados.")
+        #expect(CampoRecusado.mensagemConta(campos: ["xyz"]) == "Confira os dados digitados.")
+    }
+
     @Test func respostaDecodificaSemCampos() throws {
         // Servidor antigo ou outro 422 (ex.: `total_da_viagem_acima_do_limite`):
         // a chave não vem e a decodificação não pode quebrar.

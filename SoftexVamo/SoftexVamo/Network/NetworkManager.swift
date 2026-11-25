@@ -205,7 +205,8 @@ final class NetworkManager: Sendable {
         logout401: Bool = true,
         session: URLSession,
         timeoutSeconds: UInt64,
-        allowRefresh: Bool = true
+        allowRefresh: Bool = true,
+        mensagem422: @Sendable ([String]?) -> String? = CampoRecusado.mensagem
     ) async throws -> Data {
         logger.info("execute: \(request.httpMethod ?? "?", privacy: .private) \(request.url?.absoluteString ?? "?", privacy: .private)")
         let start = Date()
@@ -251,7 +252,8 @@ final class NetworkManager: Sendable {
                         logout401: true,
                         session: session,
                         timeoutSeconds: timeoutSeconds,
-                        allowRefresh: false
+                        allowRefresh: false,
+                        mensagem422: mensagem422
                     )
                 } catch {
                     // O refresh token tambem nao vale mais (401/403) ou a
@@ -282,7 +284,7 @@ final class NetworkManager: Sendable {
             // "Dados de entrada invalidos". Sem `campos` nada muda — o
             // `total_da_viagem_acima_do_limite` (#166), que não traz a chave,
             // segue com a frase própria do `errorDescription`.
-            let message = (http.statusCode == 422 ? CampoRecusado.mensagem(campos: decoded?.campos) : nil)
+            let message = (http.statusCode == 422 ? mensagem422(decoded?.campos) : nil)
                 ?? decoded?.error
                 ?? "Erro no servidor"
             let requestId = decoded?.request_id ?? "-"
@@ -293,13 +295,23 @@ final class NetworkManager: Sendable {
     }
 
     @discardableResult
-    nonisolated private func execute(_ request: URLRequest, logout401: Bool = true, allowRefresh: Bool = true) async throws -> Data {
-        try await execute(request, logout401: logout401, session: session, timeoutSeconds: 8, allowRefresh: allowRefresh)
+    nonisolated private func execute(
+        _ request: URLRequest,
+        logout401: Bool = true,
+        allowRefresh: Bool = true,
+        mensagem422: @Sendable ([String]?) -> String? = CampoRecusado.mensagem
+    ) async throws -> Data {
+        try await execute(request, logout401: logout401, session: session, timeoutSeconds: 8, allowRefresh: allowRefresh, mensagem422: mensagem422)
     }
 
     @discardableResult
-    nonisolated private func executeUpload(_ request: URLRequest, logout401: Bool = true, allowRefresh: Bool = true) async throws -> Data {
-        try await execute(request, logout401: logout401, session: uploadSession, timeoutSeconds: 90, allowRefresh: allowRefresh)
+    nonisolated private func executeUpload(
+        _ request: URLRequest,
+        logout401: Bool = true,
+        allowRefresh: Bool = true,
+        mensagem422: @Sendable ([String]?) -> String? = CampoRecusado.mensagem
+    ) async throws -> Data {
+        try await execute(request, logout401: logout401, session: uploadSession, timeoutSeconds: 90, allowRefresh: allowRefresh, mensagem422: mensagem422)
     }
 
     nonisolated func fetchCicloResumo(antesDe: Int? = nil, skip: Int = 0, limit: Int = 5) async throws -> [CicloSoftex] {
@@ -695,7 +707,10 @@ final class NetworkManager: Sendable {
             body: try encoder.encode(dados),
             includeToken: false
         )
-        return try decoder.decode(AuthResponse.self, from: try await execute(request, logout401: false))
+        return try decoder.decode(
+            AuthResponse.self,
+            from: try await execute(request, logout401: false, mensagem422: CampoRecusado.mensagemConta)
+        )
     }
 
     nonisolated func register(dados: RegisterRequest) async throws -> AuthResponse {
@@ -708,7 +723,10 @@ final class NetworkManager: Sendable {
             body: try encoder.encode(dados),
             includeToken: false
         )
-        return try decoder.decode(AuthResponse.self, from: try await execute(request, logout401: false))
+        return try decoder.decode(
+            AuthResponse.self,
+            from: try await execute(request, logout401: false, mensagem422: CampoRecusado.mensagemConta)
+        )
     }
 
     nonisolated func refreshAccessToken(refreshToken: String) async throws -> AuthResponse {
