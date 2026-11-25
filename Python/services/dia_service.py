@@ -7,6 +7,15 @@ from typing import List
 import models
 from dtos.dia import DiaRequest
 from repositories import dia_repository, ciclo_repository, gasto_repository
+from services.dia_calendario import dia_de_calendario
+
+
+def _data_dia_do_pedido(dia: DiaRequest):
+    # App novo manda `data_local` (data de calendário); app antigo manda só o
+    # instante e cai na mesma heurística do backfill (docs/data-do-dia.md §4).
+    if dia.data_local is not None:
+        return dia.data_local
+    return dia_de_calendario(dia.data)
 
 
 def listar_dias_por_ciclo(db: Session, ciclo_id: int, user_id: str, skip: int, limit: int):
@@ -38,6 +47,7 @@ def criar_dia(db: Session, ciclo_id: int, dia: DiaRequest, user_id: str):
     novo_dia = models.Dia(
         client_id=dia.client_id,
         data=dia.data,
+        data_dia=_data_dia_do_pedido(dia),
         saldo=ciclo.diaria,
         ciclo_id=ciclo_id
     )
@@ -81,7 +91,7 @@ def criar_dias_lote(db: Session, ciclo_id: int, dias: List[DiaRequest], user_id:
         if dia.client_id and dia.client_id in dias_existentes:
             novos_dias.append(dias_existentes[dia.client_id])
             continue
-        novo = models.Dia(client_id=dia.client_id, data=dia.data, saldo=ciclo.diaria, ciclo_id=ciclo_id)
+        novo = models.Dia(client_id=dia.client_id, data=dia.data, data_dia=_data_dia_do_pedido(dia), saldo=ciclo.diaria, ciclo_id=ciclo_id)
         novos_dias.append(novo)
         if dia.client_id:
             dias_existentes[dia.client_id] = novo

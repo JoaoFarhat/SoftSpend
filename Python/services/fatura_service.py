@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session, selectinload
 import models
 from dtos.fatura import MAXIMO_COMPRAS, FaturaLida, MatchPrevia
 from services import open_finance_reconciliation_service
+from services.dia_calendario import data_do_dia
 from services.fatura_arquivo_service import (
     ErroFatura,
     VALOR_MAXIMO_COMPRA,
@@ -55,12 +56,6 @@ class _CompraComoTransacao:
 # -------------------------------------------------------------- prévia
 
 
-def _data_da_coluna(valor) -> date | None:
-    if valor is None:
-        return None
-    return valor.date() if isinstance(valor, datetime) else valor
-
-
 def marcar_previa(
     session: Session, user_id: str, ciclo_id: int, lida: FaturaLida
 ) -> None:
@@ -90,7 +85,7 @@ def marcar_previa(
     dias = [
         (dia, data)
         for dia in ciclo.dias
-        if (data := _data_da_coluna(dia.data)) is not None
+        if (data := data_do_dia(dia)) is not None
     ]
     if not dias:
         return

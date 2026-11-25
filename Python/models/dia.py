@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, UniqueConstraint
 from database import Base
 from sqlalchemy.orm import relationship
 
@@ -9,6 +9,7 @@ class Dia(Base):
     client_id = Column(String(50), index=True, nullable=True)
     ciclo_id = Column(Integer, ForeignKey("ciclos.id"))
     data = Column(DateTime(timezone=True))
+    data_dia = Column(Date, nullable=True)
     saldo = Column(Numeric(10, 2))
 
     ciclo = relationship("Ciclo", back_populates="dias")
@@ -16,4 +17,5 @@ class Dia(Base):
 
     __table_args__ = (
         UniqueConstraint("client_id", "ciclo_id", name="uix_dia_client_id_ciclo"),
+        Index("ix_dias_ciclo_data_dia", "ciclo_id", "data_dia"),
     )

@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 import models
 from repositories import open_finance_repository
+from services.dia_calendario import data_do_dia
 
 STATUS_AUTO_MATCHED = "AUTO_MATCHED"
 STATUS_REVIEW = "REVIEW"
@@ -38,10 +39,11 @@ def _pontuacao_texto(gasto: models.Gasto, transacao) -> int:
 
 
 def _data_gasto(gasto: models.Gasto):
-    if not gasto.dia or not gasto.dia.data:
+    # O dia de calendario (data_dia ou o fallback de docs/data-do-dia.md), e
+    # nao o instante UTC — senao a janela de match erra um dia no fuso leste.
+    if not gasto.dia:
         return None
-    data = gasto.dia.data
-    return data.date() if isinstance(data, datetime) else data
+    return data_do_dia(gasto.dia)
 
 
 def _pontuacao(gasto: models.Gasto, transacao) -> int | None:

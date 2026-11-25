@@ -670,6 +670,37 @@ Cadeia de migrations:
     bloqueadas falham com `Table 'softspend.assinaturas' doesn't exist`. A
     AS2 não tem migration (o índice único de `original_transaction_id` já
     está nesta).
+12. `e4b8d2f6a1c3` — data do dia como data de calendário
+    (`docs/data-do-dia.md`, tarefa D1): `dias.data_dia` (`DATE`, anulável),
+    backfill pela hora UTC do `dias.data` (>= 11h → dia UTC seguinte) e
+    índice `(ciclo_id, data_dia)`. O downgrade só derruba índice e coluna;
+    `dias.data` segue intacta.
+
+## Data do dia (`dias.data_dia`)
+
+Spec: `docs/data-do-dia.md`. `dias.data` guarda a meia-noite **local** do
+aparelho como instante UTC — no fuso leste de Greenwich ela cai no dia UTC
+anterior, e ler `.date()` errava um dia no relatório, na prévia da fatura e
+na conciliação. O dia da viagem passou a ser uma data de calendário:
+
+- `dias.data_dia` (`DATE`, anulável) é a fonte de verdade; `dias.data` fica
+  só como ordenação de compatibilidade e para o app antigo.
+- No fio, `data_local` (`"YYYY-MM-DD"`) entra em `DiaRequest` e sai em
+  `DiaResponse` (e nos `dias` do `CicloResponse`), ao lado do `data` de
+  sempre — nada foi removido, então apps antigos seguem funcionando.
+- `services/dia_calendario.py` é o único helper: `dia_de_calendario`
+  (heurística da hora UTC — >= 11h → dia UTC seguinte, §4 da spec) e
+  `data_do_dia` (`data_dia` ou o fallback). Toda conta de "dia"
+  (`export_service`, `fatura_service.marcar_previa`,
+  `open_finance_reconciliation_service._data_gasto`) lê por `data_do_dia`;
+  ninguém deve ler `dia.data` para extrair o dia de calendário.
+- `DiaRequest.data_local` recebido manda em `data_dia`; sem ele (app
+  antigo), `criar_dia`/`criar_dias_lote` aplicam `dia_de_calendario` sobre o
+  instante. Reenvio por `client_id` devolve o existente sem recalcular.
+- `DiaResponse.data_local` lê `data_dia` (`AliasChoices`) e, se nulo, cai no
+  fallback — linha sem `data_dia` ainda devolve o dia certo.
+- Testes em `tests/test_data_do_dia.py`; a parte do app é a tarefa D2 da
+  spec.
 
 ## Isolamento por usuário (UUID)
 
