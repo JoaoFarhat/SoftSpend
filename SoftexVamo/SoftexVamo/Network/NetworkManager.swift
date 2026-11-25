@@ -17,8 +17,11 @@ nonisolated let esperasRefreshTransitorio: [Duration] = [.seconds(1), .seconds(3
 
 /// Falha que vale repetir o refresh: rede (timeout, sem conexão) ou 5xx.
 /// 401/403 e qualquer outro erro significam que o token não vale mais.
+/// `URLError(.cancelled)` não repete: quem cancelou não quer nova tentativa.
 nonisolated func ehFalhaTransitoriaDeRefresh(_ error: Error) -> Bool {
-    if error is URLError { return true }
+    if let urlError = error as? URLError {
+        return urlError.code != .cancelled
+    }
     if case APIError.serverError(_, _, let statusCode) = error {
         return statusCode >= 500
     }
@@ -29,8 +32,12 @@ nonisolated func ehFalhaTransitoriaDeRefresh(_ error: Error) -> Bool {
 /// do `/auth/refresh` recusa antes de a rota trocar o token, então o mesmo
 /// refresh token continua valendo e pode ser reenviado depois sem virar
 /// reuso — quem chamou recebe o próprio 429 (o `SyncActor` o trata como
-/// limite por minuto). Qualquer outro erro desloga como antes.
+/// limite por minuto). Cancelamento (`CancellationError`, `URLError(.cancelled)`)
+/// também não desloga: a pessoa cancelou a operação, o login não ficou
+/// inválido. Qualquer outro erro desloga como antes.
 nonisolated func deveDeslogarAposFalhaDeRefresh(_ error: Error) -> Bool {
+    if error is CancellationError { return false }
+    if let urlError = error as? URLError, urlError.code == .cancelled { return false }
     if case APIError.serverError(_, _, let statusCode) = error {
         return statusCode != 429
     }
@@ -61,6 +68,35 @@ nonisolated func repetindoSeTransitorio<T: Sendable>(
             try await dormir(espera)
         }
     }
+}
+
+/// Renova o token e reenvia o pedido com o token novo — o reenvio fica FORA
+/// do `catch` do refresh: falha dele (timeout, sem rede, 404, 422, 500,
+/// cancelamento) sobe intacta sem deslogar, porque o login renovado
+/// continua válido.
+///
+/// Falha do refresh, sim, pode derrubar a sessão: o refresh token não vale
+/// mais (401/403) ou a rede/servidor falhou nas 3 tentativas do refresher.
+/// Não adianta chamar `/auth/logout`, e o token antigo não é guardado:
+/// passados 60 s, reenviá-lo seria reuso. `deveDeslogarAposFalhaDeRefresh`
+/// guarda as exceções (429 do limitador, cancelamento): o erro sobe intacto
+/// para quem chamou, sem logout e sem apagar os tokens.
+nonisolated func renovandoEReenviando<T: Sendable>(
+    renovar: @Sendable () async throws -> String,
+    reenviar: @Sendable (String) async throws -> T,
+    deslogar: @Sendable () -> Void
+) async throws -> T {
+    let token: String
+    do {
+        token = try await renovar()
+    } catch {
+        guard deveDeslogarAposFalhaDeRefresh(error) else {
+            throw error
+        }
+        deslogar()
+        throw APIError.authentication
+    }
+    return try await reenviar(token)
 }
 
 private actor TokenRefresher {
@@ -240,37 +276,31 @@ final class NetworkManager: Sendable {
 
         if deveRenovarToken(statusCode: http.statusCode, logout401: logout401) {
             if allowRefresh {
-                do {
-                    let authResponse = try await refresher.refresh()
-                    var retryRequest = request
-                    retryRequest.setValue(
-                        "Bearer \(authResponse.accessToken)",
-                        forHTTPHeaderField: "Authorization"
-                    )
-                    return try await execute(
-                        retryRequest,
-                        logout401: true,
-                        session: session,
-                        timeoutSeconds: timeoutSeconds,
-                        allowRefresh: false,
-                        mensagem422: mensagem422
-                    )
-                } catch {
-                    // O refresh token tambem nao vale mais (401/403) ou a
-                    // rede/servidor falhou nas 3 tentativas do refresher.
-                    // Nao adianta chamar /auth/logout, e o token antigo nao
-                    // e guardado: passados 60 s, reenvia-lo seria reuso.
-                    // Excecao: o 429 do limitador recusou antes de trocar o
-                    // token, entao o mesmo refresh token ainda vale — o erro
-                    // sobe intacto para quem chamou agendar a nova tentativa
-                    // (o SyncActor trata como limite por minuto), sem logout
-                    // e sem apagar os tokens.
-                    guard deveDeslogarAposFalhaDeRefresh(error) else {
-                        throw error
+                // O reenvio com o token novo roda fora do catch do refresh:
+                // falha dele não é falha de login e não desloga.
+                return try await renovandoEReenviando(
+                    renovar: { [self] in
+                        try await refresher.refresh().accessToken
+                    },
+                    reenviar: { [self] token in
+                        var retryRequest = request
+                        retryRequest.setValue(
+                            "Bearer \(token)",
+                            forHTTPHeaderField: "Authorization"
+                        )
+                        return try await execute(
+                            retryRequest,
+                            logout401: true,
+                            session: session,
+                            timeoutSeconds: timeoutSeconds,
+                            allowRefresh: false,
+                            mensagem422: mensagem422
+                        )
+                    },
+                    deslogar: {
+                        Task { @MainActor in AuthService.shared.logout(revogandoNoServidor: false) }
                     }
-                    Task { @MainActor in AuthService.shared.logout(revogandoNoServidor: false) }
-                    throw APIError.authentication
-                }
+                )
             } else {
                 Task { @MainActor in AuthService.shared.logout(revogandoNoServidor: false) }
                 throw APIError.authentication
