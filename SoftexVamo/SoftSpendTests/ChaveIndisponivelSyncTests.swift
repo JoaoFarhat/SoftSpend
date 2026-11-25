@@ -3,10 +3,10 @@ import Foundation
 import SwiftData
 @testable import SoftSpend
 
-/// Nota fiscal com a chave do Keychain indisponível (iPhone trancado enquanto
-/// o sync termina em segundo plano): o gasto não pode virar `.synced` sem a
-/// nota subir. Fica `.failed` com backoff, com os bytes guardados, e sobe
-/// quando a chave volta.
+/// Nota anexada a um gasto que já subiu, com a chave das notas fora do ar:
+/// o gasto não pode virar `.synced` sem a nota subir. A decisão do
+/// `concluirGasto` olha o campo cifrado, sem decifrar. A espera pelo
+/// desbloqueio e a remoção com a chave fora estão em `ChaveInacessivelTests`.
 @MainActor
 struct ChaveIndisponivelSyncTests {
     let container: ModelContainer
@@ -24,8 +24,8 @@ struct ChaveIndisponivelSyncTests {
 
     var crypto: ComprovanteCrypto { ComprovanteCrypto(armazem: armazem) }
 
-    func sync(forcar: Bool = false) async -> Int {
-        let syncActor = SyncActor(modelContainer: container, api: api, crypto: crypto)
+    func sync(crypto: ComprovanteCrypto? = nil, forcar: Bool = false) async -> Int {
+        let syncActor = SyncActor(modelContainer: container, api: api, crypto: crypto ?? self.crypto)
         return await syncActor.sync(agora: .now, userId: userId, forcar: forcar)
     }
 
@@ -64,27 +64,24 @@ struct ChaveIndisponivelSyncTests {
         return gastos[0]
     }
 
-    @Test func chaveIndisponivelMarcaFalhaESobeQuandoAChaveVolta() async throws {
+    /// iPhone trancado: o PUT do gasto sobe, mas ele fica `.pending` (sem
+    /// falha, sem tentativa) com a nota guardada; destrancou, a nota sobe.
+    @Test func chaveIndisponivelNaoConcluiOGasto() async throws {
         try await criarGastoSincronizado()
         let cifrada = try anexarNota()
-
         armazem.indisponivel = true
-        _ = await sync()
 
-        let falhou = try lerGasto()
-        #expect(falhou.syncStatus == .failed)
-        #expect(falhou.tentativas == 1)
-        #expect(falhou.proximaTentativaEm != nil)
-        #expect(falhou.syncError != nil)
-        #expect(falhou.comprovanteDataCriptografado == cifrada)
-        #expect(falhou.comprovanteUrl == nil)
+        #expect(await sync() == 1)
+
+        let aguardando = try lerGasto()
+        #expect(aguardando.syncStatus == .pending)
+        #expect(aguardando.syncError == nil)
+        #expect(aguardando.tentativas == 0)
+        #expect(aguardando.comprovanteDataCriptografado == cifrada)
+        #expect(aguardando.comprovanteUrl == nil)
         #expect(!api.chamadas.contains(.uploadComprovante))
         #expect(api.gastos.first?.comprovante == nil)
         #expect(armazem.adicionadas.isEmpty)
-
-        // Sem forçar, o backoff segura: a chave continua fora e nada sobe.
-        _ = await sync()
-        #expect(!api.chamadas.contains(.uploadComprovante))
 
         armazem.indisponivel = false
         #expect(await sync(forcar: true) == 0)
@@ -96,6 +93,24 @@ struct ChaveIndisponivelSyncTests {
         #expect(fim.comprovanteDataCriptografado == nil)
         #expect(fim.comprovanteUrl != nil)
         #expect(armazem.adicionadas.isEmpty)
+    }
+
+    /// Chave guardada com tamanho errado não é "iPhone trancado": não volta
+    /// sozinha. Falha com o motivo e backoff, bytes intactos, sem chave nova.
+    @Test func chaveInvalidaMarcaFalha() async throws {
+        try await criarGastoSincronizado()
+        let cifrada = try anexarNota()
+        let quebrado = ArmazemDeChaveFalso(chave: Data([1, 2, 3]))
+
+        _ = await sync(crypto: ComprovanteCrypto(armazem: quebrado))
+
+        let falhou = try lerGasto()
+        #expect(falhou.syncStatus == .failed)
+        #expect(falhou.tentativas == 1)
+        #expect(falhou.syncError == ComprovanteCryptoError.invalidKeySize.errorDescription)
+        #expect(falhou.comprovanteDataCriptografado == cifrada)
+        #expect(!api.chamadas.contains(.uploadComprovante))
+        #expect(quebrado.adicionadas.isEmpty)
     }
 
     /// Bytes que não abrem com a chave atual: nada sobe, e o gasto fica `.failed`

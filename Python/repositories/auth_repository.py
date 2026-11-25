@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 import models
 
 
@@ -18,8 +19,16 @@ def buscar_por_id(db: Session, user_id: str) -> models.User | None:
 
 
 def criar_usuario(db: Session, usuario: models.User) -> models.User:
-    db.add(usuario)
-    db.flush()
+    try:
+        # Corrida no cadastro: dois pedidos iguais passam juntos na conferencia
+        # de email/username e o segundo esbarra no unique so no flush. O
+        # savepoint faz o erro desfazer apenas este insert, sem quebrar a
+        # sessao (sem savepoint, a transacao toda ficaria em estado falho).
+        with db.begin_nested():
+            db.add(usuario)
+            db.flush()
+    except IntegrityError:
+        raise ValueError("Dados de cadastro ja em uso")
     db.refresh(usuario)
     return usuario
 

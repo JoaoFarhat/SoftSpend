@@ -167,6 +167,26 @@ antes de sair — a faixa "N alterações aguardando envio" do `MainView` aparec
 expõe o `contarPendentes` que o `sync` já usa. Testes em
 `SoftSpendTests/SyncManagerPedidoTests.swift`.
 
+**Troca de conta no meio do envio**: o `NetworkManager` lê o token a cada
+pedido, então um `sync` de A que seguisse depois de A sair e B entrar mandaria
+os dados de A com o login de B (viagem de A criada na conta de B; 404 de B
+descartando gasto de A). O `SyncActor` recebe no
+`init(modelContainer:api:crypto:usuarioAtual:)` a consulta do usuário logado;
+o `SyncManager.configure` passa `SyncActor.usuarioLogado`
+(`AuthService.shared.currentUser?.id` no MainActor). O padrão `nil` não
+confere nada (é o que os testes antigos usam). `mesmoUsuario()` roda
+**antes** de cada chamada à `api` (todas as etapas, `recuperarBackendId`,
+upload/DELETE de comprovante) e **depois** de cada `await` dela, com sucesso ou
+erro: se o usuário não é mais o `userId` do `sync`, liga
+`usuarioTrocouNesteSync` (zerado no começo do `sync`). Daí em diante nenhuma etapa
+chama a API (`deveParar`, junto com o `limiteAtingidoNesteSync`), as passadas
+restantes não rodam e a resposta em voo é ignorada — nada é marcado (sem
+`marcarFalha`, sem sucesso, sem descarte). O item fica como estava e sobe
+quando A entrar de novo. O `SyncManager.sync` relê o usuário no começo de cada
+volta do `repeat` (sai do laço sem ninguém logado) e só publica
+`pendentesRestantes` da conta que está logada. Testes em
+`SoftSpendTests/TrocaDeContaSyncTests.swift` (`UsuarioFalso`).
+
 Cada stage só processa itens cujo pai já tem `backendId`. Itens órfãos aguardam
 na fila (`continue`) para a próxima passada.
 
@@ -263,10 +283,33 @@ processado. Nota guardada que a chave atual não abre (`sincronizarComprovante`,
 ramo sem bytes legíveis): `syncError = SyncActor.erroNotaNaoAbre` +
 `marcarFalha` — a tela mostra o motivo e o backoff impede insistir a cada
 passada, com os bytes preservados. A saída é o "Descartar nota" do
-`DetalheGastoView` (mostrado sempre que `comprovanteDataCriptografado != nil`
-e a nota não abre): chama `removerComprovante`, que limpa os bytes e sobe a
-remoção — o gasto destrava na passada seguinte. Testes em
-`SoftSpendTests/DescartarNotaIlegivelTests.swift`.
+`DetalheGastoView` (mostrado quando `comprovanteDataCriptografado != nil`, a
+nota não abre e a chave **não** está só indisponível): chama
+`removerComprovante`, que limpa os bytes e sobe a remoção — o gasto destrava
+na passada seguinte. Testes em `SoftSpendTests/DescartarNotaIlegivelTests.swift`.
+
+**Chave indisponível ≠ nota que não abre**: o `SyncActor` recebe o crypto no
+`init(modelContainer:api:crypto:)` (padrão `ComprovanteCrypto.shared`) e lê a
+nota por `GastosDia.lerComprovante(crypto:)`. Ordem dos ramos de
+`sincronizarComprovante` (não reordenar):
+
+1. nota que abre: upload;
+2. `comprovanteParaRemover`: DELETE — não precisa dos bytes nem da chave, sobe
+   mesmo com o iPhone trancado;
+3. `keyNotAvailable` (Keychain `WhenUnlockedThisDeviceOnly` com o iPhone
+   trancado, típico do sync em segundo plano): `marcarAguardandoDesbloqueio` —
+   `.pending`, sem contar tentativa, sem `syncError`,
+   `proximaTentativaEm = agora + 60 s`, bytes intactos. Nunca `.synced` nem
+   `erroNotaNaoAbre`;
+4. `invalidKeySize` (chave guardada com tamanho errado, não volta sozinha):
+   lança, e o `syncComprovantes` faz `marcarFalha` com o motivo;
+5. bytes que a chave atual não abre: `erroNotaNaoAbre` + `marcarFalha`.
+
+O `DetalheGastoView` separa do mesmo jeito: com `keyNotAvailable` não mostra
+"não abre" nem "Descartar nota". Testes em `SoftSpendTests/ChaveInacessivelTests.swift`
+(espera, desbloqueio e a remoção com bytes guardados e a chave fora) e
+`ChaveIndisponivelSyncTests.swift` (gasto já enviado e chave inválida), com
+`ArmazemDeChaveFalso`.
 
 **Exclusão vinda do servidor (T5)**: no `CiclosViewModel`, com a lista completa
 de dias (`listaCompleta`), `removerSumidos` apaga gasto `.synced` com `backendId`
@@ -313,17 +356,15 @@ e `adicionar(_:)` só faz `SecItemAdd`. `ComprovanteCrypto.init(armazem:)`;
   criar outra deixaria todas as notas guardadas ilegíveis para sempre.
 - Nunca `SecItemDelete`. `errSecDuplicateItem` no add (outra chamada criou
   antes) relê e usa a chave que está lá.
-- `GastosDia.lerComprovante(crypto:)` lança com a chave indisponível
+- `GastosDia.lerComprovante(crypto:)` lança só erro de chave
   (`keyNotAvailable`/`invalidKeySize`) e devolve `nil` (com log) quando os bytes
-  não abrem com a chave atual. O getter `comprovanteData` das telas continua
-  devolvendo `nil` nos dois casos.
-- O `SyncActor` recebe o crypto no `init(modelContainer:api:crypto:)` (padrão
-  `.shared`). Em `sincronizarComprovante`, chave indisponível vira
-  `marcarFalha` (backoff, bytes intactos, sem upload); o `concluirGasto` não
-  marca `.synced` enquanto a nota não abre. Bytes ilegíveis seguem como antes
-  ("nada a enviar").
-- Testes em `SoftSpendTests/ComprovanteCryptoTests.swift` e
-  `ChaveIndisponivelSyncTests.swift`, com `ArmazemDeChaveFalso` (em memória).
+  não abrem com a chave atual. O getter `comprovanteData` continua devolvendo
+  `nil` nos dois casos.
+- O `concluirGasto` decide pelo campo cifrado
+  (`comprovanteDataCriptografado != nil || comprovanteParaRemover` segura o
+  gasto), sem decifrar.
+- Testes em `SoftSpendTests/ComprovanteCryptoTests.swift`, com
+  `ArmazemDeChaveFalso` (em memória; `indisponivel` simula o iPhone trancado).
 
 ### Apple Pay (atalho "Registrar gasto")
 
@@ -409,7 +450,8 @@ libera recurso.
   `isAuthenticated`, nada vai ao servidor.
 - A cena raiz (`SoftexVamoApp`) chama `iniciar()` (ouve `Transaction.updates`
   e reenvia `Transaction.unfinished`), `trocouUsuario()` na troca de conta e
-  `carregarEstado()` ao voltar para o primeiro plano.
+  `voltouAoPrimeiroPlano()` (estado + reenvio das compras pendentes) ao
+  voltar para o primeiro plano.
 - `Scenes/PlanosAssinaturaView.swift`: preço e duração do teste vêm da App
   Store (semanas viram dias: "2 semanas" aparece "14 dias"). Termos e
   Privacidade em `LinksLegais` (páginas servidas pelo nginx a partir de
@@ -622,6 +664,7 @@ AWS S3, Cloudflare R2, Supabase Storage e MinIO:
 | `S3_REGION` | `auto` | Use a região real na AWS |
 | `S3_PUBLIC_BASE_URL` | — | Se definida, a URL é `{base}/{key}`; senão gera URL assinada |
 | `S3_URL_EXPIRACAO` | `3600` | Validade da URL assinada, em segundos. Recomenda-se 1h em produção |
+| `S3_MAX_IMAGEM_PIXELS` | `70_000_000` | Teto de pixels (largura × altura) das imagens aceitas, conferido no cabeçalho antes de decodificar; acima dele o upload e o OCR respondem 422 |
 
 Open Finance com Pluggy (`services/open_finance_service.py`):
 
@@ -753,18 +796,26 @@ em `DetalheViagemView` ("Importar fatura do cartão", `.sheet`):
 - Ordem do "Importar" (§2.1): `POST /api/faturas` com todas as compras com
   dia na viagem ("compras mantidas") → só então os gastos marcados são criados
   via `CiclosViewModel.createNewGasto` (`.pending`, dia local pela data) →
-  `sync(forcar: true)` → `/conciliar` → matches aplicados em `GastosDia` →
+  `sync(forcar: true)` esperado com o mesmo teto (`tetoSync`): passado o teto
+  a tela conclui e o envio segue em segundo plano — o servidor concilia cada
+  gasto ao recebê-lo (`gasto_service.criar_gasto` chama `conciliar_gasto`),
+  então os que subirem depois ganham o vínculo sozinhos e o resumo avisa →
+  `/conciliar` → matches aplicados em `GastosDia` →
   "Desvincular"/"Confirmar" da conferência refeitos no servidor (o `match` da
   prévia não tem id; o vínculo é localizado pelo `gasto_id`). Falha na
   gravação → nenhum gasto criado.
 - Sem `vencimento` no arquivo (CSV/OFX sem a data), a conferência mostra um
   `DatePicker` (`vencimentoInformado`, padrão = data da última compra) e a
   data vai no envio — sem ela o `POST /api/faturas` responde 422.
-- O `sync(forcar:)` antes da leitura tem teto (`tetoSync`, 20 s, helper
-  `Services/EsperaComTeto.swift`, o mesmo da exportação): estourado,
-  a leitura segue e o sync continua em background — **não é cancelado**,
-  senão os itens em voo ganhariam `.failed`+backoff no `SyncActor`. A `Task`
-  da leitura é cancelada no `onDisappear` da folha (`cancelarLeitura`).
+- O `sync(forcar:)` da fatura — antes da leitura e no "Importar" — tem teto
+  (`tetoSync`, 20 s, helper `Services/EsperaComTeto.swift`, o mesmo da
+  exportação): estourado, o fluxo segue e o sync continua em background —
+  **não é cancelado**, senão os itens em voo ganhariam `.failed`+backoff
+  no `SyncActor`. No "Importar", o fechamento do sync liga um marcador
+  (`syncDoImportTerminou`); se a espera volta com ele desligado o
+  `syncEmSegundoPlano` acende e o resumo acrescenta "os gastos novos
+  terminam de ser enviados em segundo plano". A `Task` da leitura é
+  cancelada no `onDisappear` da folha (`cancelarLeitura`).
 
 Assinatura AS1 (`docs/publicacao.md` §1.4; decisões de 13/11: 14 dias
 grátis, sem assinatura bloqueia ciclo novo, IA, importar fatura e exportar).

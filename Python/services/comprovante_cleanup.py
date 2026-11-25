@@ -45,21 +45,21 @@ def _anotar_comprovante_removido(mapper, connection, target):
 def _remover_comprovantes_pendentes(session):
     session.info.pop(CHAVE_ROLLBACK, None)
     keys = set(session.info.pop(CHAVE_PENDENTES, ()))
+    if not keys:
+        return
 
-    for key in keys:
-        storage_service.remover_comprovante(key)
-
-    if keys:
-        logger.info("Processada remoção de %d comprovante(s) do storage", len(keys))
+    # Uma chamada em lote: nota a nota, a exclusão de uma viagem ou da conta
+    # com centenas de comprovantes passava dos 8 s de tempo limite do app.
+    storage_service.remover_comprovantes(keys)
+    logger.info("Processada remoção de %d comprovante(s) do storage", len(keys))
 
 
 @event.listens_for(Session, "after_rollback")
 def _descartar_comprovantes_pendentes(session):
     session.info.pop(CHAVE_PENDENTES, None)
     keys = set(session.info.pop(CHAVE_ROLLBACK, ()))
+    if not keys:
+        return
 
-    for key in keys:
-        storage_service.remover_comprovante(key)
-
-    if keys:
-        logger.info("Processada remoção de %d comprovante(s) após rollback", len(keys))
+    storage_service.remover_comprovantes(keys)
+    logger.info("Processada remoção de %d comprovante(s) após rollback", len(keys))

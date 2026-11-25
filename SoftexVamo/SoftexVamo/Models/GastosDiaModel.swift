@@ -41,10 +41,11 @@ nonisolated final class GastosDia {
     /// Abre a nota guardada no aparelho.
     ///
     /// - `nil`: não há nota, ou os bytes não abrem com a chave atual (logado).
-    /// - lança `ComprovanteCryptoError.keyNotAvailable`/`.invalidKeySize`: a
-    ///   chave não está acessível agora (ex.: iPhone trancado). A nota continua
-    ///   guardada e deve ser tentada de novo — o sync não pode tratá-la como
-    ///   "nada a enviar".
+    /// - lança `ComprovanteCryptoError.keyNotAvailable`: a chave não está
+    ///   acessível agora (ex.: iPhone trancado). A nota pode estar boa e deve
+    ///   ser tentada de novo, sem falha nem "Descartar nota".
+    /// - lança `ComprovanteCryptoError.invalidKeySize`: a chave guardada tem
+    ///   tamanho errado; não volta sozinha (o sync marca falha).
     func lerComprovante(crypto: ComprovanteCrypto = .shared) throws -> Data? {
         guard let comprovanteDataCriptografado else { return nil }
         do {

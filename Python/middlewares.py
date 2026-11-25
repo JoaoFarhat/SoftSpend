@@ -18,6 +18,13 @@ REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._-]{1,128}$")
 
 HSTS_MAX_AGE = int(os.getenv("HSTS_MAX_AGE", "31536000"))
 
+USER_AGENT_MAX_LEN = 200
+
+
+def _user_agent(request: Request) -> str:
+    # O header vem do cliente sem limite e entra em toda linha do app.log.
+    return request.headers.get("User-Agent", "-")[:USER_AGENT_MAX_LEN]
+
 
 class RequestIDMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -45,7 +52,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 "method": request.method,
                 "path": request.url.path,
                 "ip": self._get_client_ip(request),
-                "user_agent": request.headers.get("User-Agent", "-"),
+                "user_agent": _user_agent(request),
             },
         )
 
@@ -61,7 +68,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                     "status_code": 500,
                     "duration_ms": duration_ms,
                     "ip": self._get_client_ip(request),
-                    "user_agent": request.headers.get("User-Agent", "-"),
+                    "user_agent": _user_agent(request),
                 },
             )
             raise
@@ -75,7 +82,7 @@ class LoggingMiddleware(BaseHTTPMiddleware):
                 "status_code": response.status_code,
                 "duration_ms": duration_ms,
                 "ip": self._get_client_ip(request),
-                "user_agent": request.headers.get("User-Agent", "-"),
+                "user_agent": _user_agent(request),
             },
         )
 

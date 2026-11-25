@@ -238,6 +238,16 @@ def test_janela_zero_desliga_tolerancia(client, monkeypatch):
         assert _status(client, token) == 401
 
 
+def test_janela_invalida_cai_no_padrao_de_60s(client, monkeypatch):
+    monkeypatch.setenv("REFRESH_REUSE_GRACE_SECONDS", "abc")
+    sessao = _login(client)
+    _refresh(client, sessao["refresh_token"]).raise_for_status()
+
+    # Valor ilegivel na variavel cai no padrao de 60 s em vez de derrubar o
+    # /auth/refresh: a replica imediata ainda entra na janela de tolerancia.
+    assert _refresh(client, sessao["refresh_token"]).status_code == 200
+
+
 def test_reuso_na_janela_com_refresh_novo_expirado_revoga(client):
     sessao = _login(client)
     rotacionada = _refresh(client, sessao["refresh_token"]).json()

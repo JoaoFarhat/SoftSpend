@@ -7,6 +7,7 @@ nenhum teste chama o Gemini de verdade.
 """
 
 import io
+import logging
 from types import SimpleNamespace
 
 import pytest
@@ -14,6 +15,11 @@ from PIL import Image
 
 from enums.categoria_enum import Categoria
 from services import ocr_service
+
+from test_core_api import (
+    USER_A,
+    ambiente,  # fixture reutilizada de test_core_api
+)
 
 MSG_IMAGEM = "Não foi possível abrir esta imagem; tente outra foto"
 MSG_SEM_CHAVE = "A leitura automática está indisponível agora; preencha o gasto à mão"
@@ -102,3 +108,34 @@ def test_resposta_valida(monkeypatch):
         "valor": 45.9,
         "categoria": "ALIMENTACAO",
     }
+
+
+def test_erro_inesperado_do_ocr_vai_para_o_log(ambiente, monkeypatch, caplog):
+    """Bug no meio da leitura: o app vê o 500 amigável e a causa fica no log.
+
+    Sem o `logger.exception` do `except Exception`, o `app.log` só mostraria
+    "status 500" e ninguém saberia o que quebrou.
+    """
+
+    def _quebrado(conteudo):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(ocr_service, "extrair_gasto_da_imagem", _quebrado)
+    client = ambiente.como(USER_A)
+
+    with caplog.at_level(logging.ERROR, logger="controllers.gasto_controller"):
+        resposta = client.post(
+            "/gastos/extrair",
+            files={"imagem": ("nota.png", _png_valido(), "image/png")},
+        )
+
+    assert resposta.status_code == 500
+    assert resposta.json()["error"] == "Erro ao processar imagem"
+    assert "boom" not in resposta.text
+
+    registro = next(
+        r for r in caplog.records if r.name == "controllers.gasto_controller"
+    )
+    assert registro.levelno == logging.ERROR
+    assert registro.exc_info is not None
+    assert registro.exc_info[0] is RuntimeError

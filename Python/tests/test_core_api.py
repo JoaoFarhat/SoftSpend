@@ -465,5 +465,5 @@ def test_exportar_csv_do_proprio_ciclo(ambiente):
     assert "text/csv" in response.headers["Content-Type"]
     texto = response.content.decode("utf-8-sig")
     assert "Semana de teste" in texto
-    assert "25.50" in texto
-    assert "74.50" in texto
+    assert "25,50" in texto
+    assert "74,50" in texto

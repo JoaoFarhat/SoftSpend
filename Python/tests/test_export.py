@@ -224,9 +224,27 @@ def test_csv_protege_titulo_contra_formula_e_mantem_saldo_negativo(ambiente):
     texto = response.content.decode("utf-8-sig")
     for titulo in ("=1+1", "+1+1", "@SUM(1)", "\tcmd"):
         assert f"'{titulo}" in texto
-    assert "-13.00" in texto
+    assert "-13,00" in texto
     # O titulo do ciclo e os valores numericos nao ganham o prefixo.
     assert "Ciclo;Viagem" in texto
+
+
+def test_csv_escreve_dinheiro_com_virgula_decimal(ambiente):
+    """No Excel pt-BR, "1500.50" nao e numero: a coluna virava texto e a
+    soma dava zero. Todo valor sai com virgula e sem separador de milhar."""
+    client = ambiente.como(USER_A)
+    ciclo, _, _ = _ciclo_dia_gasto(client, "Viagem", "Almoco", "1500.50")
+
+    response = client.get(
+        f"/ciclos/{ciclo['id']}/export", params={"formato": "csv"}
+    )
+
+    assert response.status_code == 200
+    texto = response.content.decode("utf-8-sig")
+    assert ";1500,50;" in texto
+    assert "1500.50" not in texto
+    assert "Valor total;700,00" in texto
+    assert "Diária;100,00" in texto
 
 
 @pytest.mark.parametrize(
