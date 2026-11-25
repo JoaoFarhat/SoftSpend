@@ -175,9 +175,12 @@ struct NetworkManagerExecuteTests {
 
     // MARK: - Fábricas
 
-    nonisolated private func sessaoDeTeste() -> URLSession {
+    /// `marca` vai num cabeçalho de toda chamada da sessão: o teste do
+    /// `deleteAccount` usa para saber por qual das duas sessões o pedido saiu.
+    nonisolated private func sessaoDeTeste(marca: String? = nil) -> URLSession {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [URLProtocolDeTeste.self]
+        if let marca { config.httpAdditionalHeaders = ["X-Sessao-Teste": marca] }
         return URLSession(configuration: config)
     }
 
@@ -404,20 +407,27 @@ struct NetworkManagerExecuteTests {
         }
     }
 
-    // MARK: - (h) deleteAccount vai pela sessão de 90 s
+    // MARK: - (h) deleteAccount vai pela sessão de upload
 
-    /// Apagar a conta pode demorar no servidor: o pedido precisa sair com o
-    /// timeout de upload (90 s), não com os 8 s das chamadas comuns — senão o
-    /// app mostra erro com o servidor ainda apagando e a limpeza local da
-    /// conta (exigência da Apple) não roda.
-    @Test func deleteAccountSaiComTimeoutDe90() async throws {
+    /// Apagar a conta pode demorar no servidor: o pedido precisa sair pela
+    /// sessão de upload (90 s por espera, 300 s no total), não pela comum de
+    /// 8 s — senão o app mostra erro com o servidor ainda apagando e a limpeza
+    /// local da conta (exigência da Apple) não roda. Desde o #200 o tempo vem
+    /// da sessão, não do pedido.
+    @Test func deleteAccountSaiPelaSessaoDeUpload() async throws {
         URLProtocolDeTeste.enfileirar(.init(200))
+        let manager = NetworkManager(
+            session: sessaoDeTeste(marca: "comum"),
+            uploadSession: sessaoDeTeste(marca: "upload"),
+            tokens: CofreEmMemoria(accessToken: "token-velho", refreshToken: "refresh-velho"),
+            aoDeslogar: {}
+        )
 
-        try await managerDeTeste().deleteAccount()
+        try await manager.deleteAccount()
 
         let pedidos = URLProtocolDeTeste.pedidos(para: "/auth/conta")
         try #require(pedidos.count == 1)
         #expect(pedidos[0].httpMethod == "DELETE")
-        #expect(pedidos[0].timeoutInterval == 90)
+        #expect(pedidos[0].value(forHTTPHeaderField: "X-Sessao-Teste") == "upload")
     }
 }
