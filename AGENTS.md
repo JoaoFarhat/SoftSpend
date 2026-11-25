@@ -755,18 +755,26 @@ em `DetalheViagemView` ("Importar fatura do cartão", `.sheet`):
 - Ordem do "Importar" (§2.1): `POST /api/faturas` com todas as compras com
   dia na viagem ("compras mantidas") → só então os gastos marcados são criados
   via `CiclosViewModel.createNewGasto` (`.pending`, dia local pela data) →
-  `sync(forcar: true)` → `/conciliar` → matches aplicados em `GastosDia` →
+  `sync(forcar: true)` esperado com o mesmo teto (`tetoSync`): passado o teto
+  a tela conclui e o envio segue em segundo plano — o servidor concilia cada
+  gasto ao recebê-lo (`gasto_service.criar_gasto` chama `conciliar_gasto`),
+  então os que subirem depois ganham o vínculo sozinhos e o resumo avisa →
+  `/conciliar` → matches aplicados em `GastosDia` →
   "Desvincular"/"Confirmar" da conferência refeitos no servidor (o `match` da
   prévia não tem id; o vínculo é localizado pelo `gasto_id`). Falha na
   gravação → nenhum gasto criado.
 - Sem `vencimento` no arquivo (CSV/OFX sem a data), a conferência mostra um
   `DatePicker` (`vencimentoInformado`, padrão = data da última compra) e a
   data vai no envio — sem ela o `POST /api/faturas` responde 422.
-- O `sync(forcar:)` antes da leitura tem teto (`tetoSync`, 20 s, helper
-  `Services/EsperaComTeto.swift`, o mesmo da exportação): estourado,
-  a leitura segue e o sync continua em background — **não é cancelado**,
-  senão os itens em voo ganhariam `.failed`+backoff no `SyncActor`. A `Task`
-  da leitura é cancelada no `onDisappear` da folha (`cancelarLeitura`).
+- O `sync(forcar:)` da fatura — antes da leitura e no "Importar" — tem teto
+  (`tetoSync`, 20 s, helper `Services/EsperaComTeto.swift`, o mesmo da
+  exportação): estourado, o fluxo segue e o sync continua em background —
+  **não é cancelado**, senão os itens em voo ganhariam `.failed`+backoff
+  no `SyncActor`. No "Importar", o fechamento do sync liga um marcador
+  (`syncDoImportTerminou`); se a espera volta com ele desligado o
+  `syncEmSegundoPlano` acende e o resumo acrescenta "os gastos novos
+  terminam de ser enviados em segundo plano". A `Task` da leitura é
+  cancelada no `onDisappear` da folha (`cancelarLeitura`).
 
 Assinatura AS1 (`docs/publicacao.md` §1.4; decisões de 13/11: 14 dias
 grátis, sem assinatura bloqueia ciclo novo, IA, importar fatura e exportar).

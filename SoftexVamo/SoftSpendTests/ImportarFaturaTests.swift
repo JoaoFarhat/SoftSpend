@@ -622,6 +622,50 @@ struct ImportarFaturaTests {
         #expect(!syncTerminou)
     }
 
+    /// Sync preso (rede ruim) não segura o "Importar": passado o teto a
+    /// importação conclui — o gasto marcado já foi criado e a conciliação
+    /// rodou — e o resumo avisa que os gastos novos seguem subindo em
+    /// segundo plano. O sync continua sozinho, sem ser cancelado.
+    @Test func syncTravadoNaoSeguraOImportar() async throws {
+        let (ciclo, _) = try viagem()
+        var syncTerminou = false
+        let vm = viewModel(
+            para: ciclo,
+            sincronizar: {
+                try? await Task.sleep(for: .seconds(60))
+                syncTerminou = true
+            },
+            tetoSync: .milliseconds(50)
+        )
+        await conferindo(vm)
+        vm.alternarMarcada(1)
+        api.detalhe = detalhePadrao()
+
+        await vm.importar()
+
+        #expect(vm.etapa == .pronto) // não esperou os 60 s do sync
+        #expect(api.chamadas == ["ler", "gravar", "criarGasto", "conciliar"])
+        #expect(try gastosLocais().filter { $0.backendId == nil }.count == 1)
+        #expect(api.conciliacoes == 1)
+        #expect(!syncTerminou)
+        #expect(vm.resumoImportacao.contains("em segundo plano"))
+    }
+
+    /// Sync que termina dentro do teto: o resumo sai como antes, sem o
+    /// aviso de segundo plano.
+    @Test func syncDentroDoTetoNaoMudaOResumo() async throws {
+        let (ciclo, _) = try viagem()
+        let vm = viewModel(para: ciclo) // sincronizar padrão: termina na hora
+        await conferindo(vm)
+        vm.alternarMarcada(1)
+        api.detalhe = detalhePadrao()
+
+        await vm.importar()
+
+        #expect(vm.etapa == .pronto)
+        #expect(vm.resumoImportacao == "1 gasto criado · 1 compra já era lançada")
+    }
+
     /// Folha fechada no meio da leitura: `cancelarLeitura` cancela a `Task`
     /// — a prévia nem chega a ser aplicada.
     @Test func folhaFechadaCancelaALeituraEmVoo() async throws {

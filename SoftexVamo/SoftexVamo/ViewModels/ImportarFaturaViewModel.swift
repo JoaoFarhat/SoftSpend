@@ -155,6 +155,12 @@ final class ImportarFaturaViewModel: ObservableObject {
     private var tipoArquivo: ArquivoFatura.Tipo = .pdf
     private var gastosCriados = 0
     private var gastosFalharam = 0
+    /// O fechamento do sync do "Importar" liga este marcador: `false`
+    /// quando a espera com teto volta quer dizer que o teto venceu.
+    private var syncDoImportTerminou = false
+    /// Ligado só quando o teto vence antes do sync do "Importar" acabar:
+    /// o `resumo` avisa que os gastos novos seguem subindo em segundo plano.
+    private var syncEmSegundoPlano = false
     /// A `Task` da leitura, guardada para a folha cancelar pelo
     /// `onDisappear` — uma leitura em voo não segue em background.
     private var tarefaLeitura: Task<Void, Never>?
@@ -337,14 +343,20 @@ final class ImportarFaturaViewModel: ObservableObject {
         dispararLeitura()
     }
 
-    /// O `sync(forcar:)` antes da leitura é um aquecimento: com a rede
-    /// ruim ele não pode segurar a tela — espera no máximo `tetoSync` e a
-    /// leitura segue. O sync **não é cancelado** (continua sozinho em
-    /// background): cancelar marcaria os itens em voo como `.failed` no
-    /// `SyncActor`, um backoff que não existiria sem a tela.
-    private func sincronizarComTeto() async {
+    /// O `sync(forcar:)` esperado com teto (aquecimento da leitura e
+    /// envio do "Importar"): com a rede ruim ele não pode segurar a tela
+    /// — espera no máximo `tetoSync` e o fluxo segue. O sync **não é
+    /// cancelado** (continua sozinho em background): cancelar marcaria os
+    /// itens em voo como `.failed` no `SyncActor`, um backoff que não
+    /// existiria sem a tela. `aoTerminarSync`, quando passado, roda no
+    /// MainActor assim que o sync acaba de verdade — dentro ou fora do
+    /// teto — e é como o `importar` sabe se os gastos novos já subiram.
+    private func sincronizarComTeto(
+        aoTerminarSync: (@MainActor () -> Void)? = nil
+    ) async {
         await EsperaComTeto.esperar(teto: tetoSync) {
             await self.sincronizar()
+            await aoTerminarSync?()
         }
     }
 
@@ -433,8 +445,10 @@ final class ImportarFaturaViewModel: ObservableObject {
     /// "Importar": só agora algo é gravado. O servidor grava a fatura e as
     /// compras mantidas primeiro; se falhar, nenhum gasto é criado (§2.1,
     /// §2.11). Depois os gastos marcados sobem pelo caminho normal
-    /// (`createNewGasto`, `.pending`), o sync forçado manda tudo e a
-    /// conciliação roda de novo para casar os gastos novos.
+    /// (`createNewGasto`, `.pending`) e o sync forçado manda tudo —
+    /// esperado só até `tetoSync`, porque o servidor concilia cada gasto
+    /// ao recebê-lo: passado o teto a tela conclui, os gastos novos sobem
+    /// sozinhos em segundo plano e a conciliação casa o que já subiu.
     func importar() async {
         guard etapa == .conferindo, let fatura else { return }
         etapa = .importando
@@ -461,7 +475,14 @@ final class ImportarFaturaViewModel: ObservableObject {
                     logger.error("Gasto da fatura não criado: \(error.localizedDescription, privacy: .public)")
                 }
             }
-            await sincronizar()
+            // Esperar o envio terminar não é preciso: o servidor
+            // concilia cada gasto ao recebê-lo (`criar_gasto` chama
+            // `conciliar_gasto`), então os que subirem depois ganham o
+            // vínculo sozinhos. Passado o teto a tela segue — o sync
+            // continua em background, sem ser cancelado.
+            syncDoImportTerminou = false
+            await sincronizarComTeto(aoTerminarSync: { self.syncDoImportTerminou = true })
+            syncEmSegundoPlano = !syncDoImportTerminou
             if let conciliado = try? await api.conciliarFatura(faturaId: detalhe.id) {
                 detalhe = conciliado
             }
@@ -543,6 +564,9 @@ final class ImportarFaturaViewModel: ObservableObject {
         let vinculadas = jaLancadas.count
         if vinculadas > 0 {
             partes.append("\(vinculadas) \(vinculadas == 1 ? "compra já era lançada" : "compras já eram lançadas")")
+        }
+        if syncEmSegundoPlano {
+            partes.append("os gastos novos terminam de ser enviados em segundo plano")
         }
         return partes.joined(separator: " · ")
     }
