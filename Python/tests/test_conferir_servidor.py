@@ -6,6 +6,8 @@ e `certificados_apple/` com um `.cer`, para o head do Alembic e os
 certificados dependerem só do teste.
 """
 
+import subprocess
+
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
@@ -262,3 +264,51 @@ def test_sem_systemctl_da_falta(ambiente, capsys, monkeypatch):
     monkeypatch.setattr(cs, "_estado_timer", lambda nome: None)
     assert _rodar(ambiente) == 1
     assert "systemctl indisponível" in _linhas(capsys)
+
+
+# `_estado_timer` de verdade (o que roda na EC2), com `subprocess.run`
+# trocado por monkeypatch — os testes acima substituem a função inteira.
+
+
+def test_estado_timer_sem_systemctl_devolve_none(monkeypatch):
+    def _run(*args, **kwargs):
+        raise FileNotFoundError("systemctl")
+
+    monkeypatch.setattr(cs.subprocess, "run", _run)
+    assert cs._estado_timer("softspend-backup.timer") is None
+
+
+def test_estado_timer_timeout_devolve_desconhecido(monkeypatch):
+    def _run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="systemctl", timeout=5)
+
+    monkeypatch.setattr(cs.subprocess, "run", _run)
+    assert cs._estado_timer("softspend-backup.timer") == (
+        "desconhecido",
+        "desconhecido",
+    )
+
+
+def test_estado_timer_enabled_active(monkeypatch):
+    saidas = {"is-enabled": "enabled\n", "is-active": "active\n"}
+
+    def _run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout=saidas[cmd[1]])
+
+    monkeypatch.setattr(cs.subprocess, "run", _run)
+    assert cs._estado_timer("softspend-backup.timer") == ("enabled", "active")
+
+
+def test_is_enabled_vazio_diz_nao_instalado_no_falta(monkeypatch):
+    """Unit não instalada: `is-enabled` sai vazio e `is-active` sai
+    "inactive"; o FALTA diz "não instalado" em vez de "(/inactive)"."""
+
+    def _run(cmd, **kwargs):
+        stdout = "" if cmd[1] == "is-enabled" else "inactive\n"
+        return subprocess.CompletedProcess(cmd, 1, stdout=stdout)
+
+    monkeypatch.setattr(cs.subprocess, "run", _run)
+    linha = cs._linha(cs.conferir_timers({}, None, None))
+    assert linha.startswith("FALTA")
+    assert "não instalado" in linha
+    assert "(/" not in linha
