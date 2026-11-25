@@ -423,6 +423,26 @@ def test_resposta_cortada_por_max_tokens_da_422(client, monkeypatch):
     assert "OFX ou CSV" in resposta.json()["error"]
 
 
+def test_json_incompativel_da_422_sem_detalhe_tecnico(client, monkeypatch):
+    falso = _ClienteGeminiFalso(
+        SimpleNamespace(
+            parsed=None,
+            text='{"compras": "x"}',
+            candidates=[SimpleNamespace(finish_reason="STOP")],
+            usage_metadata=SimpleNamespace(
+                prompt_token_count=123, candidates_token_count=45
+            ),
+        )
+    )
+    monkeypatch.setattr(fatura_ia_service, "_client", falso)
+
+    resposta = _post(client, _pdf(), "fatura.pdf", "application/pdf")
+    assert resposta.status_code == 422
+    erro = resposta.json()["error"]
+    assert erro == "Não foi possível ler esta fatura; envie em OFX ou CSV"
+    assert "validation error" not in erro
+
+
 def test_compras_invalidas_descartadas_com_aviso(client, monkeypatch):
     falso = _ClienteGeminiFalso(
         _resposta_gemini(
