@@ -180,7 +180,8 @@ actor SyncActor: ModelActor {
     nonisolated let modelExecutor: any ModelExecutor
     nonisolated let modelContainer: ModelContainer
     private let api: any SyncAPI
-    /// Abre as notas guardadas no aparelho. Nos testes, com um armazém de chave falso.
+    /// Abre as notas guardadas no aparelho. Nos testes, com um armazém de
+    /// chave falso (`ArmazemDeChaveFalso`) que simula o iPhone trancado.
     private let crypto: ComprovanteCrypto
 
     /// Algum item mudou durante o envio nesta passada: vale rodar outra.
@@ -564,6 +565,17 @@ actor SyncActor: ModelActor {
         item.syncError = nil
     }
 
+    /// Chave das notas indisponível agora (iPhone trancado — ela é
+    /// `WhenUnlockedThisDeviceOnly`): não é falha. Como o 429 por minuto, fica
+    /// `.pending`, sem contar tentativa e sem `syncError` — "nota não abre"
+    /// aqui levaria a tela a oferecer "Descartar nota" numa nota que pode
+    /// estar boa — e tenta de novo daqui a 60 s (o `forcar` ignora a espera).
+    private func marcarAguardandoDesbloqueio(_ item: any Syncavel, agora: Date) {
+        item.proximaTentativaEm = agora.addingTimeInterval(60)
+        item.syncStatus = .pending
+        item.syncError = nil
+    }
+
     private func marcarSucesso(_ item: any Syncavel) {
         item.tentativas = 0
         item.proximaTentativaEm = nil
@@ -894,7 +906,7 @@ actor SyncActor: ModelActor {
             let gastoUUID = gasto.id
             let foto = FotoGasto(gasto)
             do {
-                try await sincronizarComprovante(gasto, backendId: backendId, foto: foto)
+                try await sincronizarComprovante(gasto, backendId: backendId, foto: foto, agora: agora)
             } catch {
                 if atingiuLimitePorMinuto(error) {
                     gravarGasto(gastoUUID, etapa: "syncComprovantes-limite") { atual in
@@ -916,12 +928,29 @@ actor SyncActor: ModelActor {
     /// Só limpa o comprovante local se ele ainda é o que foi enviado: uma foto
     /// nova anexada durante o upload fica para a próxima passada.
     ///
-    /// Chave da nota indisponível (iPhone trancado) lança: o `syncComprovantes`
-    /// marca a falha com backoff e os bytes guardados ficam intactos.
-    private func sincronizarComprovante(_ gasto: GastosDia, backendId: Int, foto: FotoGasto) async throws {
+    /// A ordem dos ramos importa:
+    /// 1. nota que abre: upload;
+    /// 2. remoção pendente: DELETE — não precisa dos bytes nem da chave, então
+    ///    vem antes de qualquer ramo de "não abre";
+    /// 3. chave indisponível (`keyNotAvailable`, iPhone trancado):
+    ///    `marcarAguardandoDesbloqueio`, bytes intactos;
+    /// 4. chave inválida (`invalidKeySize`): lança — o `syncComprovantes`
+    ///    marca a falha com o motivo e backoff;
+    /// 5. bytes que a chave atual não abre: `erroNotaNaoAbre` + backoff.
+    private func sincronizarComprovante(_ gasto: GastosDia, backendId: Int, foto: FotoGasto, agora: Date) async throws {
         let gastoUUID = gasto.id
 
-        if let comprovanteData = try gasto.lerComprovante(crypto: crypto) {
+        // `lerComprovante` só lança erro de chave; bytes que não abrem viram `nil`.
+        let dadosNota: Data?
+        var erroDaChave: Error?
+        do {
+            dadosNota = try gasto.lerComprovante(crypto: crypto)
+        } catch {
+            dadosNota = nil
+            erroDaChave = error
+        }
+
+        if let comprovanteData = dadosNota {
             let atualizado = try await api.uploadComprovante(
                 gastoId: backendId,
                 imageData: comprovanteData,
@@ -953,6 +982,18 @@ actor SyncActor: ModelActor {
                 atual.comprovanteParaRemover = false
                 concluirGasto(atual, mudou: mudou)
             }
+        } else if (erroDaChave as? ComprovanteCryptoError) == .keyNotAvailable {
+            // A nota existe e pode estar boa; só não abre agora. Espera sem
+            // falhar e sem mexer nos bytes.
+            gravarGasto(gastoUUID, etapa: "syncComprovantes-chave-indisponivel") { atual in
+                if FotoGasto(atual) != foto {
+                    marcarMudancaDuranteEnvio(atual)
+                } else {
+                    marcarAguardandoDesbloqueio(atual, agora: agora)
+                }
+            }
+        } else if let erroDaChave {
+            throw erroDaChave
         } else {
             // Bytes guardados que a chave atual não abre: não há o que enviar
             // nem o que apagar. Falha com o motivo na tela e backoff, em vez
