@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
@@ -8,6 +10,7 @@ from dtos.gasto import GastoResponse, GastoRequest, GastoExtraidoResponse
 from services import gasto_service, limite_ia, ocr_service, storage_service
 from limiter import limiter
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 TAMANHO_MAXIMO_IMAGEM = 5 * 1024 * 1024
@@ -138,6 +141,7 @@ async def extrair_gasto_de_imagem(request: Request, imagem: UploadFile = File(..
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except Exception:
+        logger.exception("Falha ao ler comprovante")
         raise HTTPException(status_code=500, detail="Erro ao processar imagem")
 
 
