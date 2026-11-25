@@ -173,4 +173,4 @@ def test_export_csv_mostra_saldo_recalculado(ambiente):
 
     assert response.status_code == 200
     texto = response.content.decode("utf-8-sig")
-    assert "120.00" in texto
+    assert "120,00" in texto
