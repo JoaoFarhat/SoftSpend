@@ -69,8 +69,8 @@ final class SyncManager: ObservableObject {
 
     /// Remove do banco local ciclos, dias e gastos que já foram sincronizados
     /// como deletados há mais de 7 dias. Evita acúmulo de registros mortos.
-    func limparDadosMortos(context: ModelContext) {
-        let limite = Date().addingTimeInterval(-7 * 24 * 3600)
+    func limparDadosMortos(context: ModelContext, agora: Date = Date()) {
+        let limite = agora.addingTimeInterval(-7 * 24 * 3600)
         let synced = SyncStatus.synced.rawValue
 
         do {
