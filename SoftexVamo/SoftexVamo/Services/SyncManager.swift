@@ -14,7 +14,6 @@ final class SyncManager: ObservableObject {
 
     @Published var isSyncing = false
     @Published var pendentesRestantes: Int = 0
-    @Published var lastSyncError: Error?
     private var syncActor: SyncActor?
     /// T9: pedidos de sync que chegam com `isSyncing == true` não são mais
     /// descartados — `pedidoPendente` manda rodar mais uma vez ao fim e
@@ -141,7 +140,6 @@ final class SyncManager: ObservableObject {
         var forcarAtual = forcar
         repeat {
             pedidoPendente = false
-            lastSyncError = nil
             let agora = Date()
             logger.info("SyncManager: iniciando sync para userId \(userId, privacy: .private), forcar=\(forcarAtual, privacy: .public)")
             let restantes = await syncActor.sync(agora: agora, userId: userId, forcar: forcarAtual)
@@ -446,66 +444,6 @@ actor SyncActor: ModelActor {
             gravarCiclo(cicloUUID, etapa: "sincronizarEdicaoCiclo-catch") { atual, _ in
                 atual.syncError = erro
                 marcarFalha(atual)
-            }
-        }
-    }
-
-    /// Todos os dias locais do ciclo (inclusive os apagados), por data.
-    private func diasLocais(doCiclo cicloUUID: UUID, em contexto: ModelContext) -> [DiaSoftex] {
-        var diasDesc = FetchDescriptor<DiaSoftex>(
-            predicate: #Predicate { _ in true },
-            sortBy: [SortDescriptor(\.data)]
-        )
-        diasDesc.relationshipKeyPathsForPrefetching = [\.ciclo]
-        return ((try? contexto.fetch(diasDesc)) ?? []).filter { $0.ciclo?.id == cicloUUID }
-    }
-
-    /// Aplica a resposta do `dias/lote` aos dias locais, relidos depois do `await`.
-    private func reconciliarDias(
-        _ diasRemotos: [DiaSoftex],
-        ciclo: CicloSoftex,
-        idsEnviados: Set<UUID>,
-        contexto: ModelContext,
-        backendId: Int
-    ) {
-        let locais = diasLocais(doCiclo: ciclo.id, em: contexto)
-        let idsRemotos = Set(diasRemotos.compactMap { $0.backendId })
-        let clientIdsRemotos = Set(diasRemotos.compactMap { $0.clientId })
-
-        for local in locais where local.deletadoEm == nil {
-            let aindaExiste = (local.backendId != nil && idsRemotos.contains(local.backendId!))
-                || clientIdsRemotos.contains(local.clientId)
-            // Só marcamos como deletado se o dia já tinha backendId (já foi sincronizado
-            // alguma vez). Dias criados offline ainda não enviados não devem ser apagados
-            // só porque o servidor ainda não os conhece.
-            if local.backendId != nil && !aindaExiste {
-                local.deletadoEm = Date()
-                local.syncStatus = .pending
-            }
-        }
-
-        for diaRemoto in diasRemotos {
-            if let local = locais.first(where: { $0.backendId == diaRemoto.backendId })
-                ?? locais.first(where: { $0.clientId == diaRemoto.clientId }) {
-                if local.deletadoEm != nil && idsEnviados.contains(local.id) {
-                    // Apagado durante o envio: não reviver; o syncDeletions envia o delete.
-                    local.backendId = local.backendId ?? diaRemoto.backendId
-                    continue
-                }
-                local.data = diaRemoto.data
-                local.saldo = diaRemoto.saldo
-                local.backendId = diaRemoto.backendId
-                local.clientId = diaRemoto.clientId ?? local.clientId
-                local.deletadoEm = nil
-                local.syncStatus = .synced
-            } else if diaRemoto.backendId != nil {
-                diaRemoto.ciclo = ciclo
-                diaRemoto.syncStatus = .synced
-                contexto.insert(diaRemoto)
-                // Não faça append manual na relação inversa: ao setar diaRemoto.ciclo,
-                // o SwiftData atualiza ciclo.dias automaticamente.
-            } else {
-                logger.warning("Dia remoto sem backendId ignorado no ciclo \(backendId, privacy: .public)")
             }
         }
     }
@@ -1144,8 +1082,19 @@ actor SyncActor: ModelActor {
         )
 
         let todosGastos = ((try? modelContext.fetch(gastoDescriptor)) ?? [])
+        // Gasto apagado cujo dia (ou cuja viagem) também tem `deletadoEm` não
+        // manda DELETE próprio: o servidor já o apaga em cascata junto com o
+        // pai (`remover_dia` leva os gastos do dia). Ele conclui junto quando
+        // o DELETE do pai termina — encerramento no fim desta etapa. Sem isso,
+        // encurtar uma viagem com 100 gastos nos dias que saem fazia mais de
+        // 100 pedidos e esbarrava no limite por minuto (429).
         let gastos = todosGastos
-            .filter { $0.dia?.ciclo?.userId == userId && deveTentar($0, agora: agora, forcar: forcar) }
+            .filter {
+                $0.dia?.ciclo?.userId == userId
+                    && $0.dia?.deletadoEm == nil
+                    && $0.dia?.ciclo?.deletadoEm == nil
+                    && deveTentar($0, agora: agora, forcar: forcar)
+            }
         logger.info("syncDeletions: \(gastos.count, privacy: .public) gasto(s) para deletar")
 
         for gasto in gastos {
@@ -1194,8 +1143,14 @@ actor SyncActor: ModelActor {
             sortBy: [SortDescriptor(\.criadoEm)]
         )
         let todosDias = ((try? modelContext.fetch(diaDescriptor)) ?? [])
+        // Mesma cascata: dia apagado de uma viagem apagada espera o `DELETE`
+        // da viagem — o servidor o remove junto com ela.
         let dias = todosDias
-            .filter { $0.ciclo?.userId == userId && deveTentar($0, agora: agora, forcar: forcar) }
+            .filter {
+                $0.ciclo?.userId == userId
+                    && $0.ciclo?.deletadoEm == nil
+                    && deveTentar($0, agora: agora, forcar: forcar)
+            }
         logger.info("syncDeletions: \(dias.count, privacy: .public) dia(s) para deletar")
 
         for dia in dias {
@@ -1284,6 +1239,25 @@ actor SyncActor: ModelActor {
                 }
             }
             marcarSucesso(ciclo)
+        }
+
+        // Encerramento da cascata: o pai apagado com `.synced` já saiu do
+        // servidor (sucesso ou 404 da API no DELETE, ou nunca existiu lá) e
+        // levou os filhos junto — eles concluem sem DELETE próprio. Se o
+        // DELETE do pai falhou, os filhos ficam como estão e saem junto na
+        // próxima vez. Dias antes dos gastos: um dia recém-concluído pela
+        // viagem já leva os gastos dele junto.
+        for dia in todosDias where dia.syncStatus != .synced && dia.ciclo?.userId == userId {
+            if let ciclo = dia.ciclo, ciclo.deletadoEm != nil, ciclo.syncStatus == .synced {
+                marcarSucesso(dia)
+            }
+        }
+        for gasto in todosGastos where gasto.syncStatus != .synced && gasto.dia?.ciclo?.userId == userId {
+            let diaConcluido = gasto.dia.map { $0.deletadoEm != nil && $0.syncStatus == .synced } ?? false
+            let cicloConcluido = gasto.dia?.ciclo.map { $0.deletadoEm != nil && $0.syncStatus == .synced } ?? false
+            if diaConcluido || cicloConcluido {
+                marcarSucesso(gasto)
+            }
         }
 
         salvar(modelContext, etapa: "syncDeletions")

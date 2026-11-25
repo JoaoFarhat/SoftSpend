@@ -162,7 +162,9 @@ struct EdicaoCicloSyncTests {
 
         #expect(await sync() == 0)
 
-        #expect(api.chamadas == [.putCiclo, .deleteGasto, .deleteDia])
+        // O servidor apaga os gastos junto com o dia (`remover_dia`): só sai o
+        // DELETE do dia e os gastos marcados concluem junto, sem DELETE próprio.
+        #expect(api.chamadas == [.putCiclo, .deleteDia])
         #expect(api.dias.count == 2)
         #expect(api.gastos.count == 1)
         #expect(api.gastos.first?.titulo == "Almoço")
@@ -171,5 +173,7 @@ struct EdicaoCicloSyncTests {
         let vivos = dias.filter { $0.deletadoEm == nil }
         #expect(vivos.count == 2)
         #expect(dias.first { $0.deletadoEm != nil }?.syncStatus == .synced)
+        let gastos = try ModelContext(container).fetch(FetchDescriptor<GastosDia>())
+        #expect(gastos.first { $0.deletadoEm != nil }?.syncStatus == .synced)
     }
 }
