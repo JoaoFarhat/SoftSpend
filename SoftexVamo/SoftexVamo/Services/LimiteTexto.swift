@@ -35,3 +35,18 @@ nonisolated enum LimiteTexto {
         cortarTitulo(texto.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 }
+
+/// Teto de valor que o servidor impõe (`max_digits=10, decimal_places=2` nos
+/// DTOs). Sem ele, um zero a mais no gasto ou no total/diária da viagem
+/// voltava 422 e o `SyncActor` retentava com backoff para sempre.
+///
+/// `nonisolated`: acessível de qualquer isolamento, como `LimiteTexto`.
+nonisolated enum LimiteValor {
+    /// Maior valor que cabe em `max_digits=10, decimal_places=2`
+    /// (`Python/dtos/gasto/gasto_request.py`, `Python/dtos/ciclo/ciclo_request.py`):
+    /// R$ 99.999.999,99.
+    static let maximo = Decimal(string: "99999999.99")!
+
+    /// Frase única do teto, mostrada no formulário da viagem e no do gasto.
+    static let mensagem = "O valor máximo é R$ 99.999.999,99"
+}

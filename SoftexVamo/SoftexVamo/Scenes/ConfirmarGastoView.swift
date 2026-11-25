@@ -157,6 +157,12 @@ struct ConfirmarGastoView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Espaco.m) {
                     cabecalho
+                    if let erroValor = rascunho.erroValor {
+                        Text(erroValor)
+                            .font(.footnote)
+                            .foregroundStyle(Tema.alertaTexto)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     if let aviso = rascunho.aviso {
                         Text(aviso)
                             .font(.footnote)

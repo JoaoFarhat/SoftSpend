@@ -17,7 +17,7 @@ struct FormularioViagemTests {
     func dec(_ s: String) -> Decimal { Decimal(string: s)! }
 
     func formulario(ida: Int = 20, volta: Int = 25) -> FormularioViagem {
-        FormularioViagem(ida: d(ida), volta: d(volta), calendario: cal)
+        FormularioViagem(ida: d(ida), volta: d(volta), calendario: cal, hoje: d(20))
     }
 
     // MARK: Dias
@@ -25,7 +25,7 @@ struct FormularioViagemTests {
     @Test func contaIdaEVolta() {
         #expect(formulario().dias == 6)
         #expect(formulario(ida: 20, volta: 20).dias == 1)
-        #expect(FormularioViagem(ida: d(25), volta: d(20), calendario: cal).dias == 0)
+        #expect(FormularioViagem(ida: d(25), volta: d(20), calendario: cal, hoje: d(20)).dias == 0)
     }
 
     // MARK: Campos ligados
@@ -87,7 +87,7 @@ struct FormularioViagemTests {
 
     /// Viagem antiga aberta para editar (nada digitado ainda): vale o total, como antes.
     @Test func mudarDatasSemCampoDigitadoMantemOTotal() {
-        var f = FormularioViagem(ida: d(20), volta: d(25), total: 2700, calendario: cal)
+        var f = FormularioViagem(ida: d(20), volta: d(25), total: 2700, calendario: cal, hoje: d(20))
         f.mudarVolta(d(28))
         #expect(f.total == 2700)
         #expect(f.diariaTexto == "300,00")
@@ -119,7 +119,7 @@ struct FormularioViagemTests {
     }
 
     @Test func edicaoComecaPeloTotal() {
-        let f = FormularioViagem(ida: d(20), volta: d(25), total: 2700, destino: "Cuiabá, MT", calendario: cal)
+        let f = FormularioViagem(ida: d(20), volta: d(25), total: 2700, destino: "Cuiabá, MT", calendario: cal, hoje: d(20))
         #expect(f.totalTexto == "2.700,00")
         #expect(f.diariaTexto == "450,00")
         #expect(f.ultimoEditado == nil)
@@ -139,10 +139,118 @@ struct FormularioViagemTests {
         f.editarDiaria("450")
         #expect(f.erro == nil)
 
-        var invertido = FormularioViagem(ida: d(25), volta: d(20), calendario: cal)
+        var invertido = FormularioViagem(ida: d(25), volta: d(20), calendario: cal, hoje: d(20))
         invertido.destino = "Recife"
         invertido.editarTotal("100")
         #expect(invertido.erro == "A volta precisa ser no dia da ida ou depois")
+    }
+
+    // MARK: Teto de valor do servidor
+
+    /// `max_digits=10, decimal_places=2` nos DTOs: R$ 99.999.999,99 ainda
+    /// salva; acima disso o servidor devolve 422 e a viagem inteira ficava
+    /// tentando subir para sempre — o formulário bloqueia antes de gravar.
+    @Test func totalNoTetoDoServidorSalva() async throws {
+        let container = try ModelContainer(
+            for: CicloSoftex.self, DiaSoftex.self, GastosDia.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        let vm = CiclosViewModel()
+        vm.modelContext = ModelContext(container)
+
+        var f = formulario()
+        f.destino = "Cuiabá, MT"
+        f.editarTotal("99.999.999,99")
+        #expect(f.erro == nil)
+        let total = try #require(f.total)
+
+        try await vm.createNewCiclo(startDate: f.ida, endDate: f.volta, totalValue: total, titulo: f.destino)
+
+        #expect(vm.allCiclos.first?.valor_total == dec("99999999.99"))
+    }
+
+    @Test func totalAcimaDoTetoDoServidorBloqueia() {
+        var f = formulario()
+        f.destino = "Cuiabá, MT"
+        f.editarTotal("100.000.000,00")
+        #expect(f.erro == "O valor máximo é R$ 99.999.999,99")
+    }
+
+    /// O buraco do zero a mais na diária: o total recalculado (diária × dias)
+    /// é o que passa do teto — R$ 5 milhões/dia numa viagem de 30 dias.
+    @Test func diariaQueVezesOsDiasPassaDoTetoBloqueia() {
+        var f = FormularioViagem(ida: d(1), volta: d(30), calendario: cal, hoje: d(20)) // 30 dias
+        f.destino = "Cuiabá, MT"
+        f.editarDiaria("5.000.000")
+        #expect(f.total == dec("150000000"))
+        #expect(f.erro == "O valor máximo é R$ 99.999.999,99")
+    }
+
+    /// Diária alta que, vezes os dias, ainda cabe no teto continua livre.
+    @Test func diariaNoTetoComUmDiaPassa() {
+        var f = FormularioViagem(ida: d(20), volta: d(20), calendario: cal, hoje: d(20)) // 1 dia
+        f.destino = "Cuiabá, MT"
+        f.editarDiaria("99.999.999,99")
+        #expect(f.erro == nil)
+    }
+
+    // MARK: Janela de datas (servidor: hoje ± 5 anos)
+
+    /// Ida a `anosPermitidos` anos de hoje ainda salva; um dia além, o
+    /// servidor recusaria os dias (422) e a viagem inteira ficava tentando
+    /// subir para sempre — o formulário bloqueia antes de gravar.
+    @Test func idaNoLimiteDaJanelaSalvaEUmDiaAlemNao() {
+        let hoje = d(20)
+        let noLimite = cal.date(byAdding: .year, value: -FormularioViagem.anosPermitidos, to: hoje)!
+        let alem = cal.date(byAdding: .day, value: -1, to: noLimite)!
+
+        var dentro = FormularioViagem(ida: noLimite, volta: d(25), calendario: cal, hoje: hoje)
+        dentro.destino = "Cuiabá, MT"
+        dentro.editarTotal("600")
+        #expect(dentro.erro == nil)
+
+        var fora = FormularioViagem(ida: alem, volta: d(25), calendario: cal, hoje: hoje)
+        fora.destino = "Cuiabá, MT"
+        fora.editarTotal("600")
+        #expect(fora.erro == "Escolha datas até 4 anos antes ou depois de hoje")
+    }
+
+    /// O mesmo para a volta no futuro: 4 anos de hoje passa, 4 anos e 1 dia não.
+    @Test func voltaNoLimiteDaJanelaSalvaEUmDiaAlemNao() {
+        let hoje = d(20)
+        let noLimite = cal.date(byAdding: .year, value: FormularioViagem.anosPermitidos, to: hoje)!
+        let alem = cal.date(byAdding: .day, value: 1, to: noLimite)!
+
+        var dentro = FormularioViagem(ida: hoje, volta: noLimite, calendario: cal, hoje: hoje)
+        dentro.destino = "Cuiabá, MT"
+        dentro.editarTotal("60.000") // 4 anos de diária acima de R$ 0,01
+        #expect(dentro.erro == nil)
+
+        var fora = FormularioViagem(ida: hoje, volta: alem, calendario: cal, hoje: hoje)
+        fora.destino = "Cuiabá, MT"
+        fora.editarTotal("60.000")
+        #expect(fora.erro == "Escolha datas até 4 anos antes ou depois de hoje")
+    }
+
+    // MARK: Diária mínima (servidor: gt=0)
+
+    /// R$ 1 em 200 dias arredonda a R$ 0,01 e salva; em 201 dá 0,00 e o
+    /// servidor recusaria a diária (`gt=0`) — bloqueia com a frase.
+    @Test func diariaDeUmCentavoSalvaEAbaixoDelNao() {
+        let hoje = d(20)
+        var em200 = FormularioViagem(ida: hoje, volta: cal.date(byAdding: .day, value: 199, to: hoje)!,
+                                   calendario: cal, hoje: hoje)
+        em200.destino = "Cuiabá, MT"
+        em200.editarTotal("1,00")
+        #expect(em200.dias == 200)
+        #expect(em200.erro == nil)
+
+        var em201 = FormularioViagem(ida: hoje, volta: cal.date(byAdding: .day, value: 200, to: hoje)!,
+                                   calendario: cal, hoje: hoje)
+        em201.destino = "Cuiabá, MT"
+        em201.editarTotal("1,00")
+        #expect(em201.dias == 201)
+        #expect(em201.erro == "A diária ficaria abaixo de R$ 0,01. Aumente o total ou encurte a viagem")
     }
 
     // MARK: Leitura em pt-BR
@@ -173,7 +281,7 @@ struct FormularioViagemTests {
         let vm = CiclosViewModel()
         vm.modelContext = ModelContext(container)
 
-        var f = FormularioViagem(ida: d(20), volta: d(25), calendario: cal)
+        var f = FormularioViagem(ida: d(20), volta: d(25), calendario: cal, hoje: d(20))
         f.destino = "Cuiabá, MT"
         f.editarDiaria("450")
         #expect(f.erro == nil)

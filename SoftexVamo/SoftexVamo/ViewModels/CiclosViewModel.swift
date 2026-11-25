@@ -859,7 +859,10 @@ final class CiclosViewModel: ObservableObject {
         let dayCount = Calendar.current.datesBetween(startDate, and: endDate)
         let safeDayCount = max(dayCount, 1)
 
-        let saldo = totalValue / Decimal(safeDayCount)
+        // Mesma diária que o servidor grava (arredondada a 2 casas): a crua
+        // (33,3333…) ficava diferente do que voltava na leitura — e vira o
+        // saldo de cada dia em `salvarNovoCicloLocal`.
+        let saldo = ValoresViagem.diaria(total: totalValue, dias: safeDayCount)
         let periodo = createPeriodoString(from: startDate, to: endDate)
 
         let newCiclo = CicloSoftex(userId: currentUser?.id ?? "", valor_total: totalValue, gasto_total: Decimal(0), periodo: periodo, diaria: saldo, titulo: LimiteTexto.titulo(titulo), dias: nil)

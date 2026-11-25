@@ -97,7 +97,7 @@ struct DemoInicioView: View {
 
     /// Tela 4: Cuiabá, 20 a 25/07, digitando só a diária de R$ 450.
     private var formularioExemplo: FormularioViagem {
-        var f = FormularioViagem(ida: dados.dia(20), volta: dados.dia(25), destino: "Cuiabá, MT")
+        var f = FormularioViagem(ida: dados.dia(20), volta: dados.dia(25), destino: "Cuiabá, MT", hoje: dados.hoje)
         f.editarDiaria("450")
         f.formatarCampos()
         return f
