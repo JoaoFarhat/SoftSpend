@@ -956,7 +956,8 @@ Testes em `tests/test_conta_demo.py`.
 
 Para conferir se o servidor está pronto para a loja (banco conecta,
 `alembic_version` igual ao head, segredos e `APPLE_*` presentes, `.cer` em
-`certificados_apple/`, conta de demonstração liberada), rode na EC2, de
+`certificados_apple/`, conta de demonstração liberada, timers da conferência
+das assinaturas e do backup ligados), rode na EC2, de
 dentro de `Python/`: `python -m scripts.conferir_servidor`. Imprime uma
 linha `OK`/`FALTA` por item — nunca o valor de segredos — e sai 1 se faltar
 algo. Testes em `tests/test_conferir_servidor.py`.

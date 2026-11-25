@@ -40,8 +40,12 @@ def _ambiente_ok() -> dict:
 
 
 @pytest.fixture
-def ambiente(tmp_path):
+def ambiente(tmp_path, monkeypatch):
     """Banco SQLite + pasta Python/ falsa, tudo pronto para sair 0."""
+    # Os timers só existem na EC2; nos testes, os dois ligados por padrão.
+    monkeypatch.setattr(
+        cs, "_estado_timer", lambda nome: ("enabled", "active")
+    )
     pasta = tmp_path / "Python"
     (pasta / "alembic" / "versions").mkdir(parents=True)
     (pasta / "alembic" / "versions" / f"{HEAD}_rev.py").write_text(
@@ -231,3 +235,30 @@ def test_billing_enforcement_aparece_mas_nao_e_falta(ambiente, capsys):
         ambiente=env, sessao=ambiente["session"], pasta=ambiente["pasta"]
     ) == 0
     assert "BILLING_ENFORCEMENT=off" in _linhas(capsys)
+
+
+def test_timers_ligados_dao_ok(ambiente, capsys):
+    assert _rodar(ambiente) == 0
+    assert any(
+        l.startswith("OK timers diários") for l in _linhas(capsys).splitlines()
+    )
+
+
+def test_timer_assinaturas_desligado_da_falta(ambiente, capsys, monkeypatch):
+    def _estado(nome):
+        if nome == "softspend-assinaturas.timer":
+            return ("disabled", "inactive")
+        return ("enabled", "active")
+
+    monkeypatch.setattr(cs, "_estado_timer", _estado)
+    assert _rodar(ambiente) == 1
+    falta = [l for l in _linhas(capsys).splitlines() if l.startswith("FALTA")]
+    assert len(falta) == 1
+    assert "softspend-assinaturas.timer" in falta[0]
+    assert "setup.sh" in falta[0]
+
+
+def test_sem_systemctl_da_falta(ambiente, capsys, monkeypatch):
+    monkeypatch.setattr(cs, "_estado_timer", lambda nome: None)
+    assert _rodar(ambiente) == 1
+    assert "systemctl indisponível" in _linhas(capsys)

@@ -13,6 +13,7 @@ banco e a pasta `Python/`; `main` só junta as três coisas e imprime.
 """
 
 import os
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -195,6 +196,52 @@ def conferir_liberacao(ambiente: dict, sessao, pasta: Path) -> Resultado:
     return Resultado(True, nome, f"{len(ids)} id(s) liberado(s) existe(m) ({info})")
 
 
+TIMERS_DIARIOS = (
+    "softspend-assinaturas.timer",
+    "softspend-backup.timer",
+)
+
+
+def _estado_timer(nome: str) -> tuple[str, str] | None:
+    """Par `(is-enabled, is-active)` do timer; `None` se não há `systemctl`."""
+    estados = []
+    for subcomando in ("is-enabled", "is-active"):
+        try:
+            saida = subprocess.run(
+                ["systemctl", subcomando, nome],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except FileNotFoundError:
+            return None
+        except (OSError, subprocess.TimeoutExpired):
+            return ("desconhecido", "desconhecido")
+        estados.append(saida.stdout.strip())
+    return (estados[0], estados[1])
+
+
+def conferir_timers(ambiente: dict, sessao, pasta: Path) -> Resultado:
+    """Os timers diários (conciliação das assinaturas e backup) ficam
+    desligados quando o `setup.sh` rodou antes das `APPLE_*`/`backup.env`;
+    aqui isso vira FALTA em vez de passar em silêncio."""
+    nome = "timers diários"
+    desligados = []
+    for timer in TIMERS_DIARIOS:
+        estado = _estado_timer(timer)
+        if estado is None:
+            return Resultado(False, nome, "systemctl indisponível")
+        if estado != ("enabled", "active"):
+            desligados.append(f"{timer} ({estado[0]}/{estado[1]})")
+    if desligados:
+        return Resultado(
+            False,
+            nome,
+            f"{'; '.join(desligados)} — rodar o setup.sh de novo",
+        )
+    return Resultado(True, nome, "assinaturas e backup enabled/active")
+
+
 CHECAGENS = (
     conferir_banco,
     conferir_migracoes,
@@ -203,6 +250,7 @@ CHECAGENS = (
     conferir_apple,
     conferir_certificados,
     conferir_liberacao,
+    conferir_timers,
 )
 
 
