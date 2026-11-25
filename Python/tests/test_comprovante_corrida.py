@@ -62,13 +62,14 @@ def _storage_falso(monkeypatch) -> tuple[dict, list]:
         subidas.append(key)
         return key
 
-    def _remover(key):
-        arquivos.pop(key, None)
-        arquivos.pop(_thumb(key), None)
+    def _remover(keys):
+        for key in keys:
+            arquivos.pop(key, None)
+            arquivos.pop(_thumb(key), None)
 
     monkeypatch.setattr(storage_service, "esta_configurado", lambda: True)
     monkeypatch.setattr(storage_service, "salvar_comprovante", _salvar)
-    monkeypatch.setattr(storage_service, "remover_comprovante", _remover)
+    monkeypatch.setattr(storage_service, "remover_comprovantes", _remover)
     return arquivos, subidas
 
 
