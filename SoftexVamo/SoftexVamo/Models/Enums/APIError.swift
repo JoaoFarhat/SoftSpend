@@ -14,7 +14,10 @@ nonisolated enum APIError: LocalizedError, Sendable {
 
     var errorDescription: String? {
         switch self {
-        case .serverError(let message, _, _):
+        case .serverError(let message, _, let statusCode):
+            if statusCode == 422 && message == Self.codigoTotalViagemAcimaDoLimite {
+                return "O total da viagem passaria de R$ 99.999.999,99. Diminua o valor ou apague outro gasto."
+            }
             return message
         case .badURL:
             return "URL invalida"
@@ -63,4 +66,10 @@ nonisolated enum APIError: LocalizedError, Sendable {
         }
         return false
     }
+
+    /// Código que o servidor manda no corpo do 422 quando um gasto levaria o
+    /// total da viagem além de R$ 99.999.999,99. O `errorDescription` troca
+    /// esse código por uma frase em português — sem isso o `syncError`
+    /// mostrava o código cru na tela.
+    static let codigoTotalViagemAcimaDoLimite = "total_da_viagem_acima_do_limite"
 }
