@@ -420,6 +420,9 @@ struct ExclusaoNoServidorTests {
 
         vm.fetchCiclosResumo()
         await vm.loadCiclosTask?.value
+        // Os dias da 1ª página chegam numa tarefa à parte: sem esperá-la, a
+        // contagem abaixo podia ser tirada no meio e mudar depois.
+        await vm.loadMoreDiasTask?.value
         #expect(api.antesDeChamados.count == 1)
         let diasAntes = api.diasBuscados.count
 
