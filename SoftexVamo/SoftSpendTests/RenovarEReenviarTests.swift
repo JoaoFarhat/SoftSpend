@@ -25,11 +25,9 @@ private func erroServidor(_ status: Int) -> APIError {
     .serverError(message: "x", requestId: "-", statusCode: status)
 }
 
-private func ehErroServidor(_ status: Int) -> (Error) -> Bool {
-    { erro in
-        guard case APIError.serverError(_, _, let s) = erro else { return false }
-        return s == status
-    }
+private func ehErroServidor(_ erro: Error, _ status: Int) -> Bool {
+    guard case APIError.serverError(_, _, let s) = erro else { return false }
+    return s == status
 }
 
 /// O reenvio com o token novo roda FORA do `catch` do refresh: falhar depois
@@ -45,8 +43,8 @@ struct RenovarEReenviarTests {
                 reenviar: { _ -> Int in throw URLError(.timedOut) },
                 deslogar: { r.deslogar() }
             )
-        } throws: {
-            ($0 as? URLError)?.code == .timedOut
+        } throws: { erro in
+            return (erro as? URLError)?.code == .timedOut
         }
         #expect(r.deslogadas == 0)
     }
@@ -60,7 +58,9 @@ struct RenovarEReenviarTests {
                 reenviar: { _ -> Int in throw erroServidor(status) },
                 deslogar: { r.deslogar() }
             )
-        } throws: ehErroServidor(status)
+        } throws: { erro in
+            return ehErroServidor(erro, status)
+        }
         #expect(r.deslogadas == 0)
     }
 
@@ -72,8 +72,8 @@ struct RenovarEReenviarTests {
                 reenviar: { _ -> Int in 42 },
                 deslogar: { r.deslogar() }
             )
-        } throws: {
-            guard case APIError.authentication = $0 else { return false }
+        } throws: { erro in
+            guard case APIError.authentication = erro else { return false }
             return true
         }
         #expect(r.deslogadas == 1)
@@ -87,7 +87,9 @@ struct RenovarEReenviarTests {
                 reenviar: { _ -> Int in 42 },
                 deslogar: { r.deslogar() }
             )
-        } throws: ehErroServidor(429)
+        } throws: { erro in
+            return ehErroServidor(erro, 429)
+        }
         #expect(r.deslogadas == 0)
     }
 
