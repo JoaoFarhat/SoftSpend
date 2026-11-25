@@ -195,6 +195,59 @@ struct GastoDuplicadoTests {
         #expect(gastos[0].comprovanteDataCriptografado == Data([1, 2, 3]))
     }
 
+    /// A nota migrada vem com o `comprovanteMime` junto: sem ele, um PDF
+    /// herdado era tratado como foto ("image/jpeg") na tela.
+    @Test func duplicataEditadaHerdaNotaComMimeDaOutra() async throws {
+        let local = subirViagem()
+        let antigo = GastosDia(valor: 25, titulo: "Almoço", categoria: .ALIMENTACAO, dia: local.dia)
+        antigo.backendId = 5
+        antigo.syncStatus = .synced
+        antigo.criadoEm = Date(timeIntervalSinceNow: -3600)
+        antigo.comprovanteDataCriptografado = Data([1, 2, 3])
+        antigo.comprovanteMime = "application/pdf"
+        ctx.insert(antigo)
+        let novo = GastosDia(valor: 30, titulo: "Almoço", categoria: .ALIMENTACAO, dia: local.dia)
+        novo.backendId = 5  // pending: edição ainda não enviada
+        ctx.insert(novo)
+        try ctx.save()
+
+        let vm = viewModel(local)
+        await vm.carregarDiasDoServidor(cicloId: 7) { _, _ in [self.diaDoServidor(local.dia)] }
+
+        let gastos = try gastosNoBanco()
+        try #require(gastos.count == 1)
+        #expect(gastos[0].id == novo.id)
+        #expect(gastos[0].comprovanteDataCriptografado == Data([1, 2, 3]))
+        #expect(gastos[0].comprovanteMime == "application/pdf")
+    }
+
+    /// A cópia que fica tem a remoção da nota ainda não enviada
+    /// (`comprovanteParaRemover`): a nota da outra não migra, senão a nota
+    /// tirada voltava e o sync a enviava de novo.
+    @Test func duplicataComRemocaoPendenteNaoHerdaNotaDaOutra() async throws {
+        let local = subirViagem()
+        let antigo = GastosDia(valor: 25, titulo: "Almoço", categoria: .ALIMENTACAO, dia: local.dia)
+        antigo.backendId = 5
+        antigo.syncStatus = .synced
+        antigo.criadoEm = Date(timeIntervalSinceNow: -3600)
+        antigo.comprovanteDataCriptografado = Data([1, 2, 3])
+        ctx.insert(antigo)
+        let novo = GastosDia(valor: 30, titulo: "Almoço", categoria: .ALIMENTACAO, dia: local.dia)
+        novo.backendId = 5  // pending: a pessoa tirou a nota e a remoção não subiu
+        novo.comprovanteParaRemover = true
+        ctx.insert(novo)
+        try ctx.save()
+
+        let vm = viewModel(local)
+        await vm.carregarDiasDoServidor(cicloId: 7) { _, _ in [self.diaDoServidor(local.dia)] }
+
+        let gastos = try gastosNoBanco()
+        try #require(gastos.count == 1)
+        #expect(gastos[0].id == novo.id)
+        #expect(gastos[0].comprovanteDataCriptografado == nil)
+        #expect(gastos[0].comprovanteParaRemover)
+    }
+
     /// Sem comprovante pendente em nenhuma cópia, fica a mais antiga.
     @Test func duplicataSemComprovanteFicaAMaisAntiga() async throws {
         let local = subirViagem()

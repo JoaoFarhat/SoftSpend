@@ -752,9 +752,10 @@ final class CiclosViewModel: ObservableObject {
             let candidatos = comAlteracao.isEmpty ? iguais : comAlteracao
             guard let fica = candidatos.first(where: { $0.comprovanteDataCriptografado != nil })
                 ?? candidatos.min(by: { $0.criadoEm < $1.criadoEm }) else { continue }
-            if fica.comprovanteDataCriptografado == nil,
+            if fica.comprovanteDataCriptografado == nil && !fica.comprovanteParaRemover,
                let doadora = iguais.first(where: { $0.id != fica.id && $0.comprovanteDataCriptografado != nil }) {
                 fica.comprovanteDataCriptografado = doadora.comprovanteDataCriptografado
+                fica.comprovanteMime = doadora.comprovanteMime
             }
             for outro in iguais where outro.id != fica.id {
                 modelContext?.delete(outro)
