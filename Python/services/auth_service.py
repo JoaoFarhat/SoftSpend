@@ -199,7 +199,13 @@ def refresh_access_token(
     # que ela ainda esteja ativa.
     if rt.revoked_at is not None:
         # Lida a cada chamada para permitir ajuste sem restart.
-        janela = int(os.getenv("REFRESH_REUSE_GRACE_SECONDS", "60"))
+        try:
+            janela = int(os.getenv("REFRESH_REUSE_GRACE_SECONDS", "60"))
+        except ValueError:
+            logger.warning(
+                "REFRESH_REUSE_GRACE_SECONDS invalido; usando o padrao de 60s"
+            )
+            janela = 60
         if (
             janela > 0
             and agora - rt.revoked_at <= timedelta(seconds=janela)

@@ -238,6 +238,16 @@ final class AssinaturaViewModel: ObservableObject {
         await reenviarPendentes()
     }
 
+    /// Volta ao primeiro plano (`.active` da cena): relê o estado e reenvia
+    /// as compras sem `finish()` — quem pagou com o servidor fora não
+    /// precisa reabrir o app para a assinatura destravar. Sem login não faz
+    /// nada.
+    func voltouAoPrimeiroPlano() async {
+        guard usuarioLogado() != nil else { return }
+        await carregarEstado()
+        await reenviarPendentes()
+    }
+
     /// `GET /api/assinatura`. Falha mantém o estado anterior (desconhecido
     /// fica desconhecido): quem decide no envio é o servidor.
     func carregarEstado() async {

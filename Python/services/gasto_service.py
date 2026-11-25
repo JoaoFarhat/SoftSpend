@@ -248,7 +248,15 @@ def anexar_comprovante(db: Session, gasto_id: int, conteudo: bytes, content_type
 
     _buscar_gasto_do_usuario(db, gasto_id, user_id)
 
-    nova_key = storage_service.salvar_comprovante(user_id, gasto_id, conteudo, content_type)
+    # ValueError do storage = arquivo ilegivel/invalido: responde 422 com a
+    # mensagem para o usuario, antes de qualquer gravacao no banco. Sem este
+    # try a rota caia em 500 e o app repetia o upload para sempre.
+    try:
+        nova_key = storage_service.salvar_comprovante(
+            user_id, gasto_id, conteudo, content_type
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     marcar_comprovante_para_remover_no_rollback(db, nova_key)
 
     # Se o gasto sumiu entre o upload e a trava, o 404 leva ao rollback e o

@@ -1,11 +1,12 @@
 import logging
 import os
 import uuid
+from collections.abc import Iterable
 from io import BytesIO
 
 import boto3
 from botocore.config import Config
-from PIL import Image
+from PIL import Image, ImageOps
 
 from services.pdfium_seguro import trava_pdfium
 
@@ -17,6 +18,11 @@ URL_EXPIRACAO_SEGUNDOS = int(os.getenv("S3_URL_EXPIRACAO", str(3600)))
 
 MAX_IMAGEM_LARGURA = int(os.getenv("S3_MAX_IMAGEM_LARGURA", "5000"))
 MAX_IMAGEM_ALTURA = int(os.getenv("S3_MAX_IMAGEM_ALTURA", "5000"))
+
+# Teto de pixels (largura x altura) conferido logo apos o Image.open, que so
+# le o cabecalho. Um PNG de 10 MB pode ter ~170 Mpx e ocupar ~700 MB ao
+# decodificar; o padrao fica acima do panorama do iPhone.
+MAX_IMAGEM_PIXELS = int(os.getenv("S3_MAX_IMAGEM_PIXELS", "70000000"))
 
 # Lado maior da miniatura usada no relatorio. Grande o suficiente para uma nota
 # ficar legivel ampliada, pequeno o suficiente para o download em paralelo.
@@ -72,13 +78,23 @@ def _conteudo_para_jpeg(conteudo: bytes) -> tuple[bytes, str]:
     try:
         img = Image.open(BytesIO(conteudo))
     except Exception as e:
-        raise ValueError(f"Arquivo nao e uma imagem valida: {e}")
+        logger.warning("Falha ao abrir imagem de comprovante: %s", type(e).__name__)
+        raise ValueError("Não foi possível abrir esta imagem; anexe outra foto")
+
+    if img.width * img.height > MAX_IMAGEM_PIXELS:
+        raise ValueError("Imagem grande demais; tire outra foto ou anexe um PDF")
 
     if not _formato_imagem_permitido(img):
-        raise ValueError("Formato de imagem nao suportado. Use JPEG, PNG ou WEBP")
+        raise ValueError("Formato de imagem não suportado; use JPEG, PNG ou WEBP")
 
+    # A foto do app chega com a marca de orientacao (EXIF); girar os pixels
+    # antes de medir evita a nota deitada no relatorio e no link.
+    img = ImageOps.exif_transpose(img)
+
+    # A camera atual tira fotos maiores que o teto (5712x4284 no iPhone 15/16):
+    # reduzir mantendo a proporcao em vez de recusar — antes a foto nunca subia.
     if img.width > MAX_IMAGEM_LARGURA or img.height > MAX_IMAGEM_ALTURA:
-        raise ValueError(f"Imagem excede as dimensoes maximas de {MAX_IMAGEM_LARGURA}x{MAX_IMAGEM_ALTURA}px")
+        img.thumbnail((MAX_IMAGEM_LARGURA, MAX_IMAGEM_ALTURA), Image.LANCZOS)
 
     if img.mode != "RGB":
         img = img.convert("RGB")
@@ -126,16 +142,17 @@ def pdf_primeira_pagina_para_jpeg(conteudo: bytes) -> bytes:
         try:
             documento = pdfium.PdfDocument(conteudo)
         except Exception as erro:
-            raise ValueError(f"PDF invalido: {erro}")
+            logger.warning("Falha ao abrir PDF de comprovante: %s", type(erro).__name__)
+            raise ValueError("Não foi possível abrir este PDF; anexe outro arquivo")
 
         try:
             if len(documento) == 0:
-                raise ValueError("PDF nao tem paginas")
+                raise ValueError("PDF não tem páginas")
 
             pagina = documento[0]
             largura_pt, altura_pt = pagina.get_size()
             if largura_pt <= 0 or altura_pt <= 0:
-                raise ValueError("PDF tem pagina sem dimensoes")
+                raise ValueError("PDF tem página sem dimensões")
             escala = min(
                 PDF_ESCALA_RENDER,
                 PDF_MAX_LADO_PX / largura_pt,
@@ -212,25 +229,56 @@ def salvar_comprovante(user_id: str, gasto_id: int, conteudo: bytes, content_typ
     return key
 
 
-def remover_comprovante(key: str | None) -> None:
-    """
-    Apaga o original e a miniatura do bucket.
+# Teto do delete_objects da API do S3: ate 1000 objetos por chamada.
+MAX_OBJETOS_POR_DELETE = 1000
 
-    Falhas sao apenas logadas: um objeto orfao no bucket e menos grave que
-    impedir o usuario de deletar/atualizar o gasto dele.
+
+def remover_comprovantes(keys: Iterable[str | None]) -> None:
+    """Apaga os originais e as miniaturas de varias keys de uma vez.
+
+    Uma chamada por nota, dentro do `db.commit()` do `get_db`, passava dos 8 s
+    de tempo limite do app ao excluir uma viagem ou a conta com centenas de
+    comprovantes. A falha de uma parte so e logada (nunca a key inteira) e nao
+    impede as seguintes — um objeto orfao no bucket e menos grave que impedir
+    o usuario de deletar.
     """
-    if not key or not _client:
+    if not _client:
         return
 
-    keys = keys_do_comprovante(key)
-
-    try:
-        _client.delete_objects(
-            Bucket=S3_BUCKET,
-            Delete={"Objects": [{"Key": k} for k in keys], "Quiet": True},
+    objetos = list(
+        dict.fromkeys(
+            objeto
+            for key in keys
+            if key
+            for objeto in keys_do_comprovante(key)
         )
-    except Exception as erro:
-        logger.warning("Falha ao remover comprovante %s: %s", key, type(erro).__name__)
+    )
+
+    for inicio in range(0, len(objetos), MAX_OBJETOS_POR_DELETE):
+        lote = objetos[inicio : inicio + MAX_OBJETOS_POR_DELETE]
+        try:
+            resposta = _client.delete_objects(
+                Bucket=S3_BUCKET,
+                Delete={"Objects": [{"Key": k} for k in lote], "Quiet": True},
+            )
+        except Exception as erro:
+            logger.warning(
+                "Falha ao remover lote de %d comprovante(s): %s",
+                len(lote),
+                type(erro).__name__,
+            )
+            continue
+
+        erros = resposta.get("Errors") or []
+        if erros:
+            logger.warning(
+                "Remocao em lote devolveu erro em %d objeto(s)", len(erros)
+            )
+
+
+def remover_comprovante(key: str | None) -> None:
+    """Apaga o original e a miniatura do bucket (ver `remover_comprovantes`)."""
+    remover_comprovantes([key])
 
 
 def _baixar(key: str) -> bytes | None:

@@ -75,10 +75,11 @@ struct SoftexVamoApp: App {
                 if fase == .active, !authService.isAuthenticated {
                     authService.checkAuthentication()
                 }
-                // Estado da assinatura relido ao voltar para o primeiro plano
-                // (só com login; sem login não faz nada).
+                // Estado da assinatura relido ao voltar para o primeiro plano,
+                // reenviando as compras pendentes (só com login; sem login não
+                // faz nada).
                 if fase == .active {
-                    Task { await AssinaturaViewModel.shared.carregarEstado() }
+                    Task { await AssinaturaViewModel.shared.voltouAoPrimeiroPlano() }
                 }
             }
         }

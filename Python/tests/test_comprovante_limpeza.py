@@ -6,7 +6,7 @@ Termos de que excluir a conta apaga os comprovantes. Cada teste aqui passa
 pela rota: a requisição marca o delete e o `session.commit()` — que em
 produção é feito pelo `get_db` — dispara a remoção.
 
-O mock em `storage_service.remover_comprovante` registra o que sairia para o
+O mock em `storage_service.remover_comprovantes` registra o que sairia para o
 S3; cada caso confere a key removida exatamente uma vez.
 """
 
@@ -25,7 +25,7 @@ from test_core_api import (
     ambiente,  # fixture reutilizada de test_core_api
 )
 
-REMOVER = "services.comprovante_cleanup.storage_service.remover_comprovante"
+REMOVER = "services.comprovante_cleanup.storage_service.remover_comprovantes"
 
 KEY_1 = "comprovantes/user-a/gasto-1.jpg"
 KEY_2 = "comprovantes/user-a/gasto-2.jpg"
@@ -54,7 +54,11 @@ def _novo_gasto(client, dia_id: int, client_id: str) -> dict:
 
 
 def _keys_removidas(remover) -> set:
-    return {chamada.args[0] for chamada in remover.call_args_list}
+    return {
+        key
+        for chamada in remover.call_args_list
+        for key in chamada.args[0]
+    }
 
 
 def test_delete_do_gasto_remove_o_comprovante_do_bucket(ambiente):
@@ -66,7 +70,7 @@ def test_delete_do_gasto_remove_o_comprovante_do_bucket(ambiente):
         assert client.delete(f"/gastos/{gasto['id']}").status_code == 204
         ambiente.session.commit()
 
-    remover.assert_called_once_with(KEY_1)
+    remover.assert_called_once_with({KEY_1})
 
 
 def test_delete_do_dia_remove_os_comprovantes_dos_gastos(ambiente):
@@ -80,7 +84,7 @@ def test_delete_do_dia_remove_os_comprovantes_dos_gastos(ambiente):
         assert client.delete(f"/dias/{dia['id']}").status_code == 204
         ambiente.session.commit()
 
-    assert remover.call_count == 2
+    remover.assert_called_once()
     assert _keys_removidas(remover) == {KEY_1, KEY_2}
 
 
@@ -98,7 +102,7 @@ def test_delete_da_viagem_remove_os_comprovantes_em_cascata(ambiente):
         assert client.delete(f"/ciclos/{ciclo['id']}").status_code == 204
         ambiente.session.commit()
 
-    assert remover.call_count == 2
+    remover.assert_called_once()
     assert _keys_removidas(remover) == {KEY_1, KEY_2}
 
 
@@ -117,7 +121,7 @@ def test_delete_do_dia_nao_toca_no_comprovante_do_dia_que_fica(ambiente):
         assert client.delete(f"/dias/{dia_2['id']}").status_code == 204
         ambiente.session.commit()
 
-    remover.assert_called_once_with(KEY_2)
+    remover.assert_called_once_with({KEY_2})
 
 
 def test_delete_da_conta_remove_todos_os_comprovantes(ambiente):
@@ -132,7 +136,7 @@ def test_delete_da_conta_remove_todos_os_comprovantes(ambiente):
         assert client.delete("/auth/conta").status_code == 204
         ambiente.session.commit()
 
-    assert remover.call_count == 2
+    remover.assert_called_once()
     assert _keys_removidas(remover) == {KEY_1, KEY_2}
     assert ambiente.session.get(models.User, USER_A) is None
 

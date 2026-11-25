@@ -732,17 +732,31 @@ final class CiclosViewModel: ObservableObject {
     }
 
     /// Duplicatas de gasto que já ficaram no aparelho (mesmo `backendId` em registros
-    /// diferentes): fica o que tem comprovante local ainda não enviado, senão o mais
-    /// antigo; os outros saem do SwiftData. Roda a cada carga dos dias do servidor,
-    /// junto com a dedup de dia (T6).
+    /// diferentes): fica a cópia com alteração local ainda não enviada (edição ou
+    /// exclusão pendente — sem isso o valor antigo voltava ou o gasto apagado
+    /// ressurgia); entre elas, a de nota guardada, senão a mais antiga. Sem
+    /// alteração local em nenhuma, vale a regra de antes: a de nota guardada,
+    /// senão a mais antiga. Se a que fica não tem nota guardada e uma das que
+    /// saem tem, os bytes cifrados migram para ela (sem decifrar) antes do
+    /// delete, para a nota não se perder. Roda a cada carga dos dias do
+    /// servidor, junto com a dedup de dia (T6).
     private func absorverDuplicatasDeGasto(no dia: DiaSoftex) {
         for backendId in Set(dia.gastos.compactMap(\.backendId)) {
             let descriptor = FetchDescriptor<GastosDia>(
                 predicate: #Predicate { $0.backendId == backendId }
             )
             guard let iguais = try? modelContext?.fetch(descriptor), iguais.count > 1 else { continue }
-            guard let fica = iguais.first(where: { $0.comprovanteDataCriptografado != nil })
-                ?? iguais.min(by: { $0.criadoEm < $1.criadoEm }) else { continue }
+            let comAlteracao = iguais.filter {
+                CicloSoftex.temAlteracaoLocal($0.syncStatus, deletadoEm: $0.deletadoEm)
+            }
+            let candidatos = comAlteracao.isEmpty ? iguais : comAlteracao
+            guard let fica = candidatos.first(where: { $0.comprovanteDataCriptografado != nil })
+                ?? candidatos.min(by: { $0.criadoEm < $1.criadoEm }) else { continue }
+            if fica.comprovanteDataCriptografado == nil && !fica.comprovanteParaRemover,
+               let doadora = iguais.first(where: { $0.id != fica.id && $0.comprovanteDataCriptografado != nil }) {
+                fica.comprovanteDataCriptografado = doadora.comprovanteDataCriptografado
+                fica.comprovanteMime = doadora.comprovanteMime
+            }
             for outro in iguais where outro.id != fica.id {
                 modelContext?.delete(outro)
             }

@@ -11,6 +11,7 @@ from PIL import Image, ImageOps
 from pydantic import BaseModel
 
 from enums.categoria_enum import Categoria
+from services import storage_service
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,12 @@ def aquecer() -> None:
 def _preprocessar_imagem(image_bytes: bytes) -> bytes:
     try:
         img = Image.open(BytesIO(image_bytes))
+        # Image.open so le o cabecalho: o teto de pixels barra aqui a imagem
+        # que explodiria a memoria ao decodificar.
+        if img.width * img.height > storage_service.MAX_IMAGEM_PIXELS:
+            raise SemRespostaGemini(
+                "Imagem grande demais; tire outra foto ou anexe um PDF"
+            )
         img = ImageOps.exif_transpose(img)
 
         if img.mode != "RGB":
@@ -185,14 +192,18 @@ def _preprocessar_imagem(image_bytes: bytes) -> bytes:
         buffer = BytesIO()
         img.save(buffer, format="JPEG", quality=JPEG_QUALITY, optimize=True)
         return buffer.getvalue()
+    except SemRespostaGemini:
+        raise
     except Exception as e:
         # A imagem nem chega ao Gemini: não gasta a cota do dia.
-        raise SemRespostaGemini(f"Imagem invalida: {e}")
+        logger.warning("Imagem invalida no OCR: %s", type(e).__name__)
+        raise SemRespostaGemini("Não foi possível abrir esta imagem; tente outra foto")
 
 
 def extrair_gasto_da_imagem(image_bytes: bytes) -> dict:
     if not _client:
-        raise SemRespostaGemini("GEMINI_API_KEY nao configurada no ambiente")
+        logger.error("GEMINI_API_KEY nao configurada")
+        raise SemRespostaGemini("A leitura automática está indisponível agora; preencha o gasto à mão")
 
     inicio_preproc = time.perf_counter()
     imagem_otimizada = _preprocessar_imagem(image_bytes)
@@ -220,11 +231,12 @@ def extrair_gasto_da_imagem(image_bytes: bytes) -> dict:
     dados = response.parsed
     if dados is None:
         if not response.text:
-            raise ValueError("Modelo nao retornou dados estruturados")
+            raise ValueError("Não foi possível ler este comprovante; preencha o gasto à mão")
         try:
             dados = GastoExtraido(**json.loads(response.text))
-        except (json.JSONDecodeError, Exception) as e:
-            raise ValueError(f"Modelo retornou resposta inesperada: {response.text[:200]} ({e})")
+        except Exception as e:
+            logger.warning("Resposta inesperada do modelo no OCR: %s", type(e).__name__)
+            raise ValueError("Não foi possível ler este comprovante; preencha o gasto à mão")
 
     return {
         "titulo": dados.titulo[:40],

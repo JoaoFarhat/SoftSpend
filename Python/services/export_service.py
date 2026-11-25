@@ -9,7 +9,7 @@ import csv
 import io
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from xml.sax.saxutils import escape, quoteattr
 
@@ -39,6 +39,10 @@ COMPROVANTE_NENHUM = "nenhum"
 
 MAX_DOWNLOADS_PARALELOS = 8
 
+# Deslocamento fixo: o Brasil nao tem horario de verao desde 2019 e o
+# `ZoneInfo` exigiria o pacote `tzdata` no Windows.
+FUSO_BRASIL = timezone(timedelta(hours=-3))
+
 # Altura maxima da miniatura na linha da tabela.
 COMPROVANTE_ALTURA_MAX = 32 * mm
 COMPROVANTE_LARGURA_MAX = 34 * mm
@@ -50,6 +54,10 @@ ROTULOS_CATEGORIA = {
     "COMPRAS": "Compras",
     "OUTROS": "Outros",
 }
+
+
+def _agora_brasil() -> datetime:
+    return datetime.now(timezone.utc).astimezone(FUSO_BRASIL)
 
 
 def _rotulo_categoria(categoria) -> str:
@@ -88,6 +96,15 @@ def _celula_csv(valor: str | None) -> str:
     return "'" + valor if valor.startswith(_INICIOS_FORMULA) else valor
 
 
+def _valor_csv(valor) -> str:
+    """Dinheiro com virgula decimal e sem separador de milhar ("1500,50").
+
+    O arquivo abre no Excel em pt-BR, onde "25.50" nao e numero: a coluna
+    viraria texto e a soma daria zero.
+    """
+    return f"{Decimal(valor or 0):.2f}".replace(".", ",")
+
+
 def _dias_ordenados(ciclo: models.Ciclo) -> list[models.Dia]:
     return sorted(ciclo.dias or [], key=lambda d: (d.data is None, d.data))
 
@@ -114,23 +131,23 @@ def gerar_csv(ciclo: models.Ciclo) -> bytes:
     writer = csv.writer(buffer, delimiter=";", quoting=csv.QUOTE_MINIMAL)
 
     writer.writerow(["Ciclo", _celula_csv(ciclo.titulo)])
-    writer.writerow(["Periodo", _celula_csv(ciclo.periodo)])
-    writer.writerow(["Valor total", f"{Decimal(ciclo.valor_total or 0):.2f}"])
-    writer.writerow(["Gasto total", f"{Decimal(ciclo.gasto_total or 0):.2f}"])
-    writer.writerow(["Diaria", f"{Decimal(ciclo.diaria or 0):.2f}"])
+    writer.writerow(["Período", _celula_csv(ciclo.periodo)])
+    writer.writerow(["Valor total", _valor_csv(ciclo.valor_total)])
+    writer.writerow(["Gasto total", _valor_csv(ciclo.gasto_total)])
+    writer.writerow(["Diária", _valor_csv(ciclo.diaria)])
     writer.writerow([])
-    writer.writerow(["Data", "Saldo do dia", "Titulo", "Categoria", "Valor", "Tem comprovante"])
+    writer.writerow(["Data", "Saldo do dia", "Título", "Categoria", "Valor", "Tem comprovante"])
 
     for dia in _dias_ordenados(ciclo):
-        saldo = f"{Decimal(dia.saldo or 0):.2f}"
+        saldo = _valor_csv(dia.saldo)
         for gasto in _gastos_do_dia(dia):
             writer.writerow([
                 _data(dia.data),
                 saldo,
                 _celula_csv(gasto.titulo),
                 _rotulo_categoria(gasto.categoria),
-                f"{Decimal(gasto.valor or 0):.2f}",
-                "sim" if gasto.comprovante_key else "nao",
+                _valor_csv(gasto.valor),
+                "sim" if gasto.comprovante_key else "não",
             ])
 
     return buffer.getvalue().encode("utf-8-sig")
@@ -222,7 +239,11 @@ def _tabela_resumo(ciclo: models.Ciclo, total_gastos: int, estilos) -> Table:
     return tabela
 
 
-def gerar_pdf(ciclo: models.Ciclo, comprovantes: str = COMPROVANTE_IMAGEM) -> bytes:
+def gerar_pdf(
+    ciclo: models.Ciclo,
+    comprovantes: str = COMPROVANTE_IMAGEM,
+    agora: datetime | None = None,
+) -> bytes:
     estilos = _estilos()
     thumbs = _baixar_thumbs(ciclo) if comprovantes == COMPROVANTE_IMAGEM else {}
 
@@ -294,7 +315,7 @@ def gerar_pdf(ciclo: models.Ciclo, comprovantes: str = COMPROVANTE_IMAGEM) -> by
         Paragraph("RELATÓRIO DE GASTOS", estilos["titulo"]),
         Paragraph(
             f"{escape(ciclo.titulo or '-')} &nbsp;·&nbsp; {escape(ciclo.periodo or '-')} &nbsp;·&nbsp; "
-            f"gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            f"gerado em {(agora or _agora_brasil()).strftime('%d/%m/%Y %H:%M')}",
             estilos["subtitulo"],
         ),
         Spacer(1, 8 * mm),

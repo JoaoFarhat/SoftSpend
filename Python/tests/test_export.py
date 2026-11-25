@@ -5,6 +5,10 @@ quebrava `gerar_pdf` e a rota devolvia 500. No CSV, texto que comeca com `=`,
 `+`, `-`, `@` (tab ou retorno tambem) vira formula ao abrir no Excel e leva `'`
 na frente.
 
+A hora do "gerado em" do PDF sai no fuso de Brasilia (UTC-3 fixo), porque a
+EC2 roda em UTC e o `datetime.now()` marcava a hora errada (e o dia seguinte
+depois das 21:00).
+
 Mesmo padrao de `test_core_api.py`: SQLite em `tmp_path` e
 `dependency_overrides` para `get_db` e `get_current_user_id`.
 """
@@ -12,7 +16,7 @@ Mesmo padrao de `test_core_api.py`: SQLite em `tmp_path` e
 import importlib
 import re
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -220,6 +224,84 @@ def test_csv_protege_titulo_contra_formula_e_mantem_saldo_negativo(ambiente):
     texto = response.content.decode("utf-8-sig")
     for titulo in ("=1+1", "+1+1", "@SUM(1)", "\tcmd"):
         assert f"'{titulo}" in texto
-    assert "-13.00" in texto
+    assert "-13,00" in texto
     # O titulo do ciclo e os valores numericos nao ganham o prefixo.
     assert "Ciclo;Viagem" in texto
+
+
+def test_csv_escreve_dinheiro_com_virgula_decimal(ambiente):
+    """No Excel pt-BR, "1500.50" nao e numero: a coluna virava texto e a
+    soma dava zero. Todo valor sai com virgula e sem separador de milhar."""
+    client = ambiente.como(USER_A)
+    ciclo, _, _ = _ciclo_dia_gasto(client, "Viagem", "Almoco", "1500.50")
+
+    response = client.get(
+        f"/ciclos/{ciclo['id']}/export", params={"formato": "csv"}
+    )
+
+    assert response.status_code == 200
+    texto = response.content.decode("utf-8-sig")
+    assert ";1500,50;" in texto
+    assert "1500.50" not in texto
+    assert "Valor total;700,00" in texto
+    assert "Diária;100,00" in texto
+
+
+@pytest.mark.parametrize(
+    "agora_utc,esperado",
+    [
+        # 23:40 UTC ainda sao 20:40 do mesmo dia em Brasilia.
+        (datetime(2026, 11, 25, 23, 40, tzinfo=timezone.utc), (25, 20, 40)),
+        # Depois das 21:00 em Brasilia o UTC ja virou o dia: 01:30 UTC do
+        # dia 26 e 22:30 do dia 25, nao o dia seguinte.
+        (datetime(2026, 11, 26, 1, 30, tzinfo=timezone.utc), (25, 22, 30)),
+    ],
+)
+def test_agora_brasil_converte_do_utc_do_servidor(monkeypatch, agora_utc, esperado):
+    """A EC2 roda em UTC; `_agora_brasil` converte para o fuso do relatorio."""
+    from services import export_service
+
+    class _DatetimeCongelado:
+        @staticmethod
+        def now(tz=None):
+            return agora_utc
+
+    monkeypatch.setattr(export_service, "datetime", _DatetimeCongelado)
+
+    agora = export_service._agora_brasil()
+
+    assert agora.tzinfo == export_service.FUSO_BRASIL
+    assert agora.utcoffset() == timedelta(hours=-3)
+    assert (agora.day, agora.hour, agora.minute) == esperado
+
+
+def test_gerar_pdf_escreve_gerado_em_na_hora_de_brasilia():
+    """O 'gerado em' sai no fuso de Brasilia, nao no UTC do servidor."""
+    import pypdfium2 as pdfium
+    import models
+    from services import export_service
+    from services.pdfium_seguro import trava_pdfium
+
+    ciclo = models.Ciclo(
+        titulo="Viagem",
+        periodo="01/11/2026 a 07/11/2026",
+        valor_total=Decimal("700.00"),
+        gasto_total=Decimal("0.00"),
+        diaria=Decimal("100.00"),
+    )
+    agora = datetime(2026, 11, 25, 20, 40, tzinfo=export_service.FUSO_BRASIL)
+
+    pdf = export_service.gerar_pdf(ciclo, agora=agora)
+
+    # O pypdfium2 nao e seguro entre threads: toda chamada fica na trava.
+    with trava_pdfium:
+        documento = pdfium.PdfDocument(pdf)
+        try:
+            texto = "".join(
+                documento[i].get_textpage().get_text_bounded()
+                for i in range(len(documento))
+            )
+        finally:
+            documento.close()
+
+    assert "gerado em 25/11/2026 20:40" in texto
