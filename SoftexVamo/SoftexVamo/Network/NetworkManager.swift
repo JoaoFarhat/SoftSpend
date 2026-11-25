@@ -37,6 +37,9 @@ nonisolated func ehFalhaTransitoriaDeRefresh(_ error: Error) -> Bool {
 /// inválido. Qualquer outro erro desloga como antes.
 nonisolated func deveDeslogarAposFalhaDeRefresh(_ error: Error) -> Bool {
     if error is CancellationError { return false }
+    // A conta do aparelho mudou durante a renovação: a falha é da sessão
+    // antiga, não da que está logada agora.
+    if case APIError.sessaoTrocada = error { return false }
     if let urlError = error as? URLError, urlError.code == .cancelled { return false }
     if case APIError.serverError(_, _, let statusCode) = error {
         return statusCode != 429
@@ -123,8 +126,66 @@ nonisolated struct CofreDeTokensKeychain: CofreDeTokens {
     func apagarTokens() { KeychainManager.deleteAllTokens() }
 }
 
+/// O `sub` (id do usuário) do payload de um JWT. Lê só o meio do token
+/// (base64url) e **não confere a assinatura**: serve apenas para o app saber
+/// se dois tokens são da mesma conta, nunca para autorizar nada. Token
+/// ilegível ou sem `sub` devolve `nil`.
+nonisolated func subDoJWT(_ token: String) -> String? {
+    let partes = token.split(separator: ".", omittingEmptySubsequences: false)
+    guard partes.count == 3 else { return nil }
+    var base64 = partes[1]
+        .replacingOccurrences(of: "-", with: "+")
+        .replacingOccurrences(of: "_", with: "/")
+    let resto = base64.count % 4
+    if resto == 1 { return nil }
+    if resto > 0 {
+        base64 += String(repeating: "=", count: 4 - resto)
+    }
+    guard let dados = Data(base64Encoded: base64),
+          let objeto = (try? JSONSerialization.jsonObject(with: dados)) as? [String: Any],
+          let sub = objeto["sub"] as? String,
+          !sub.isEmpty else {
+        return nil
+    }
+    return sub
+}
+
+/// O que fazer com um `401` de um pedido que podia renovar o token.
+nonisolated enum DecisaoApos401: Equatable, Sendable {
+    /// O cofre ainda tem o token enviado: renovar e reenviar, como sempre.
+    case renovar
+    /// Outra renovação da MESMA conta já trocou o token: reenviar uma vez
+    /// com o token atual, sem renovar de novo.
+    case reenviarCom(String)
+    /// A conta mudou (outro `sub`, token ilegível ou ninguém logado): o
+    /// pedido não sai de novo com o login de outra conta.
+    case sessaoTrocada
+}
+
+/// Compara o token que foi no pedido (`tokenEnviado`, sem o "Bearer ") com o
+/// que está no cofre agora (`tokenAtual`). Sem isso, um pedido de A que
+/// volta 401 depois de A sair e B entrar renovava o login de B e era
+/// reenviado com ele — o `POST /ciclos` de A criava a viagem na conta de B.
+nonisolated func decidirApos401(tokenEnviado: String?, tokenAtual: String?) -> DecisaoApos401 {
+    if tokenEnviado == tokenAtual { return .renovar }
+    guard let tokenEnviado, let tokenAtual,
+          let subEnviado = subDoJWT(tokenEnviado),
+          let subAtual = subDoJWT(tokenAtual),
+          subEnviado == subAtual else {
+        return .sessaoTrocada
+    }
+    return .reenviarCom(tokenAtual)
+}
+
+/// O token de um cabeçalho `Authorization: Bearer <token>`.
+nonisolated func tokenDoCabecalho(_ valor: String?) -> String? {
+    guard let valor, valor.hasPrefix("Bearer ") else { return nil }
+    return String(valor.dropFirst("Bearer ".count))
+}
+
 private actor TokenRefresher {
-    private var currentTask: Task<AuthResponse, Error>?
+    /// A renovação em voo e o refresh token que ela enviou.
+    private var emVoo: (refreshToken: String, task: Task<AuthResponse, Error>)?
     private let cofre: any CofreDeTokens
 
     init(cofre: any CofreDeTokens) {
@@ -135,33 +196,64 @@ private actor TokenRefresher {
     /// (e não no `init`) porque o refresher é criado junto com o manager,
     /// quando ainda não existe `self` para passar. Antes o refresh ia sempre
     /// pelo `NetworkManager.shared`, o que impedia testar o fluxo.
-    func refresh(atravesDe manager: NetworkManager) async throws -> AuthResponse {
-        if let task = currentTask {
-            return try await task.value
-        }
-
-        // Lido uma vez só: todas as tentativas reenviam este mesmo token.
-        guard let refreshToken = cofre.lerRefreshToken() else {
+    ///
+    /// `refreshToken` é o refresh token da sessão do pedido que levou o 401,
+    /// lido pelo `execute` junto com a comparação do access token (antes o
+    /// refresher lia o cofre por conta própria, depois de um salto de actor,
+    /// e podia renovar a conta que entrou nesse meio-tempo).
+    func refresh(atravesDe manager: NetworkManager, refreshToken: String?) async throws -> AuthResponse {
+        guard let refreshToken else {
             throw APIError.authentication
         }
 
-        let task = Task {
-            let response = try await repetindoSeTransitorio(esperas: esperasRefreshTransitorio) {
-                try await manager.refreshAccessToken(refreshToken: refreshToken)
+        if let emVoo {
+            // A renovação em voo é de outra sessão: o resultado dela não
+            // serve para este pedido.
+            guard emVoo.refreshToken == refreshToken else {
+                throw APIError.sessaoTrocada
             }
-            cofre.gravarAccessToken(response.accessToken)
+            return try await emVoo.task.value
+        }
+
+        let cofre = self.cofre
+        // Todas as tentativas reenviam este mesmo token.
+        let task = Task {
+            let response: AuthResponse
+            do {
+                response = try await repetindoSeTransitorio(esperas: esperasRefreshTransitorio) {
+                    try await manager.refreshAccessToken(refreshToken: refreshToken)
+                }
+            } catch {
+                // A conta mudou enquanto a renovação estava fora: a falha
+                // é da sessão antiga e não pode deslogar a nova.
+                guard cofre.lerRefreshToken() == refreshToken else {
+                    throw APIError.sessaoTrocada
+                }
+                throw error
+            }
+            // Só grava se o cofre ainda é da sessão que renovou: senão os
+            // tokens de A iriam por cima dos de B (ou de volta depois do
+            // logout de A).
+            guard cofre.lerRefreshToken() == refreshToken else {
+                throw APIError.sessaoTrocada
+            }
+            // Refresh antes do access: com o app fechado entre as duas
+            // gravações, o refresh antigo (já trocado no servidor) ficaria
+            // no cofre e, passado 1 minuto, reenviá-lo seria reuso — o
+            // servidor derrubaria todas as sessões do usuário.
             cofre.gravarRefreshToken(response.refreshToken)
+            cofre.gravarAccessToken(response.accessToken)
             return response
         }
 
-        currentTask = task
+        emVoo = (refreshToken, task)
 
         do {
             let response = try await task.value
-            currentTask = nil
+            emVoo = nil
             return response
         } catch {
-            currentTask = nil
+            emVoo = nil
             throw error
         }
     }
@@ -315,9 +407,16 @@ final class NetworkManager: Sendable {
         logout401: Bool = true,
         session: URLSession,
         allowRefresh: Bool = true,
+        refreshDaSessao: String? = nil,
         mensagem422: @Sendable ([String]?) -> String? = CampoRecusado.mensagem
     ) async throws -> Data {
         logger.info("execute: \(request.httpMethod ?? "?", privacy: .private) \(request.url?.absoluteString ?? "?", privacy: .private)")
+        // O `Authorization` que vai neste pedido: no 401, decide se o cofre
+        // ainda é da mesma sessão (`decidirApos401`).
+        let tokenEnviado = tokenDoCabecalho(request.value(forHTTPHeaderField: "Authorization"))
+        // Pedido que não renova (o reenvio): o refresh token da sessão com
+        // que ele saiu. No 401, só desloga se o cofre ainda tem esse.
+        let sessaoDoPedido = allowRefresh ? nil : (refreshDaSessao ?? tokens.lerRefreshToken())
         let start = Date()
 
         // Sem corrida contra Task.sleep: o teto total do pedido já é o
@@ -335,32 +434,60 @@ final class NetworkManager: Sendable {
         logger.info("execute: status \(http.statusCode, privacy: .public) for \(request.url?.absoluteString ?? "?", privacy: .private)")
 
         if deveRenovarToken(statusCode: http.statusCode, logout401: logout401) {
-            if allowRefresh {
+            guard allowRefresh else {
+                // 401 do reenvio: a sessão que falhou é a do pedido. Se o
+                // cofre já tem outra (a conta mudou no meio), não desloga
+                // quem está logado agora.
+                guard tokens.lerRefreshToken() == sessaoDoPedido else {
+                    throw APIError.sessaoTrocada
+                }
+                aoDeslogar()
+                throw APIError.authentication
+            }
+
+            // Lidos juntos, sem `await` no meio: o refresh token entregue ao
+            // refresher é da mesma sessão do access token comparado.
+            let tokenAtual = tokens.lerAccessToken()
+            let refreshAtual = tokens.lerRefreshToken()
+
+            switch decidirApos401(tokenEnviado: tokenEnviado, tokenAtual: tokenAtual) {
+            case .sessaoTrocada:
+                // Sem renovar, sem reenviar e sem deslogar: o pedido era de
+                // outra conta.
+                throw APIError.sessaoTrocada
+
+            case .reenviarCom(let token):
+                // Outra renovação da mesma conta já trocou o token.
+                return try await reenviarUmaVez(
+                    request, token: token, refreshDaSessao: refreshAtual,
+                    session: session, mensagem422: mensagem422
+                )
+
+            case .renovar:
+                // O refresh token que a renovação devolveu: é a sessão do
+                // reenvio (o 401 dele só desloga se o cofre ainda a tem).
+                let refreshRenovado = OSAllocatedUnfairLock<String?>(initialState: nil)
                 // O reenvio com o token novo roda fora do catch do refresh:
                 // falha dele não é falha de login e não desloga.
                 return try await renovandoEReenviando(
                     renovar: { [self] in
-                        try await refresher.refresh(atravesDe: self).accessToken
+                        let par = try await refresher.refresh(atravesDe: self, refreshToken: refreshAtual)
+                        refreshRenovado.withLock { $0 = par.refreshToken }
+                        return par.accessToken
                     },
                     reenviar: { [self] token in
-                        var retryRequest = request
-                        retryRequest.setValue(
-                            "Bearer \(token)",
-                            forHTTPHeaderField: "Authorization"
-                        )
-                        return try await execute(
-                            retryRequest,
-                            logout401: true,
-                            session: session,
-                            allowRefresh: false,
-                            mensagem422: mensagem422
+                        try await reenviarUmaVez(
+                            request, token: token,
+                            refreshDaSessao: refreshRenovado.withLock { $0 },
+                            session: session, mensagem422: mensagem422
                         )
                     },
-                    deslogar: aoDeslogar
+                    deslogar: { [self] in
+                        // A conta mudou entre a falha e aqui: não desloga a nova.
+                        guard tokens.lerRefreshToken() == refreshAtual else { return }
+                        aoDeslogar()
+                    }
                 )
-            } else {
-                aoDeslogar()
-                throw APIError.authentication
             }
         }
 
@@ -379,6 +506,27 @@ final class NetworkManager: Sendable {
         }
 
         return data
+    }
+
+    /// Reenvia `request` uma vez com `token`, sem nova renovação. O 401 dele
+    /// desloga só se o cofre ainda tem `refreshDaSessao`.
+    nonisolated private func reenviarUmaVez(
+        _ request: URLRequest,
+        token: String,
+        refreshDaSessao: String?,
+        session: URLSession,
+        mensagem422: @Sendable ([String]?) -> String?
+    ) async throws -> Data {
+        var retryRequest = request
+        retryRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        return try await execute(
+            retryRequest,
+            logout401: true,
+            session: session,
+            allowRefresh: false,
+            refreshDaSessao: refreshDaSessao,
+            mensagem422: mensagem422
+        )
     }
 
     @discardableResult
