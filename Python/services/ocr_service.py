@@ -187,12 +187,14 @@ def _preprocessar_imagem(image_bytes: bytes) -> bytes:
         return buffer.getvalue()
     except Exception as e:
         # A imagem nem chega ao Gemini: não gasta a cota do dia.
-        raise SemRespostaGemini(f"Imagem invalida: {e}")
+        logger.warning("Imagem invalida no OCR: %s", type(e).__name__)
+        raise SemRespostaGemini("Não foi possível abrir esta imagem; tente outra foto")
 
 
 def extrair_gasto_da_imagem(image_bytes: bytes) -> dict:
     if not _client:
-        raise SemRespostaGemini("GEMINI_API_KEY nao configurada no ambiente")
+        logger.error("GEMINI_API_KEY nao configurada")
+        raise SemRespostaGemini("A leitura automática está indisponível agora; preencha o gasto à mão")
 
     inicio_preproc = time.perf_counter()
     imagem_otimizada = _preprocessar_imagem(image_bytes)
@@ -220,11 +222,12 @@ def extrair_gasto_da_imagem(image_bytes: bytes) -> dict:
     dados = response.parsed
     if dados is None:
         if not response.text:
-            raise ValueError("Modelo nao retornou dados estruturados")
+            raise ValueError("Não foi possível ler este comprovante; preencha o gasto à mão")
         try:
             dados = GastoExtraido(**json.loads(response.text))
-        except (json.JSONDecodeError, Exception) as e:
-            raise ValueError(f"Modelo retornou resposta inesperada: {response.text[:200]} ({e})")
+        except Exception as e:
+            logger.warning("Resposta inesperada do modelo no OCR: %s", type(e).__name__)
+            raise ValueError("Não foi possível ler este comprovante; preencha o gasto à mão")
 
     return {
         "titulo": dados.titulo[:40],
