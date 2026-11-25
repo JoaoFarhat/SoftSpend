@@ -9,7 +9,7 @@ import csv
 import io
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from xml.sax.saxutils import escape, quoteattr
 
@@ -39,6 +39,10 @@ COMPROVANTE_NENHUM = "nenhum"
 
 MAX_DOWNLOADS_PARALELOS = 8
 
+# Deslocamento fixo: o Brasil nao tem horario de verao desde 2019 e o
+# `ZoneInfo` exigiria o pacote `tzdata` no Windows.
+FUSO_BRASIL = timezone(timedelta(hours=-3))
+
 # Altura maxima da miniatura na linha da tabela.
 COMPROVANTE_ALTURA_MAX = 32 * mm
 COMPROVANTE_LARGURA_MAX = 34 * mm
@@ -50,6 +54,10 @@ ROTULOS_CATEGORIA = {
     "COMPRAS": "Compras",
     "OUTROS": "Outros",
 }
+
+
+def _agora_brasil() -> datetime:
+    return datetime.now(timezone.utc).astimezone(FUSO_BRASIL)
 
 
 def _rotulo_categoria(categoria) -> str:
@@ -222,7 +230,11 @@ def _tabela_resumo(ciclo: models.Ciclo, total_gastos: int, estilos) -> Table:
     return tabela
 
 
-def gerar_pdf(ciclo: models.Ciclo, comprovantes: str = COMPROVANTE_IMAGEM) -> bytes:
+def gerar_pdf(
+    ciclo: models.Ciclo,
+    comprovantes: str = COMPROVANTE_IMAGEM,
+    agora: datetime | None = None,
+) -> bytes:
     estilos = _estilos()
     thumbs = _baixar_thumbs(ciclo) if comprovantes == COMPROVANTE_IMAGEM else {}
 
@@ -294,7 +306,7 @@ def gerar_pdf(ciclo: models.Ciclo, comprovantes: str = COMPROVANTE_IMAGEM) -> by
         Paragraph("RELATÓRIO DE GASTOS", estilos["titulo"]),
         Paragraph(
             f"{escape(ciclo.titulo or '-')} &nbsp;·&nbsp; {escape(ciclo.periodo or '-')} &nbsp;·&nbsp; "
-            f"gerado em {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+            f"gerado em {(agora or _agora_brasil()).strftime('%d/%m/%Y %H:%M')}",
             estilos["subtitulo"],
         ),
         Spacer(1, 8 * mm),
