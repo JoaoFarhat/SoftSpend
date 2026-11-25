@@ -409,7 +409,8 @@ libera recurso.
   `isAuthenticated`, nada vai ao servidor.
 - A cena raiz (`SoftexVamoApp`) chama `iniciar()` (ouve `Transaction.updates`
   e reenvia `Transaction.unfinished`), `trocouUsuario()` na troca de conta e
-  `carregarEstado()` ao voltar para o primeiro plano.
+  `voltouAoPrimeiroPlano()` (estado + reenvio das compras pendentes) ao
+  voltar para o primeiro plano.
 - `Scenes/PlanosAssinaturaView.swift`: preço e duração do teste vêm da App
   Store (semanas viram dias: "2 semanas" aparece "14 dias"). Termos e
   Privacidade em `LinksLegais` (páginas servidas pelo nginx a partir de
