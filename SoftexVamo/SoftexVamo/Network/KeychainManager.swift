@@ -9,6 +9,33 @@ import Security
 import Foundation
 import os
 
+/// Resultado de ler um token do Keychain — o mesmo contrato do
+/// `ResultadoBuscaChave` do `ArmazemDeChave`:
+///
+/// - `.achou`: o token.
+/// - `.naoExiste`: não há token guardado (`errSecItemNotFound`, ou bytes que
+///   não viram texto). Sem login: o fluxo antigo segue (401 → logout).
+/// - `.indisponivel(status)`: o token pode estar lá, mas o Keychain não o
+///   entrega agora (ex.: `errSecInteractionNotAllowed` com o iPhone trancado —
+///   os tokens são `WhenUnlockedThisDeviceOnly`). Nunca vira logout.
+nonisolated enum ResultadoLeituraToken: Equatable, Sendable {
+    case achou(String)
+    case naoExiste
+    case indisponivel(OSStatus)
+
+    /// O token, só quando `.achou`.
+    var token: String? {
+        if case .achou(let token) = self { return token }
+        return nil
+    }
+
+    /// `.achou` com o token, `.naoExiste` sem ele. Usado pelo padrão do
+    /// `CofreDeTokens.buscarAccessToken()` para cofres que só sabem `String?`.
+    init(_ token: String?) {
+        self = token.map(ResultadoLeituraToken.achou) ?? .naoExiste
+    }
+}
+
 nonisolated struct KeychainManager {
 
     private static let accessTokenKey = "br.com.softspend.app.access_token"
@@ -21,8 +48,14 @@ nonisolated struct KeychainManager {
         save(token, forKey: accessTokenKey)
     }
 
+    /// `nil` tanto sem token quanto com o Keychain trancado. Quem precisa
+    /// separar os dois (o `NetworkManager`) usa `lerAccessToken()`.
     nonisolated static func getAccessToken() -> String? {
-        return read(forKey: accessTokenKey)
+        lerAccessToken().token
+    }
+
+    nonisolated static func lerAccessToken() -> ResultadoLeituraToken {
+        read(forKey: accessTokenKey)
     }
 
     // MARK: - Refresh Token
@@ -32,7 +65,11 @@ nonisolated struct KeychainManager {
     }
 
     nonisolated static func getRefreshToken() -> String? {
-        return read(forKey: refreshTokenKey)
+        lerRefreshToken().token
+    }
+
+    nonisolated static func lerRefreshToken() -> ResultadoLeituraToken {
+        read(forKey: refreshTokenKey)
     }
 
     // MARK: - Clear
@@ -44,27 +81,41 @@ nonisolated struct KeychainManager {
 
     // MARK: - Helpers
 
+    /// Grava por cima com `SecItemUpdate` e só cria (`SecItemAdd`) quando o
+    /// update diz que o item não existe. Nunca apaga antes de gravar: com o
+    /// iPhone trancado o add pode falhar, e o delete anterior deixava a pessoa
+    /// sem token nenhum (logout na próxima requisição).
     private nonisolated static func save(_ token: String, forKey key: String) {
         guard let data = token.data(using: .utf8) else {
             logger.error("Falha ao converter token para Data")
             return
         }
 
-        let query: [String: Any] = [
+        let busca: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: key,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-            kSecValueData as String: data
+            kSecAttrAccount as String: key
+        ]
+        let atributos: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
         ]
 
-        SecItemDelete(query as CFDictionary)
-        let status = SecItemAdd(query as CFDictionary, nil)
-        if status != errSecSuccess {
-            logger.error("Falha ao salvar token no Keychain: status \(status, privacy: .public)")
+        let statusUpdate = SecItemUpdate(busca as CFDictionary, atributos as CFDictionary)
+        if statusUpdate == errSecSuccess { return }
+        guard statusUpdate == errSecItemNotFound else {
+            logger.error("Falha ao atualizar token no Keychain: status \(statusUpdate, privacy: .public)")
+            return
+        }
+
+        var novo = busca
+        novo.merge(atributos) { _, valor in valor }
+        let statusAdd = SecItemAdd(novo as CFDictionary, nil)
+        if statusAdd != errSecSuccess {
+            logger.error("Falha ao salvar token no Keychain: status \(statusAdd, privacy: .public)")
         }
     }
 
-    private nonisolated static func read(forKey key: String) -> String? {
+    private nonisolated static func read(forKey key: String) -> ResultadoLeituraToken {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrAccount as String: key,
@@ -76,11 +127,17 @@ nonisolated struct KeychainManager {
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
 
-        guard status == errSecSuccess,
-              let item = result as? [String: Any],
+        if status == errSecItemNotFound { return .naoExiste }
+        guard status == errSecSuccess else {
+            logger.warning("Token ilegível agora no Keychain: status \(status, privacy: .public)")
+            return .indisponivel(status)
+        }
+        // Bytes que não viram texto não voltam sozinhos: tratar como
+        // "indisponível" prenderia a pessoa em "Desbloqueie o iPhone" para sempre.
+        guard let item = result as? [String: Any],
               let data = item[kSecValueData as String] as? Data,
               let token = String(data: data, encoding: .utf8) else {
-            return nil
+            return .naoExiste
         }
 
         // Só reescreve o item quando a acessibilidade realmente diverge do
@@ -93,7 +150,7 @@ nonisolated struct KeychainManager {
             migrateAccessibility(forKey: key)
         }
 
-        return token
+        return .achou(token)
     }
 
     private nonisolated static func delete(forKey key: String) {

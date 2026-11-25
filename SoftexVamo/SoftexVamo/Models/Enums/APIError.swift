@@ -14,6 +14,10 @@ nonisolated enum APIError: LocalizedError, Sendable {
     /// reenviado com o login da outra conta, o token não é renovado e
     /// ninguém é deslogado (`NetworkManager.execute`, `TokenRefresher`).
     case sessaoTrocada
+    /// O token está no Keychain, mas não dá para ler agora (iPhone trancado:
+    /// os tokens são `WhenUnlockedThisDeviceOnly`). O pedido nem sai e a
+    /// sessão continua: não é logout (`CofreDeTokens.buscarAccessToken`).
+    case chaveIndisponivel
     case unknown
 
     var errorDescription: String? {
@@ -27,6 +31,8 @@ nonisolated enum APIError: LocalizedError, Sendable {
             return "Sessão expirada. Faça login novamente."
         case .sessaoTrocada:
             return "Sua conta mudou durante o envio. Tente de novo."
+        case .chaveIndisponivel:
+            return "Desbloqueie o iPhone para continuar."
         case .unknown:
             return "Erro inesperado"
         }
