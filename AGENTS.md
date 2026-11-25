@@ -87,6 +87,21 @@ hop para o MainActor e bloqueiem a UI. Sem isso, todo `await
 NetworkManager.shared.postCiclo(...)` executado pelo `SyncActor` era
 serializado no MainActor, congelando a UI durante a sincronização.
 
+**`NetworkManager` testável**: o `init(session:uploadSession:tokens:aoDeslogar:)`
+recebe as duas `URLSession`, o `CofreDeTokens` (protocolo `nonisolated` +
+`Sendable` que lê/grava/apaga access e refresh token; o padrão
+`CofreDeTokensKeychain` delega para o `KeychainManager`) e a closure
+`aoDeslogar` (padrão: `AuthService.shared.logout(revogandoNoServidor: false)`
+num `Task` no MainActor). O `TokenRefresher` usa esse cofre e o próprio
+`NetworkManager` (recebido no `refresh(atravesDe:)`, não no `init`, porque o
+refresher nasce junto com o manager). `shared` segue com os padrões de sempre.
+O `execute` está coberto em `SoftSpendTests/NetworkManagerExecuteTests.swift`:
+`URLSession` de `URLProtocol` falso (`URLProtocolDeTeste`, estado estático —
+suíte `.serialized`) + cofre em memória (`CofreEmMemoria`), incluindo o 404
+sem `request_id` que vira `requestId "-"` (o que protege o descarte por 404,
+ver T4 abaixo). O `DELETE /auth/conta` vai pela `uploadSession` (90 s), não
+pelos 8 s comuns — o pedido sai com `timeoutInterval` 90.
+
 ### Componentes
 
 - `CiclosViewModel` — operações de ciclo/dia/gasto com persistência local.

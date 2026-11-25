@@ -19,7 +19,7 @@ nonisolated enum APIError: LocalizedError, Sendable {
             }
             return message
         case .authentication:
-            return "Sessao expirada. Faca login novamente."
+            return "Sessão expirada. Faça login novamente."
         case .unknown:
             return "Erro inesperado"
         }
