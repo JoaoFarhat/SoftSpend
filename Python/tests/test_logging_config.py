@@ -140,3 +140,17 @@ def test_request_finished_traz_status_code_e_duration_ms(client, caplog):
     assert terminados
     assert terminados[-1]["status_code"] == 200
     assert terminados[-1]["duration_ms"] >= 0
+
+
+def test_user_agent_e_cortado_em_200_caracteres(client, caplog):
+    with caplog.at_level(logging.INFO):
+        resposta = client.get("/health", headers={"User-Agent": "a" * 1000})
+
+    assert resposta.status_code == 200
+    terminados = [
+        _json_do_record(record)
+        for record in caplog.records
+        if record.getMessage() == "Request finished"
+    ]
+    assert terminados
+    assert terminados[-1]["user_agent"] == "a" * 200

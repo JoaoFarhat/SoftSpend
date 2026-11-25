@@ -224,8 +224,14 @@ def ler_fatura_pdf(pdf_bytes: bytes) -> FaturaBruta:
             raise ErroFatura(422, "Modelo não retornou dados estruturados")
         try:
             dados = FaturaExtraida(**json.loads(response.text))
-        except (json.JSONDecodeError, Exception) as erro:
-            raise ErroFatura(422, f"Modelo retornou resposta inesperada ({erro})")
+        except Exception as erro:
+            logger.warning(
+                "Falha ao interpretar a fatura devolvida pela IA: %s",
+                type(erro).__name__,
+            )
+            raise ErroFatura(
+                422, "Não foi possível ler esta fatura; envie em OFX ou CSV"
+            )
 
     usage = getattr(response, "usage_metadata", None)
     logger.info(
