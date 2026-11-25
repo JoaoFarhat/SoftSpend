@@ -155,7 +155,7 @@ struct MainView: View {
             agora = .now
         }
         .onChange(of: syncManager.isSyncing) { _, isSyncing in
-            if sincronizar, !isSyncing, syncManager.lastSyncError == nil {
+            if sincronizar, !isSyncing {
                 viewModel.fetchCiclosResumo()
             }
         }

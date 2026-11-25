@@ -212,7 +212,7 @@ rodam, mesmo com `forcar: true`. Testes em
 `SoftSpendTests/LimitePorMinutoTests.swift`.
 
 **Logging**: `SyncActor` usa `os.Logger` (subsystem `br.com.softspend`,
-category `SyncActor`) para logar falhas de save e dias remotos sem `backendId`.
+category `SyncActor`) para logar falhas de save.
 O helper `salvar(_:etapa:)` substitui `try? modelContext.save()` — erros de
 save aparecem no Console.app em vez de serem silenciados.
 
@@ -226,9 +226,19 @@ meio, `marcarMudancaDuranteEnvio` deixa `.pending` sem backoff e o `sync` roda
 mais uma passada. Uma nota anexada durante o upload não é apagada. Testes em
 `SoftSpendTests/MudancaDuranteEnvioTests.swift`.
 
-**Delete centralizado**: Em `syncDeletions`, o `modelContext.delete` é chamado
-uma única vez após o try/catch. Em sucesso ou 404 da API, o item é deletado
-localmente. Em falha real, `marcarFalha` + `continue` (sem delete).
+**Delete em cascata e centralizado**: Em `syncDeletions`, filho apagado
+(`deletadoEm`) debaixo de pai também apagado não manda `DELETE` próprio — o
+servidor já o remove em cascata (`dia_service.remover_dia` apaga os gastos do
+dia; o `DELETE` do ciclo remove tudo). Gasto cujo dia (ou cuja viagem) tem
+`deletadoEm`, e dia cuja viagem tem `deletadoEm`, esperam o `DELETE` do pai:
+quando ele dá certo ou volta 404 da API (ou o pai nunca existiu lá), os filhos
+marcados concluem junto (`marcarSucesso`, no encerramento da etapa); se o
+`DELETE` do pai falha, ficam como estão e saem junto na próxima vez. Sem a
+cascata, encurtar uma viagem com 100 gastos nos dias removidos fazia mais de
+100 pedidos e esbarrava no limite por minuto (429). Em sucesso ou 404 da API,
+o item fica `.synced` com `deletadoEm` e sai do aparelho no
+`limparDadosMortos` (7 dias). Em falha real, `marcarFalha` + `continue`.
+Testes em `SoftSpendTests/ApagarEmCascataTests.swift`.
 
 **Descarte por 404 (T4, decisão de 12/11)**: 404 no POST/PUT de `syncGastos`
 ou no POST de `syncDias` (o pai ou o item foi apagado em outro aparelho)
