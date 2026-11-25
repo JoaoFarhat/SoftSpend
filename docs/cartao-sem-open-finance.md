@@ -264,7 +264,7 @@ FaturaLida {
 
 - O **PDF vai nativo** (`Part.from_bytes(..., mime_type="application/pdf")`), sem rasterizar: o Gemini lê a camada de texto e as tabelas melhor que uma foto.
 - Saída estruturada (`response_schema`) com lista de compras; `MAX_OUTPUT_TOKENS` próprio de **16.384** (o de 256 é do comprovante) e **teto de 200 compras**. Se a resposta cortar (`MAX_TOKENS`), `422` "fatura grande demais; envie em OFX ou CSV".
-- **Timeout próprio de 60 s** por requisição (o cliente atual tem 12 s, curto demais para uma fatura). O app espera até 90 s.
+- **Timeout próprio de 60 s** por requisição (o cliente atual tem 12 s, curto demais para uma fatura). O app espera até 300 s (o `timeoutIntervalForResource` da `uploadSession`).
 - Prompt: ignore nome, endereço, CPF, limite e propaganda; devolva só compras, estornos e encargos (IOF, juros, anuidade); **não** devolva "pagamento recebido" nem saldo anterior; data completa (o ano é deduzido pelo vencimento); parcela em campos próprios; compra em moeda estrangeira com o valor **em reais cobrado na fatura** e o original em `valor_original`; categoria pelo mesmo enum do comprovante.
 
 **A IA é tratada como não confiável (o servidor valida, não confia):**
@@ -377,7 +377,7 @@ Ordem: **S1** (leitura) e depois **S2** (gravação e conciliação) no servidor
 **A1: importar a fatura no app** (complexa; só depois da S1 e da S2 na `main`)
 
 - Só `SoftexVamo/`, **sem tocar em `@Model`** (sem V2).
-- Arquivos: `Network/NetworkManager.swift` (`lerFatura`, `confirmarFatura`, `conciliarFatura`, timeout de 90 s), `Models/DTOs/FaturaDTO.swift`, `ViewModels/ImportarFaturaViewModel.swift` (máquina de estados testável sem tela: escolhendo, consentindo, lendo, conferindo, importando, pronto, erro), `Scenes/ImportarFaturaView.swift` (§2.1; `.fileImporter` para PDF, OFX e CSV; campo de senha quando o servidor pedir; três grupos), botão na tela da viagem, `Scenes/ConsentimentoLeituraView.swift` (texto da §2.8) e `Consentimento.avisoFatura`.
+- Arquivos: `Network/NetworkManager.swift` (`lerFatura`, `confirmarFatura`, `conciliarFatura`, `uploadSession` com teto de 300 s), `Models/DTOs/FaturaDTO.swift`, `ViewModels/ImportarFaturaViewModel.swift` (máquina de estados testável sem tela: escolhendo, consentindo, lendo, conferindo, importando, pronto, erro), `Scenes/ImportarFaturaView.swift` (§2.1; `.fileImporter` para PDF, OFX e CSV; campo de senha quando o servidor pedir; três grupos), botão na tela da viagem, `Scenes/ConsentimentoLeituraView.swift` (texto da §2.8) e `Consentimento.avisoFatura`.
 - Criar os gastos marcados pelo caminho existente (`CiclosViewModel.createNewGasto`, sem `dia.gastos.append`, pegadinha 3); `sync(forcar: true)` antes de `ler` e `conciliar` depois.
 - Testes (Swift Testing, rede falsa):
   - O DTO decodifica a resposta (parcela e `valor_original` incluídos).

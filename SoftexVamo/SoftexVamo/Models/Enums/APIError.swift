@@ -8,7 +8,6 @@ import Foundation
 
 nonisolated enum APIError: LocalizedError, Sendable {
     case serverError(message: String, requestId: String, statusCode: Int)
-    case badURL
     case authentication
     case unknown
 
@@ -19,8 +18,6 @@ nonisolated enum APIError: LocalizedError, Sendable {
                 return "O total da viagem passaria de R$ 99.999.999,99. Diminua o valor ou apague outro gasto."
             }
             return message
-        case .badURL:
-            return "URL inválida"
         case .authentication:
             return "Sessão expirada. Faça login novamente."
         case .unknown:
