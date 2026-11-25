@@ -7,7 +7,7 @@ Dois valores extremos davam dado errado ou 500 no `POST /api/faturas/ler`:
 - um `total_fatura` com mais de ~26 dígitos inteiros quebrava o
   `quantize` (`InvalidOperation`).
 
-`_motivo_descarte` agora confere `None` e o teto antes de arredondar (2
+`_valor_lido` agora confere `None` e o teto antes de arredondar (2
 casas, `ROUND_HALF_UP`) e só então exige valor > 0 — a compra que
 arredonda para 0,00 é descartada como "valor inválido". Total acima de
 `VALOR_MAXIMO_COMPRA * MAXIMO_COMPRAS` vira None (`soma_confere` e
