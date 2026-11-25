@@ -99,25 +99,58 @@ nonisolated func renovandoEReenviando<T: Sendable>(
     return try await reenviar(token)
 }
 
+/// Onde o `NetworkManager` lê e grava os tokens da sessão. Existe para o
+/// `execute` poder ser testado sem mexer no Keychain: em produção a
+/// implementação é o `CofreDeTokensKeychain` (delega para o
+/// `KeychainManager`); nos testes, um cofre em memória.
+nonisolated protocol CofreDeTokens: Sendable {
+    func lerAccessToken() -> String?
+    func lerRefreshToken() -> String?
+    func gravarAccessToken(_ token: String)
+    func gravarRefreshToken(_ token: String)
+    func apagarTokens()
+}
+
+/// `CofreDeTokens` padrão do app: cada chamada delega para o
+/// `KeychainManager`, que continua lendo/gravando no mesmo lugar de antes.
+nonisolated struct CofreDeTokensKeychain: CofreDeTokens {
+    init() {}
+
+    func lerAccessToken() -> String? { KeychainManager.getAccessToken() }
+    func lerRefreshToken() -> String? { KeychainManager.getRefreshToken() }
+    func gravarAccessToken(_ token: String) { KeychainManager.saveAccessToken(token) }
+    func gravarRefreshToken(_ token: String) { KeychainManager.saveRefreshToken(token) }
+    func apagarTokens() { KeychainManager.deleteAllTokens() }
+}
+
 private actor TokenRefresher {
     private var currentTask: Task<AuthResponse, Error>?
+    private let cofre: any CofreDeTokens
 
-    func refresh() async throws -> AuthResponse {
+    init(cofre: any CofreDeTokens) {
+        self.cofre = cofre
+    }
+
+    /// `manager` é o `NetworkManager` dono do refresher — injetado na chamada
+    /// (e não no `init`) porque o refresher é criado junto com o manager,
+    /// quando ainda não existe `self` para passar. Antes o refresh ia sempre
+    /// pelo `NetworkManager.shared`, o que impedia testar o fluxo.
+    func refresh(atravesDe manager: NetworkManager) async throws -> AuthResponse {
         if let task = currentTask {
             return try await task.value
         }
 
         // Lido uma vez só: todas as tentativas reenviam este mesmo token.
-        guard let refreshToken = KeychainManager.getRefreshToken() else {
+        guard let refreshToken = cofre.lerRefreshToken() else {
             throw APIError.authentication
         }
 
         let task = Task {
             let response = try await repetindoSeTransitorio(esperas: esperasRefreshTransitorio) {
-                try await NetworkManager.shared.refreshAccessToken(refreshToken: refreshToken)
+                try await manager.refreshAccessToken(refreshToken: refreshToken)
             }
-            KeychainManager.saveAccessToken(response.accessToken)
-            KeychainManager.saveRefreshToken(response.refreshToken)
+            cofre.gravarAccessToken(response.accessToken)
+            cofre.gravarRefreshToken(response.refreshToken)
             return response
         }
 
@@ -146,32 +179,80 @@ final class NetworkManager: Sendable {
 
     nonisolated static let shared = NetworkManager()
     nonisolated private let logger = Logger(subsystem: "br.com.softspend", category: "NetworkManager")
-    private let refresher = TokenRefresher()
+    private nonisolated let refresher: TokenRefresher
+    private nonisolated let session: URLSession
 
-    private nonisolated let session: URLSession = {
+    /// Sessão dedicada a uploads de imagem (OCR/comprovantes) e a chamadas
+    /// que podem demorar no servidor (o `DELETE /auth/conta`, por exemplo).
+    /// O timeout é maior para não abortar envios de notas fiscais.
+    private nonisolated let uploadSession: URLSession
+
+    /// Onde os tokens da sessão são lidos e gravados (Keychain no app,
+    /// cofre em memória nos testes).
+    private nonisolated let tokens: any CofreDeTokens
+
+    /// O que rodar quando a sessão morre de vez — no app, o logout sem
+    /// revogar no servidor; nos testes, uma closure que só conta a chamada.
+    private nonisolated let aoDeslogar: @Sendable () -> Void
+
+    /// Configuração das duas sessões do app: sem `waitsForConnectivity` e
+    /// com o `InsecureSessionDelegate` (que só confia no certificado do
+    /// `.local` em DEBUG). Nos testes as sessões são substituídas por uma
+    /// `URLSession` de `URLProtocol` falso.
+    nonisolated static func sessaoPadrao(
+        timeoutRequisicao: TimeInterval,
+        timeoutRecurso: TimeInterval
+    ) -> URLSession {
         let config = URLSessionConfiguration.default
         config.waitsForConnectivity = false
-        config.timeoutIntervalForRequest = 8
-        config.timeoutIntervalForResource = 8
+        config.timeoutIntervalForRequest = timeoutRequisicao
+        config.timeoutIntervalForResource = timeoutRecurso
         return URLSession(
             configuration: config,
             delegate: InsecureSessionDelegate(),
             delegateQueue: nil
         )
+    }
+
+    nonisolated init(
+        session: URLSession = NetworkManager.sessaoPadrao(timeoutRequisicao: 8, timeoutRecurso: 8),
+        uploadSession: URLSession = NetworkManager.sessaoPadrao(timeoutRequisicao: 90, timeoutRecurso: 300),
+        tokens: any CofreDeTokens = CofreDeTokensKeychain(),
+        aoDeslogar: @escaping @Sendable () -> Void = {
+            Task { @MainActor in AuthService.shared.logout(revogandoNoServidor: false) }
+        }
+    ) {
+        self.session = session
+        self.uploadSession = uploadSession
+        self.tokens = tokens
+        self.aoDeslogar = aoDeslogar
+        self.refresher = TokenRefresher(cofre: tokens)
+    }
+
+    /// Formatadores de data criados uma vez só: antes um
+    /// `ISO8601DateFormatter`/`DateFormatter` novo era montado para CADA data
+    /// decodificada — uma lista de 100 dias com gastos criava centenas.
+    /// Compartilhar é seguro: `ISO8601DateFormatter` é thread-safe e
+    /// `DateFormatter` é thread-safe (iOS 7+/macOS 10.9+, 64 bits) desde que
+    /// a configuração não mude depois de criado — e aqui nunca muda.
+    nonisolated private static let isoComFracao: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
     }()
 
-    /// Sessão dedicada a uploads de imagem (OCR/comprovantes).
-    /// O timeout é maior para não abortar envios de notas fiscais.
-    private nonisolated let uploadSession: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.waitsForConnectivity = false
-        config.timeoutIntervalForRequest = 90
-        config.timeoutIntervalForResource = 300
-        return URLSession(
-            configuration: config,
-            delegate: InsecureSessionDelegate(),
-            delegateQueue: nil
-        )
+    nonisolated private static let isoSemFracao: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        return f
+    }()
+
+    nonisolated private static let utcSemFuso: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(secondsFromGMT: 0)
+        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return f
     }()
 
     private nonisolated let decoder: JSONDecoder = {
@@ -180,22 +261,15 @@ final class NetworkManager: Sendable {
             let container = try decoder.singleValueContainer()
             let value = try container.decode(String.self)
 
-            let isoFormatter = ISO8601DateFormatter()
-            isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-            if let date = isoFormatter.date(from: value) {
+            if let date = NetworkManager.isoComFracao.date(from: value) {
                 return date
             }
 
-            isoFormatter.formatOptions = [.withInternetDateTime]
-            if let date = isoFormatter.date(from: value) {
+            if let date = NetworkManager.isoSemFracao.date(from: value) {
                 return date
             }
 
-            let utcFormatter = DateFormatter()
-            utcFormatter.locale = Locale(identifier: "en_US_POSIX")
-            utcFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-            utcFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-            if let date = utcFormatter.date(from: value) {
+            if let date = NetworkManager.utcSemFuso.date(from: value) {
                 return date
             }
 
@@ -228,7 +302,7 @@ final class NetworkManager: Sendable {
             request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
 
-        if includeToken, let token = KeychainManager.getAccessToken() {
+        if includeToken, let token = tokens.lerAccessToken() {
             request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
@@ -280,7 +354,7 @@ final class NetworkManager: Sendable {
                 // falha dele não é falha de login e não desloga.
                 return try await renovandoEReenviando(
                     renovar: { [self] in
-                        try await refresher.refresh().accessToken
+                        try await refresher.refresh(atravesDe: self).accessToken
                     },
                     reenviar: { [self] token in
                         var retryRequest = request
@@ -297,12 +371,10 @@ final class NetworkManager: Sendable {
                             mensagem422: mensagem422
                         )
                     },
-                    deslogar: {
-                        Task { @MainActor in AuthService.shared.logout(revogandoNoServidor: false) }
-                    }
+                    deslogar: aoDeslogar
                 )
             } else {
-                Task { @MainActor in AuthService.shared.logout(revogandoNoServidor: false) }
+                aoDeslogar()
                 throw APIError.authentication
             }
         }
@@ -789,7 +861,12 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/conta") else {
             throw URLError(.badURL)
         }
-        try await execute(makeRequest(url: url, method: "DELETE"))
+        // Apagar a conta demora no servidor (apaga viagens, dias, gastos e
+        // comprovantes em cascata): vai pela sessão de 90 s. Com os 8 s de
+        // antes o app estourava com o servidor ainda apagando, mostrava erro
+        // e a limpeza local (`apagarDadosLocais`, exigência da Apple) não
+        // rodava.
+        try await executeUpload(makeRequest(url: url, method: "DELETE"))
     }
 }
 
