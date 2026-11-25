@@ -18,10 +18,14 @@ import os
 /// - `.indisponivel(status)`: o token pode estar lá, mas o Keychain não o
 ///   entrega agora (ex.: `errSecInteractionNotAllowed` com o iPhone trancado —
 ///   os tokens são `WhenUnlockedThisDeviceOnly`). Nunca vira logout.
+/// - `.ilegivel(status)`: o Keychain recusou a leitura de um jeito que o
+///   desbloqueio não resolve (§2 de docs/keychain-login.md). O pedido não
+///   sai e a pessoa entra de novo.
 nonisolated enum ResultadoLeituraToken: Equatable, Sendable {
     case achou(String)
     case naoExiste
     case indisponivel(OSStatus)
+    case ilegivel(OSStatus)
 
     /// O token, só quando `.achou`.
     var token: String? {
@@ -36,6 +40,38 @@ nonisolated enum ResultadoLeituraToken: Equatable, Sendable {
     }
 }
 
+/// O `status` da leitura pede esperar o desbloqueio (`.indisponivel`)? Só
+/// dois: `errSecInteractionNotAllowed` (-25308, iPhone trancado) e
+/// `errSecNotAvailable` (-25291, ainda não houve o primeiro desbloqueio
+/// depois de ligar). Qualquer outro é `.ilegivel` — ficar em "Desbloqueie
+/// o iPhone" num erro que o desbloqueio não resolve prenderia a pessoa
+/// para sempre (§2.1 de docs/keychain-login.md).
+nonisolated func statusEsperaDesbloqueio(_ status: OSStatus) -> Bool {
+    status == errSecInteractionNotAllowed || status == errSecNotAvailable
+}
+
+/// `.indisponivel` com o iPhone claramente destrancado (app ativo e dados
+/// protegidos disponíveis) não é espera de desbloqueio: vira `.ilegivel` —
+/// sem isso o app ficaria em "Desbloqueie o iPhone" com o aparelho aberto
+/// na mão (§2.1). Qualquer outro resultado passa sem mudança.
+nonisolated func ajustarLeituraAoEstadoDoIPhone(
+    _ resultado: ResultadoLeituraToken,
+    iPhoneProvavelmenteTrancado: Bool
+) -> ResultadoLeituraToken {
+    if case .indisponivel(let status) = resultado, !iPhoneProvavelmenteTrancado {
+        return .ilegivel(status)
+    }
+    return resultado
+}
+
+/// Resultado de gravar um token no Keychain (§1 de docs/keychain-login.md):
+/// `.gravou` ou `.recusou(OSStatus)`. A recusa numa renovação manda o par
+/// novo para a memória; na entrada (login/cadastro) fecha o acesso.
+nonisolated enum ResultadoGravacaoToken: Equatable, Sendable {
+    case gravou
+    case recusou(OSStatus)
+}
+
 nonisolated struct KeychainManager {
 
     private static let accessTokenKey = "br.com.softspend.app.access_token"
@@ -44,7 +80,7 @@ nonisolated struct KeychainManager {
 
     // MARK: - Access Token
 
-    nonisolated static func saveAccessToken(_ token: String) {
+    nonisolated static func saveAccessToken(_ token: String) -> ResultadoGravacaoToken {
         save(token, forKey: accessTokenKey)
     }
 
@@ -60,7 +96,7 @@ nonisolated struct KeychainManager {
 
     // MARK: - Refresh Token
 
-    nonisolated static func saveRefreshToken(_ token: String) {
+    nonisolated static func saveRefreshToken(_ token: String) -> ResultadoGravacaoToken {
         save(token, forKey: refreshTokenKey)
     }
 
@@ -84,11 +120,13 @@ nonisolated struct KeychainManager {
     /// Grava por cima com `SecItemUpdate` e só cria (`SecItemAdd`) quando o
     /// update diz que o item não existe. Nunca apaga antes de gravar: com o
     /// iPhone trancado o add pode falhar, e o delete anterior deixava a pessoa
-    /// sem token nenhum (logout na próxima requisição).
-    private nonisolated static func save(_ token: String, forKey key: String) {
+    /// sem token nenhum (logout na próxima requisição). O resultado diz quem
+    /// chamou se o par novo precisa viver em memória (§1 de
+    /// docs/keychain-login.md).
+    private nonisolated static func save(_ token: String, forKey key: String) -> ResultadoGravacaoToken {
         guard let data = token.data(using: .utf8) else {
             logger.error("Falha ao converter token para Data")
-            return
+            return .recusou(errSecParam)
         }
 
         let busca: [String: Any] = [
@@ -101,10 +139,10 @@ nonisolated struct KeychainManager {
         ]
 
         let statusUpdate = SecItemUpdate(busca as CFDictionary, atributos as CFDictionary)
-        if statusUpdate == errSecSuccess { return }
+        if statusUpdate == errSecSuccess { return .gravou }
         guard statusUpdate == errSecItemNotFound else {
             logger.error("Falha ao atualizar token no Keychain: status \(statusUpdate, privacy: .public)")
-            return
+            return .recusou(statusUpdate)
         }
 
         var novo = busca
@@ -112,7 +150,9 @@ nonisolated struct KeychainManager {
         let statusAdd = SecItemAdd(novo as CFDictionary, nil)
         if statusAdd != errSecSuccess {
             logger.error("Falha ao salvar token no Keychain: status \(statusAdd, privacy: .public)")
+            return .recusou(statusAdd)
         }
+        return .gravou
     }
 
     private nonisolated static func read(forKey key: String) -> ResultadoLeituraToken {
@@ -129,8 +169,13 @@ nonisolated struct KeychainManager {
 
         if status == errSecItemNotFound { return .naoExiste }
         guard status == errSecSuccess else {
-            logger.warning("Token ilegível agora no Keychain: status \(status, privacy: .public)")
-            return .indisponivel(status)
+            if statusEsperaDesbloqueio(status) {
+                logger.warning("Token ilegível agora no Keychain: status \(status, privacy: .public)")
+                return .indisponivel(status)
+            }
+            // O desbloqueio não resolve: a sessão deste aparelho acabou.
+            logger.error("Token ilegível de vez no Keychain: status \(status, privacy: .public)")
+            return .ilegivel(status)
         }
         // Bytes que não viram texto não voltam sozinhos: tratar como
         // "indisponível" prenderia a pessoa em "Desbloqueie o iPhone" para sempre.

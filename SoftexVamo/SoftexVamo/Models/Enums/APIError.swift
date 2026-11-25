@@ -18,6 +18,11 @@ nonisolated enum APIError: LocalizedError, Sendable {
     /// os tokens são `WhenUnlockedThisDeviceOnly`). O pedido nem sai e a
     /// sessão continua: não é logout (`CofreDeTokens.buscarAccessToken`).
     case chaveIndisponivel
+    /// O Keychain recusou a leitura de um jeito que o desbloqueio não resolve
+    /// (`.ilegivel`, §2 de docs/keychain-login.md). O pedido nem sai: quem
+    /// trata chama o logout local, sem revogar no servidor, e a tela de
+    /// entrada aparece com esta mensagem.
+    case loginIlegivel
     case unknown
 
     var errorDescription: String? {
@@ -33,6 +38,8 @@ nonisolated enum APIError: LocalizedError, Sendable {
             return "Sua conta mudou durante o envio. Tente de novo."
         case .chaveIndisponivel:
             return "Desbloqueie o iPhone para continuar."
+        case .loginIlegivel:
+            return "Não foi possível ler seu login neste iPhone. Entre de novo."
         case .unknown:
             return "Erro inesperado"
         }

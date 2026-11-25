@@ -8,15 +8,24 @@ import SwiftData
 
 /// Cofre de tokens em memória. `accessTrancado`/`refreshTrancado` simulam o
 /// iPhone trancado (`errSecInteractionNotAllowed`): o token continua guardado,
-/// só não é entregue.
+/// só não é entregue. `accessIlegivel`/`refreshIlegivel` simulam a leitura
+/// que o desbloqueio não resolve (`.ilegivel`); `recusarGravacaoAccess`/
+/// `recusarGravacaoRefresh` fazem a gravação devolver `.recusou` sob comando,
+/// sem guardar nada.
 nonisolated final class CofreDeTokensFalso: CofreDeTokens, @unchecked Sendable {
     private let lock = NSLock()
     private var _access: String?
     private var _refresh: String?
     private var _accessTrancado = false
     private var _refreshTrancado = false
+    private var _accessIlegivel = false
+    private var _refreshIlegivel = false
+    private var _recusarGravacaoAccess: OSStatus?
+    private var _recusarGravacaoRefresh: OSStatus?
     private var _gravacoes = 0
     private var _apagadas = 0
+    private var _ordemGravacoes: [String] = []
+    private var _tentativasAccess = 0
 
     init(access: String?, refresh: String?) {
         _access = access
@@ -25,6 +34,11 @@ nonisolated final class CofreDeTokensFalso: CofreDeTokens, @unchecked Sendable {
 
     var gravacoes: Int { lock.withLock { _gravacoes } }
     var apagadas: Int { lock.withLock { _apagadas } }
+    /// "refresh:<token>" e "access:<token>", na ordem em que foram gravados.
+    var ordemGravacoes: [String] { lock.withLock { _ordemGravacoes } }
+    /// Chamadas ao `gravarAccessToken` — com a recusa do refresh o access nem
+    /// tenta (§1.1, regra 1), então o teste conta as tentativas.
+    var tentativasAccess: Int { lock.withLock { _tentativasAccess } }
 
     var accessTrancado: Bool {
         get { lock.withLock { _accessTrancado } }
@@ -36,29 +50,61 @@ nonisolated final class CofreDeTokensFalso: CofreDeTokens, @unchecked Sendable {
         set { lock.withLock { _refreshTrancado = newValue } }
     }
 
+    var accessIlegivel: Bool {
+        get { lock.withLock { _accessIlegivel } }
+        set { lock.withLock { _accessIlegivel = newValue } }
+    }
+
+    var refreshIlegivel: Bool {
+        get { lock.withLock { _refreshIlegivel } }
+        set { lock.withLock { _refreshIlegivel = newValue } }
+    }
+
+    /// `nil` grava normal; com um `OSStatus` a gravação devolve `.recusou`
+    /// sem guardar nada — como um Keychain que nega a escrita.
+    var recusarGravacaoAccess: OSStatus? {
+        get { lock.withLock { _recusarGravacaoAccess } }
+        set { lock.withLock { _recusarGravacaoAccess = newValue } }
+    }
+
+    var recusarGravacaoRefresh: OSStatus? {
+        get { lock.withLock { _recusarGravacaoRefresh } }
+        set { lock.withLock { _recusarGravacaoRefresh = newValue } }
+    }
+
+    var access: String? { lock.withLock { _access } }
+    var refresh: String? { lock.withLock { _refresh } }
+
     func buscarAccessToken() -> ResultadoLeituraToken {
-        lock.withLock { Self.ler(_access, trancado: _accessTrancado) }
+        lock.withLock { Self.ler(_access, trancado: _accessTrancado, ilegivel: _accessIlegivel) }
     }
 
     func buscarRefreshToken() -> ResultadoLeituraToken {
-        lock.withLock { Self.ler(_refresh, trancado: _refreshTrancado) }
+        lock.withLock { Self.ler(_refresh, trancado: _refreshTrancado, ilegivel: _refreshIlegivel) }
     }
 
     /// Como o Keychain: trancado, devolve `nil` (sem dizer por quê).
     func lerAccessToken() -> String? { buscarAccessToken().token }
     func lerRefreshToken() -> String? { buscarRefreshToken().token }
 
-    func gravarAccessToken(_ token: String) {
+    func gravarAccessToken(_ token: String) -> ResultadoGravacaoToken {
         lock.withLock {
+            _tentativasAccess += 1
+            if let recusa = _recusarGravacaoAccess { return .recusou(recusa) }
             _gravacoes += 1
             _access = token
+            _ordemGravacoes.append("access:\(token)")
+            return .gravou
         }
     }
 
-    func gravarRefreshToken(_ token: String) {
+    func gravarRefreshToken(_ token: String) -> ResultadoGravacaoToken {
         lock.withLock {
+            if let recusa = _recusarGravacaoRefresh { return .recusou(recusa) }
             _gravacoes += 1
             _refresh = token
+            _ordemGravacoes.append("refresh:\(token)")
+            return .gravou
         }
     }
 
@@ -70,7 +116,8 @@ nonisolated final class CofreDeTokensFalso: CofreDeTokens, @unchecked Sendable {
         }
     }
 
-    private static func ler(_ token: String?, trancado: Bool) -> ResultadoLeituraToken {
+    private static func ler(_ token: String?, trancado: Bool, ilegivel: Bool) -> ResultadoLeituraToken {
+        if ilegivel { return .ilegivel(errSecParam) }
         if trancado { return .indisponivel(errSecInteractionNotAllowed) }
         guard let token else { return .naoExiste }
         return .achou(token)

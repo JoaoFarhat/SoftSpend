@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import os
+import UIKit
 
 /// Esperas entre as tentativas de `/auth/refresh` quando a falha é transitória:
 /// 1 s antes da 2ª tentativa e 3 s antes da 3ª (3 tentativas no total).
@@ -43,6 +44,9 @@ nonisolated func deveDeslogarAposFalhaDeRefresh(_ error: Error) -> Bool {
     // Refresh token ilegível agora (iPhone trancado): ele continua no
     // Keychain e volta quando a tela abrir.
     if case APIError.chaveIndisponivel = error { return false }
+    // Login ilegível de vez: o logout local vem do `makeRequest`/dos ramos
+    // de leitura, uma vez só — não de cada pedido em voo (§2.2).
+    if case APIError.loginIlegivel = error { return false }
     if let urlError = error as? URLError, urlError.code == .cancelled { return false }
     if case APIError.serverError(_, _, let statusCode) = error {
         return statusCode != 429
@@ -120,8 +124,10 @@ nonisolated protocol CofreDeTokens: Sendable {
     func lerRefreshToken() -> String?
     func buscarAccessToken() -> ResultadoLeituraToken
     func buscarRefreshToken() -> ResultadoLeituraToken
-    func gravarAccessToken(_ token: String)
-    func gravarRefreshToken(_ token: String)
+    /// `.gravou` ou `.recusou(OSStatus)` (§1 de docs/keychain-login.md): na
+    /// renovação a recusa manda o par novo para a memória.
+    func gravarAccessToken(_ token: String) -> ResultadoGravacaoToken
+    func gravarRefreshToken(_ token: String) -> ResultadoGravacaoToken
     func apagarTokens()
 }
 
@@ -134,14 +140,51 @@ nonisolated extension CofreDeTokens {
 /// `CofreDeTokens` padrão do app: cada chamada delega para o
 /// `KeychainManager`, que continua lendo/gravando no mesmo lugar de antes.
 nonisolated struct CofreDeTokensKeychain: CofreDeTokens {
-    init() {}
+    /// `false` quando o iPhone está claramente destrancado (app ativo e dados
+    /// protegidos disponíveis): aí um `.indisponivel` da leitura vira
+    /// `.ilegivel`, porque a espera do desbloqueio não ajudaria (§2.1 de
+    /// docs/keychain-login.md). Padrão: dados protegidos indisponíveis OU
+    /// app fora do primeiro plano.
+    private let iPhoneProvavelmenteTrancado: @Sendable () -> Bool
+
+    init(
+        iPhoneProvavelmenteTrancado: @escaping @Sendable () -> Bool = CofreDeTokensKeychain.trancadoPorPadrao
+    ) {
+        self.iPhoneProvavelmenteTrancado = iPhoneProvavelmenteTrancado
+    }
+
+    /// `applicationState` só pode ser lido na thread principal: fora dela a
+    /// resposta segue "provavelmente trancado", que é o caminho conservador
+    /// (o pedido espera o desbloqueio em vez de declarar o login ilegível).
+    /// Não é `private` porque é o valor padrão do `init`.
+    static func trancadoPorPadrao() -> Bool {
+        guard Thread.isMainThread else { return true }
+        return MainActor.assumeIsolated {
+            !UIApplication.shared.isProtectedDataAvailable
+                || UIApplication.shared.applicationState != .active
+        }
+    }
 
     func lerAccessToken() -> String? { KeychainManager.getAccessToken() }
     func lerRefreshToken() -> String? { KeychainManager.getRefreshToken() }
-    func buscarAccessToken() -> ResultadoLeituraToken { KeychainManager.lerAccessToken() }
-    func buscarRefreshToken() -> ResultadoLeituraToken { KeychainManager.lerRefreshToken() }
-    func gravarAccessToken(_ token: String) { KeychainManager.saveAccessToken(token) }
-    func gravarRefreshToken(_ token: String) { KeychainManager.saveRefreshToken(token) }
+    func buscarAccessToken() -> ResultadoLeituraToken {
+        ajustarLeituraAoEstadoDoIPhone(
+            KeychainManager.lerAccessToken(),
+            iPhoneProvavelmenteTrancado: iPhoneProvavelmenteTrancado()
+        )
+    }
+    func buscarRefreshToken() -> ResultadoLeituraToken {
+        ajustarLeituraAoEstadoDoIPhone(
+            KeychainManager.lerRefreshToken(),
+            iPhoneProvavelmenteTrancado: iPhoneProvavelmenteTrancado()
+        )
+    }
+    func gravarAccessToken(_ token: String) -> ResultadoGravacaoToken {
+        KeychainManager.saveAccessToken(token)
+    }
+    func gravarRefreshToken(_ token: String) -> ResultadoGravacaoToken {
+        KeychainManager.saveRefreshToken(token)
+    }
     func apagarTokens() { KeychainManager.deleteAllTokens() }
 }
 
@@ -202,17 +245,33 @@ nonisolated func tokenDoCabecalho(_ valor: String?) -> String? {
     return String(valor.dropFirst("Bearer ".count))
 }
 
-/// O cofre ainda tem `refreshToken`? Trancado (`.indisponivel`) lança
-/// `.chaveIndisponivel`; outro token, ou nenhum, lança `.sessaoTrocada`.
-nonisolated private func conferirMesmaSessao(_ cofre: any CofreDeTokens, refreshToken: String) throws {
-    switch cofre.buscarRefreshToken() {
+/// O cofre ainda tem `refreshToken`? `busca` já vem lida (pendente primeiro,
+/// §1.1). Trancado (`.indisponivel`) lança `.chaveIndisponivel`; ilegível de
+/// vez (`.ilegivel`) lança `.loginIlegivel` — lança, não grava, não desloga
+/// (o próximo pedido cai no ramo do `.ilegivel`, §2.2); outro token, ou
+/// nenhum, lança `.sessaoTrocada`.
+nonisolated private func conferirMesmaSessao(_ busca: ResultadoLeituraToken, refreshToken: String) throws {
+    switch busca {
     case .indisponivel:
         throw APIError.chaveIndisponivel
+    case .ilegivel:
+        throw APIError.loginIlegivel
     case .achou(let atual) where atual == refreshToken:
         return
     case .achou, .naoExiste:
         throw APIError.sessaoTrocada
     }
+}
+
+/// Par de tokens renovado que o Keychain recusou gravar (§1.1 de
+/// docs/keychain-login.md). O servidor já trocou o refresh: se o par novo
+/// se perder, o refresh antigo do Keychain morreu no servidor e a sessão
+/// acaba junto. Enquanto está pendente ele é "o cofre" para leitura e para
+/// a comparação de sessão, e só se perde no logout, na troca de conta e no
+/// `deleteAccount`. Só memória: nunca vai para disco, log ou `UserDefaults`.
+nonisolated struct ParDeTokensPendente: Equatable, Sendable {
+    let refreshToken: String
+    let accessToken: String
 }
 
 private actor TokenRefresher {
@@ -238,6 +297,11 @@ private actor TokenRefresher {
             throw APIError.authentication
         }
 
+        // Antes de uma nova renovação vale tentar gravar o par pendente de
+        // novo (§1.1, regra 4 — junto com o começo de cada pedido e a volta
+        // para o primeiro plano).
+        manager.tentarGravarParPendente()
+
         if let emVoo {
             // A renovação em voo é de outra sessão: o resultado dela não
             // serve para este pedido.
@@ -259,19 +323,44 @@ private actor TokenRefresher {
                 // A conta mudou enquanto a renovação estava fora: a falha
                 // é da sessão antiga e não pode deslogar a nova. Cofre
                 // trancado nesse meio-tempo: `.chaveIndisponivel`, sem logout.
-                try conferirMesmaSessao(cofre, refreshToken: refreshToken)
+                try conferirMesmaSessao(manager.buscarRefreshToken(), refreshToken: refreshToken)
                 throw error
             }
             // Só grava se o cofre ainda é da sessão que renovou: senão os
             // tokens de A iriam por cima dos de B (ou de volta depois do
             // logout de A). Trancado agora, também não daria para gravar.
-            try conferirMesmaSessao(cofre, refreshToken: refreshToken)
+            try conferirMesmaSessao(manager.buscarRefreshToken(), refreshToken: refreshToken)
             // Refresh antes do access: com o app fechado entre as duas
             // gravações, o refresh antigo (já trocado no servidor) ficaria
             // no cofre e, passado 1 minuto, reenviá-lo seria reuso — o
             // servidor derrubaria todas as sessões do usuário.
-            cofre.gravarRefreshToken(response.refreshToken)
-            cofre.gravarAccessToken(response.accessToken)
+            let gravacaoRefresh = cofre.gravarRefreshToken(response.refreshToken)
+            // Recusou o refresh? O access nem tenta: o par antigo no Keychain
+            // continua consistente entre si (§1.1, regra 1).
+            var gravacaoAccess: ResultadoGravacaoToken = .gravou
+            if gravacaoRefresh == .gravou {
+                gravacaoAccess = cofre.gravarAccessToken(response.accessToken)
+            }
+            // O servidor já trocou o refresh: se a gravação foi recusada, o
+            // par novo não pode se perder — fica em memória e a renovação
+            // dá certo do mesmo jeito, sem erro e sem logout (§1.1, regra 2).
+            if gravacaoRefresh != .gravou || gravacaoAccess != .gravou {
+                let status: OSStatus
+                if case .recusou(let s) = gravacaoRefresh {
+                    status = s
+                } else if case .recusou(let s) = gravacaoAccess {
+                    status = s
+                } else {
+                    status = errSecSuccess
+                }
+                manager.guardarParPendente(
+                    ParDeTokensPendente(
+                        refreshToken: response.refreshToken,
+                        accessToken: response.accessToken
+                    ),
+                    status: status
+                )
+            }
             return response
         }
 
@@ -315,6 +404,17 @@ final class NetworkManager: Sendable {
     /// O que rodar quando a sessão morre de vez — no app, o logout sem
     /// revogar no servidor; nos testes, uma closure que só conta a chamada.
     private nonisolated let aoDeslogar: @Sendable () -> Void
+
+    /// Par renovado que o Keychain recusou gravar, esperando nova tentativa
+    /// (§1.1 de docs/keychain-login.md). Com pendente, as leituras o
+    /// devolvem e o Keychain nem é consultado — lá dentro o refresh já
+    /// trocado ia sabotar a sessão.
+    private nonisolated let parPendente = OSAllocatedUnfairLock<ParDeTokensPendente?>(initialState: nil)
+
+    /// Logout local por `.ilegivel` já disparado: vários pedidos em voo não
+    /// deslogam várias vezes (§2.2). Zera numa leitura `.achou` — o login
+    /// seguinte pode ilegibilizar de novo e precisa deslogar de novo.
+    private nonisolated let jaDeslogouPorLoginIlegivel = OSAllocatedUnfairLock(initialState: false)
 
     /// Configuração das duas sessões do app: sem `waitsForConnectivity` e
     /// com o `InsecureSessionDelegate` (que só confia no certificado do
@@ -408,6 +508,72 @@ final class NetworkManager: Sendable {
         return e
     }()
 
+    // MARK: - Par pendente e `.ilegivel`
+
+    /// Leitura de access/refresh para os pedidos: com par pendente ele é o
+    /// cofre — o Keychain tem o refresh velho, já trocado, e não é
+    /// consultado (§1.1, regra 3). A mesma leitura serve à comparação de
+    /// sessão do `TokenRefresher`.
+    nonisolated func buscarAccessToken() -> ResultadoLeituraToken {
+        if let par = parPendente.withLock({ $0 }) { return .achou(par.accessToken) }
+        return tokens.buscarAccessToken()
+    }
+
+    nonisolated func buscarRefreshToken() -> ResultadoLeituraToken {
+        if let par = parPendente.withLock({ $0 }) { return .achou(par.refreshToken) }
+        return tokens.buscarRefreshToken()
+    }
+
+    /// O par pendente, para os testes conferirem.
+    nonisolated var parDeTokensPendente: ParDeTokensPendente? {
+        parPendente.withLock { $0 }
+    }
+
+    /// O `TokenRefresher` chama quando o Keychain recusa gravar o par
+    /// renovado: ele fica em memória até uma gravação dar certo (§1.1,
+    /// regra 2). O log leva o `status` — token nunca vai para log.
+    nonisolated func guardarParPendente(_ par: ParDeTokensPendente, status: OSStatus) {
+        parPendente.withLock { $0 = par }
+        logger.warning("Par de tokens renovado ficou só em memória: status \(status, privacy: .public)")
+    }
+
+    /// Tenta gravar o par pendente de novo, na ordem da renovação (refresh
+    /// → access). Chamado no começo de cada pedido (`makeRequest`), ao
+    /// voltar para o primeiro plano (`SoftexVamoApp`) e antes de uma nova
+    /// renovação (`TokenRefresher.refresh`) — §1.1, regra 4. Uma gravação
+    /// recusada de novo segue em memória, sem erro e sem logout.
+    nonisolated func tentarGravarParPendente() {
+        guard let par = parPendente.withLock({ $0 }) else { return }
+        guard tokens.gravarRefreshToken(par.refreshToken) == .gravou,
+              tokens.gravarAccessToken(par.accessToken) == .gravou else { return }
+        // Só some se ainda é o mesmo par: uma renovação no meio-tempo pode
+        // ter posto outro.
+        parPendente.withLock { atual in
+            if atual == par { atual = nil }
+        }
+    }
+
+    /// Descarta o par pendente: logout, troca de conta e `deleteAccount` —
+    /// ninguém pode seguir usando tokens da sessão anterior (§1.1, regra 5).
+    /// O `AuthService` chama junto com o `deleteAllTokens`.
+    nonisolated func descartarParDeTokensPendente() {
+        parPendente.withLock { $0 = nil }
+    }
+
+    /// `.ilegivel` na leitura: o login deste aparelho não volta com o
+    /// desbloqueio, então o app desloga localmente — sem revogar no
+    /// servidor (não foi o refresh que falhou) — e a pessoa entra de novo
+    /// (§2.2). Uma vez por sessão ilegível: `jaDeslogouPorLoginIlegivel`
+    /// segura os outros pedidos em voo.
+    nonisolated private func deslogarPorLoginIlegivel() {
+        let chamar = jaDeslogouPorLoginIlegivel.withLock { ja -> Bool in
+            if ja { return false }
+            ja = true
+            return true
+        }
+        if chamar { aoDeslogar() }
+    }
+
     nonisolated private func makeRequest(
         url: URL,
         method: String = "GET",
@@ -415,6 +581,10 @@ final class NetworkManager: Sendable {
         contentType: String = "application/json",
         includeToken: Bool = true
     ) throws -> URLRequest {
+        // Par pendente aguardando gravação? O começo de cada pedido é uma
+        // das horas de tentar de novo (§1.1, regra 4) — custo zero sem
+        // pendente.
+        tentarGravarParPendente()
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.httpBody = body
@@ -424,8 +594,11 @@ final class NetworkManager: Sendable {
         }
 
         if includeToken {
-            switch tokens.buscarAccessToken() {
+            switch buscarAccessToken() {
             case .achou(let token):
+                // Voltou a ler: a sessão ilegível acabou (a pessoa entrou de
+                // novo) e um `.ilegivel` futuro precisa deslogar de novo.
+                jaDeslogouPorLoginIlegivel.withLock { $0 = false }
                 request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             case .naoExiste:
                 // Sem login: o pedido sai sem token, o 401 leva ao refresh e,
@@ -436,6 +609,12 @@ final class NetworkManager: Sendable {
                 // pedido não sai; a sessão fica e o envio tenta de novo depois.
                 logger.info("makeRequest: token ilegível agora (status \(status, privacy: .public)), pedido não enviado")
                 throw APIError.chaveIndisponivel
+            case .ilegivel(let status):
+                // Não volta com o desbloqueio: logout local (uma vez só) e a
+                // pessoa entra de novo (§2.2).
+                logger.error("makeRequest: token ilegível de vez (status \(status, privacy: .public)) — logout local")
+                deslogarPorLoginIlegivel()
+                throw APIError.loginIlegivel
             }
         }
 
@@ -457,7 +636,7 @@ final class NetworkManager: Sendable {
         let tokenEnviado = tokenDoCabecalho(request.value(forHTTPHeaderField: "Authorization"))
         // Pedido que não renova (o reenvio): o refresh token da sessão com
         // que ele saiu. No 401, só desloga se o cofre ainda tem esse.
-        let sessaoDoPedido = allowRefresh ? nil : (refreshDaSessao ?? tokens.lerRefreshToken())
+        let sessaoDoPedido = allowRefresh ? nil : (refreshDaSessao ?? buscarRefreshToken().token)
         let start = Date()
 
         // Sem corrida contra Task.sleep: o teto total do pedido já é o
@@ -480,9 +659,15 @@ final class NetworkManager: Sendable {
                 // cofre já tem outra (a conta mudou no meio), não desloga
                 // quem está logado agora. Cofre trancado: não dá para saber,
                 // e não desloga.
-                let refreshAgora = tokens.buscarRefreshToken()
+                let refreshAgora = buscarRefreshToken()
                 if case .indisponivel = refreshAgora {
                     throw APIError.chaveIndisponivel
+                }
+                if case .ilegivel = refreshAgora {
+                    // O Keychain recusou a leitura de vez: não é a API
+                    // recusando o token, é o login local que acabou (§2.2).
+                    deslogarPorLoginIlegivel()
+                    throw APIError.loginIlegivel
                 }
                 guard refreshAgora.token == sessaoDoPedido else {
                     throw APIError.sessaoTrocada
@@ -493,14 +678,24 @@ final class NetworkManager: Sendable {
 
             // Lidos juntos, sem `await` no meio: o refresh token entregue ao
             // refresher é da mesma sessão do access token comparado.
-            let buscaAccess = tokens.buscarAccessToken()
-            let buscaRefresh = tokens.buscarRefreshToken()
+            let buscaAccess = buscarAccessToken()
+            let buscaRefresh = buscarRefreshToken()
             // iPhone trancado (ex.: a tela apagou no meio de um envio longo):
             // sem o refresh token não dá para renovar, mas ele continua no
             // Keychain. Não chama o `/auth/refresh` e não desloga — antes o
             // `nil` daqui virava `.authentication` e a pessoa caía no login.
             if case .indisponivel = buscaAccess { throw APIError.chaveIndisponivel }
             if case .indisponivel = buscaRefresh { throw APIError.chaveIndisponivel }
+            // `.ilegivel`: o desbloqueio não resolve — logout local uma vez
+            // e a pessoa entra de novo (§2.2).
+            if case .ilegivel = buscaAccess {
+                deslogarPorLoginIlegivel()
+                throw APIError.loginIlegivel
+            }
+            if case .ilegivel = buscaRefresh {
+                deslogarPorLoginIlegivel()
+                throw APIError.loginIlegivel
+            }
             let tokenAtual = buscaAccess.token
             let refreshAtual = buscaRefresh.token
 
@@ -540,7 +735,7 @@ final class NetworkManager: Sendable {
                         // A conta mudou entre a falha e aqui: não desloga a nova.
                         // Cofre trancado agora (`.indisponivel` nunca é igual):
                         // também não.
-                        guard tokens.buscarRefreshToken() == ResultadoLeituraToken(refreshAtual) else { return }
+                        guard buscarRefreshToken() == ResultadoLeituraToken(refreshAtual) else { return }
                         aoDeslogar()
                     }
                 )

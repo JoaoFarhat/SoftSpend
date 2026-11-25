@@ -257,10 +257,26 @@ Keychain com `WhenUnlockedThisDeviceOnly`. Além do `lerAccessToken`/
 `lerRefreshToken` (`String?`), o `CofreDeTokens` tem `buscarAccessToken`/
 `buscarRefreshToken`, que devolvem `ResultadoLeituraToken`
 (`Network/KeychainManager.swift`), no mesmo contrato do `ArmazemDeChave`:
-`.achou`, `.naoExiste` (`errSecItemNotFound` ou bytes que não viram texto) e
-`.indisponivel(OSStatus)` (qualquer outro status). O padrão da extensão
-converte o `String?` (`nil` = `.naoExiste`), então cofre de teste antigo não
-muda; o `CofreDeTokensKeychain` lê o status de verdade.
+`.achou`, `.naoExiste` (`errSecItemNotFound` ou bytes que não viram texto),
+`.indisponivel(OSStatus)` (só os status que esperam o desbloqueio — a tabela
+é `statusEsperaDesbloqueio`) e `.ilegivel(OSStatus)` (os demais, que o
+desbloqueio não resolve). O padrão da extensão converte o `String?`
+(`nil` = `.naoExiste`), então cofre de teste antigo não muda; o
+`CofreDeTokensKeychain` lê o status de verdade e rebaixa `.indisponivel`
+para `.ilegivel` quando o iPhone está claramente destrancado (closure
+injetável `iPhoneProvavelmenteTrancado`).
+
+**Keychain recusando gravação e leitura ilegível** (`docs/keychain-login.md`):
+a gravação de token devolve `ResultadoGravacaoToken` (`.gravou`/
+`.recusou(OSStatus)`). Na renovação, a recusa guarda o par novo num
+`ParDeTokensPendente` em memória no `NetworkManager` — o pedido segue com o
+token novo, as leituras olham o pendente antes do Keychain e a gravação é
+retentada no começo de cada pedido, na volta ao primeiro plano e antes de
+uma nova renovação; logout/troca/`deleteAccount` o descartam. Na entrada
+(`saveUser`), a recusa fecha o acesso: apaga o que gravou, revoga a sessão
+nova em segundo plano e mostra a mensagem própria. `.ilegivel` na leitura
+lança `APIError.loginIlegivel` e chama o logout local (sem revogar) uma vez
+só. Testes em `SoftSpendTests/FalhaDoKeychainLoginTests.swift`.
 
 - Access token `.indisponivel`: o `makeRequest` (agora `throws`) lança
   `APIError.chaveIndisponivel` ("Desbloqueie o iPhone para continuar.") e o
