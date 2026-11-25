@@ -57,7 +57,7 @@ final class CiclosViewModel: ObservableObject {
     /// `private(set)` em vez de `private` para os testes aguardarem o fim da
     /// carga (`await vm.loadCiclosTask?.value`).
     private(set) var loadCiclosTask: Task<Void, Never>?
-    private var loadMoreDiasTask: Task<Void, Never>?
+    private(set) var loadMoreDiasTask: Task<Void, Never>?
     private var networkObservationTask: Task<Void, Never>?
 
     private var currentUser: UserModel? {

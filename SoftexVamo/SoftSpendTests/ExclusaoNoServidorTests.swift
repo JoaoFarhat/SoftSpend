@@ -390,8 +390,17 @@ struct ExclusaoNoServidorTests {
         #expect(try idsDeCiclos().count == 10)
     }
 
-    /// Sem conexão, `loadMoreCiclos` cai no ramo offline e não chama a rede:
-    /// a API falsa não recebe nenhum pedido de página nem de dias.
+    /// Conectividade mutável lida pelo fechamento `estaConectado` do
+    /// `CiclosViewModel`: permite desligar a "rede" no meio do cenário, depois
+    /// da 1ª página já ter subido.
+    final class CaixaConexao {
+        var conectado = true
+    }
+
+    /// Sem conexão, `loadMoreCiclos` cai no ramo offline e não chama a rede.
+    /// A "rede" é desligada DEPOIS da 1ª página: com o VM nascendo offline,
+    /// apagar o `guard estaConectado()` do "carregar mais" não mudaria nada —
+    /// a 1ª leitura também não chamaria a API falsa e o teste passaria errado.
     @Test func offlineLoadMoreCiclosNaoChamaARede() async throws {
         let usuarioAnterior = AuthService.shared.currentUser
         AuthService.shared.currentUser = UserModel(
@@ -399,8 +408,48 @@ struct ExclusaoNoServidorTests {
         )
         defer { AuthService.shared.currentUser = usuarioAnterior }
 
-        let api = FakeListasAPI(paginas: [(11...15).map(cicloDoServidor)])
-        let vm = CiclosViewModel(api: api, estaConectado: { false })
+        let caixa = CaixaConexao()
+        // Página 1 cheia (limit é 5): `hasMorePages == true`, então o
+        // `loadMoreCiclos` abaixo passa no guard e só a conectividade o segura.
+        let api = FakeListasAPI(paginas: [
+            (11...15).map(cicloDoServidor),
+            (6...10).map(cicloDoServidor),
+        ])
+        let vm = CiclosViewModel(api: api, estaConectado: { caixa.conectado })
+        vm.modelContext = ctx
+
+        vm.fetchCiclosResumo()
+        await vm.loadCiclosTask?.value
+        // Os dias da 1ª página chegam numa tarefa à parte: sem esperá-la, a
+        // contagem abaixo podia ser tirada no meio e mudar depois.
+        await vm.loadMoreDiasTask?.value
+        #expect(api.antesDeChamados.count == 1)
+        let diasAntes = api.diasBuscados.count
+
+        caixa.conectado = false
+        vm.loadMoreCiclos()
+        await vm.loadCiclosTask?.value
+
+        #expect(api.antesDeChamados.count == 1)
+        #expect(api.diasBuscados.count == diasAntes)
+        #expect(!vm.isLoading)
+    }
+
+    /// Conectado o tempo todo, `loadMoreCiclos` pede a 2ª página: prova que a
+    /// caixa do teste irmão deixa a chamada passar quando `conectado` é true.
+    @Test func conectadoLoadMoreCiclosChamaAPaginaSeguinte() async throws {
+        let usuarioAnterior = AuthService.shared.currentUser
+        AuthService.shared.currentUser = UserModel(
+            id: userId, nome: "Teste", username: "teste", email: "t@t.com"
+        )
+        defer { AuthService.shared.currentUser = usuarioAnterior }
+
+        let caixa = CaixaConexao()
+        let api = FakeListasAPI(paginas: [
+            (11...15).map(cicloDoServidor),
+            (6...10).map(cicloDoServidor),
+        ])
+        let vm = CiclosViewModel(api: api, estaConectado: { caixa.conectado })
         vm.modelContext = ctx
 
         vm.fetchCiclosResumo()
@@ -408,8 +457,8 @@ struct ExclusaoNoServidorTests {
         vm.loadMoreCiclos()
         await vm.loadCiclosTask?.value
 
-        #expect(api.antesDeChamados.isEmpty)
-        #expect(api.diasBuscados.isEmpty)
+        // 1ª página sem cursor; a 2ª com o menor id da página 1 (11).
+        #expect(api.antesDeChamados == [nil, 11])
         #expect(!vm.isLoading)
     }
 }
