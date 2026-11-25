@@ -10,9 +10,14 @@ nonisolated enum APIError: LocalizedError, Sendable {
     case serverError(message: String, requestId: String, statusCode: Int)
     case badURL
     case authentication
+    /// O pedido foi enviado com o login de uma conta e, antes da resposta, a
+    /// conta do aparelho mudou (saiu e outra entrou). O pedido não é
+    /// reenviado com o login da outra conta, o token não é renovado e
+    /// ninguém é deslogado (`NetworkManager.execute`, `TokenRefresher`).
+    case sessaoTrocada
     /// O token está no Keychain, mas não dá para ler agora (iPhone trancado:
-    /// os tokens são `WhenUnlockedThisDeviceOnly`). O pedido nem sai, e a
-    /// sessão continua: não é logout. Ver `CofreDeTokens`.
+    /// os tokens são `WhenUnlockedThisDeviceOnly`). O pedido nem sai e a
+    /// sessão continua: não é logout (`CofreDeTokens.buscarAccessToken`).
     case chaveIndisponivel
     case unknown
 
@@ -24,9 +29,11 @@ nonisolated enum APIError: LocalizedError, Sendable {
             }
             return message
         case .badURL:
-            return "URL invalida"
+            return "URL inválida"
         case .authentication:
-            return "Sessao expirada. Faca login novamente."
+            return "Sessão expirada. Faça login novamente."
+        case .sessaoTrocada:
+            return "Sua conta mudou durante o envio. Tente de novo."
         case .chaveIndisponivel:
             return "Desbloqueie o iPhone para continuar."
         case .unknown:

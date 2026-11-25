@@ -28,23 +28,11 @@ nonisolated enum ResultadoLeituraToken: Equatable, Sendable {
         if case .achou(let token) = self { return token }
         return nil
     }
-}
 
-/// Onde o `NetworkManager` lê e grava os tokens. Em produção, o Keychain
-/// (`CofreDeTokensKeychain`); nos testes, um cofre em memória que simula o
-/// iPhone trancado.
-nonisolated protocol CofreDeTokens: Sendable {
-    func lerAccessToken() -> ResultadoLeituraToken
-    func lerRefreshToken() -> ResultadoLeituraToken
-    func gravar(accessToken: String, refreshToken: String)
-}
-
-nonisolated struct CofreDeTokensKeychain: CofreDeTokens {
-    func lerAccessToken() -> ResultadoLeituraToken { KeychainManager.lerAccessToken() }
-    func lerRefreshToken() -> ResultadoLeituraToken { KeychainManager.lerRefreshToken() }
-    func gravar(accessToken: String, refreshToken: String) {
-        KeychainManager.saveAccessToken(accessToken)
-        KeychainManager.saveRefreshToken(refreshToken)
+    /// `.achou` com o token, `.naoExiste` sem ele. Usado pelo padrão do
+    /// `CofreDeTokens.buscarAccessToken()` para cofres que só sabem `String?`.
+    init(_ token: String?) {
+        self = token.map(ResultadoLeituraToken.achou) ?? .naoExiste
     }
 }
 

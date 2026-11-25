@@ -87,6 +87,21 @@ hop para o MainActor e bloqueiem a UI. Sem isso, todo `await
 NetworkManager.shared.postCiclo(...)` executado pelo `SyncActor` era
 serializado no MainActor, congelando a UI durante a sincronização.
 
+**`NetworkManager` testável**: o `init(session:uploadSession:tokens:aoDeslogar:)`
+recebe as duas `URLSession`, o `CofreDeTokens` (protocolo `nonisolated` +
+`Sendable` que lê/grava/apaga access e refresh token; o padrão
+`CofreDeTokensKeychain` delega para o `KeychainManager`) e a closure
+`aoDeslogar` (padrão: `AuthService.shared.logout(revogandoNoServidor: false)`
+num `Task` no MainActor). O `TokenRefresher` usa esse cofre e o próprio
+`NetworkManager` (recebido no `refresh(atravesDe:)`, não no `init`, porque o
+refresher nasce junto com o manager). `shared` segue com os padrões de sempre.
+O `execute` está coberto em `SoftSpendTests/NetworkManagerExecuteTests.swift`:
+`URLSession` de `URLProtocol` falso (`URLProtocolDeTeste`, estado estático —
+suíte `.serialized`) + cofre em memória (`CofreEmMemoria`), incluindo o 404
+sem `request_id` que vira `requestId "-"` (o que protege o descarte por 404,
+ver T4 abaixo). O `DELETE /auth/conta` vai pela `uploadSession` (90 s), não
+pelos 8 s comuns — o pedido sai com `timeoutInterval` 90.
+
 ### Componentes
 
 - `CiclosViewModel` — operações de ciclo/dia/gasto com persistência local.
@@ -188,6 +203,31 @@ volta do `repeat` (sai do laço sem ninguém logado) e só publica
 `pendentesRestantes` da conta que está logada. Testes em
 `SoftSpendTests/TrocaDeContaSyncTests.swift` (`UsuarioFalso`).
 
+A mesma regra vale **dentro** da chamada, no `NetworkManager`: um pedido de
+uma conta nunca é reenviado com o login de outra nem derruba o login dela.
+
+- O `execute` guarda o token do `Authorization` enviado. No 401, compara com
+  o access token do cofre (`decidirApos401`): igual → renova e reenvia como
+  antes; diferente com o mesmo `sub` no JWT (`subDoJWT` lê só o payload
+  base64url, sem conferir assinatura) → reenvia uma vez com o token atual,
+  sem renovar; outro `sub`, ilegível ou sem token → `APIError.sessaoTrocada`
+  ("Sua conta mudou durante o envio. Tente de novo."), sem renovar, sem
+  reenviar e sem deslogar.
+- O `TokenRefresher` recebe do `execute` o refresh token da sessão (lido
+  junto com o access) e só grava a resposta se o cofre ainda tem esse
+  refresh token; senão lança `.sessaoTrocada` sem gravar. Falha com o cofre
+  trocado também vira `.sessaoTrocada`. Pedido de outra sessão não pega
+  carona na renovação em voo (`.sessaoTrocada`).
+- Grava o refresh token **antes** do access: app fechado entre as duas
+  gravações deixaria o refresh antigo, já trocado, e reenviá-lo depois de
+  1 minuto é reuso (derruba todas as sessões).
+- `deveDeslogarAposFalhaDeRefresh(.sessaoTrocada)` é `false`. Nenhum caminho
+  desloga se o refresh token do cofre não é mais o da sessão que falhou —
+  nem o 401 do reenvio (`refreshDaSessao`; com o cofre trocado, lança
+  `.sessaoTrocada`).
+- Testes em `SoftSpendTests/SessaoTrocadaRedeTests.swift` (JWTs falsos com
+  `sub` "A"/"B", `URLProtocol` e cofre próprios do arquivo).
+
 Cada stage só processa itens cujo pai já tem `backendId`. Itens órfãos aguardam
 na fila (`continue`) para a próxima passada.
 
@@ -213,22 +253,26 @@ rodam, mesmo com `forcar: true`. Testes em
 `SoftSpendTests/LimitePorMinutoTests.swift`.
 
 **Token trancado (iPhone bloqueado no meio do envio)**: os tokens ficam no
-Keychain com `WhenUnlockedThisDeviceOnly`. O `NetworkManager` lê pelo
-protocolo `CofreDeTokens` (`Network/KeychainManager.swift`, `nonisolated`;
-produção `CofreDeTokensKeychain`), no mesmo contrato do `ArmazemDeChave`:
-`ResultadoLeituraToken` `.achou`, `.naoExiste` (`errSecItemNotFound` ou bytes
-que não viram texto) e `.indisponivel(OSStatus)` (qualquer outro status). O
-`init(cofre:protocolosDeTeste:aoDeslogar:)` do `NetworkManager` é a costura
-dos testes (`shared` usa o Keychain e `deslogarNoApp`).
+Keychain com `WhenUnlockedThisDeviceOnly`. Além do `lerAccessToken`/
+`lerRefreshToken` (`String?`), o `CofreDeTokens` tem `buscarAccessToken`/
+`buscarRefreshToken`, que devolvem `ResultadoLeituraToken`
+(`Network/KeychainManager.swift`), no mesmo contrato do `ArmazemDeChave`:
+`.achou`, `.naoExiste` (`errSecItemNotFound` ou bytes que não viram texto) e
+`.indisponivel(OSStatus)` (qualquer outro status). O padrão da extensão
+converte o `String?` (`nil` = `.naoExiste`), então cofre de teste antigo não
+muda; o `CofreDeTokensKeychain` lê o status de verdade.
 
-- Access token `.indisponivel`: o `makeRequest` lança
+- Access token `.indisponivel`: o `makeRequest` (agora `throws`) lança
   `APIError.chaveIndisponivel` ("Desbloqueie o iPhone para continuar.") e o
   pedido não sai — sem rede, sem 401, sem logout. `.naoExiste` segue como
   antes (pedido sem token → 401 → refresh → logout).
-- No 401, refresh token `.indisponivel`: o `TokenRefresher` lança
-  `.chaveIndisponivel` sem chamar `/auth/refresh`, e
-  `deveDeslogarAposFalhaDeRefresh` devolve `false` para ele. Só `.naoExiste`
-  vira `.authentication` (logout).
+- No 401: access ou refresh `.indisponivel` lança `.chaveIndisponivel` antes
+  do `decidirApos401` e sem chamar `/auth/refresh`. No 401 do reenvio, o mesmo
+  antes de comparar a sessão. Dentro do `TokenRefresher`, a conferência de
+  sessão depois da rede (`conferirMesmaSessao`) lança `.chaveIndisponivel` se o
+  cofre trancou no meio. O `deslogar` só roda se o `buscarRefreshToken` ainda
+  é igual ao da sessão (`.indisponivel` nunca é).
+  `deveDeslogarAposFalhaDeRefresh` devolve `false` para `.chaveIndisponivel`.
 - Gravar token é `SecItemUpdate`; `SecItemAdd` só quando o update dá
   `errSecItemNotFound`. Nunca apagar antes de gravar (o add pode falhar com o
   iPhone trancado e o token sumia).
@@ -242,8 +286,8 @@ dos testes (`shared` usa o Keychain e `deslogarNoApp`).
   entra, nunca apaga.
 
 Testes em `SoftSpendTests/TokenComIPhoneTrancadoTests.swift`
-(`CofreDeTokensFalso`, `ProtocoloFalso` — `URLProtocol` sem rede, por isso a
-suíte é `.serialized`).
+(`CofreDeTokensFalso`; `ProtocoloFalso`, `URLProtocol` próprio do arquivo com
+estado estático, por isso a suíte é `.serialized`).
 
 **Logging**: `SyncActor` usa `os.Logger` (subsystem `br.com.softspend`,
 category `SyncActor`) para logar falhas de save.

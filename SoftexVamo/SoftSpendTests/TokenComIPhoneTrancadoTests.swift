@@ -16,15 +16,15 @@ nonisolated final class CofreDeTokensFalso: CofreDeTokens, @unchecked Sendable {
     private var _accessTrancado = false
     private var _refreshTrancado = false
     private var _gravacoes = 0
+    private var _apagadas = 0
 
     init(access: String?, refresh: String?) {
         _access = access
         _refresh = refresh
     }
 
-    var access: String? { lock.withLock { _access } }
-    var refresh: String? { lock.withLock { _refresh } }
     var gravacoes: Int { lock.withLock { _gravacoes } }
+    var apagadas: Int { lock.withLock { _apagadas } }
 
     var accessTrancado: Bool {
         get { lock.withLock { _accessTrancado } }
@@ -36,19 +36,37 @@ nonisolated final class CofreDeTokensFalso: CofreDeTokens, @unchecked Sendable {
         set { lock.withLock { _refreshTrancado = newValue } }
     }
 
-    func lerAccessToken() -> ResultadoLeituraToken {
+    func buscarAccessToken() -> ResultadoLeituraToken {
         lock.withLock { Self.ler(_access, trancado: _accessTrancado) }
     }
 
-    func lerRefreshToken() -> ResultadoLeituraToken {
+    func buscarRefreshToken() -> ResultadoLeituraToken {
         lock.withLock { Self.ler(_refresh, trancado: _refreshTrancado) }
     }
 
-    func gravar(accessToken: String, refreshToken: String) {
+    /// Como o Keychain: trancado, devolve `nil` (sem dizer por quê).
+    func lerAccessToken() -> String? { buscarAccessToken().token }
+    func lerRefreshToken() -> String? { buscarRefreshToken().token }
+
+    func gravarAccessToken(_ token: String) {
         lock.withLock {
             _gravacoes += 1
-            _access = accessToken
-            _refresh = refreshToken
+            _access = token
+        }
+    }
+
+    func gravarRefreshToken(_ token: String) {
+        lock.withLock {
+            _gravacoes += 1
+            _refresh = token
+        }
+    }
+
+    func apagarTokens() {
+        lock.withLock {
+            _apagadas += 1
+            _access = nil
+            _refresh = nil
         }
     }
 
@@ -83,9 +101,11 @@ nonisolated final class EstadoProtocoloFalso: @unchecked Sendable {
 }
 
 /// Responde todo pedido das sessões do `NetworkManager` sem rede, com o status
-/// de `estado`, e guarda o que chegou.
-nonisolated final class ProtocoloFalso: URLProtocol, @unchecked Sendable {
-    static let estado = EstadoProtocoloFalso()
+/// de `estado`, e guarda o que chegou. Próprio deste arquivo (como o
+/// `URLProtocolSessaoTrocada`): suítes diferentes rodam em paralelo e não
+/// podem dividir o estado estático do `URLProtocolDeTeste`.
+nonisolated final class ProtocoloFalso: URLProtocol {
+    nonisolated static let estado = EstadoProtocoloFalso()
 
     override class func canInit(with request: URLRequest) -> Bool { true }
 
@@ -142,9 +162,13 @@ struct TokenComIPhoneTrancadoTests {
     func montar(_ cofre: CofreDeTokensFalso, status: Int) -> (NetworkManager, RegistroDeLogout) {
         ProtocoloFalso.estado.zerar(status: status)
         let registro = RegistroDeLogout()
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [ProtocoloFalso.self]
+        let sessao = URLSession(configuration: config)
         let rede = NetworkManager(
-            cofre: cofre,
-            protocolosDeTeste: [ProtocoloFalso.self],
+            session: sessao,
+            uploadSession: sessao,
+            tokens: cofre,
             aoDeslogar: { registro.deslogar() }
         )
         return (rede, registro)
@@ -165,10 +189,11 @@ struct TokenComIPhoneTrancadoTests {
         #expect(ProtocoloFalso.estado.pedidos.isEmpty)
         #expect(registro.vezes == 0)
         #expect(cofre.gravacoes == 0)
+        #expect(cofre.apagadas == 0)
         cofre.accessTrancado = false
         cofre.refreshTrancado = false
-        #expect(cofre.lerAccessToken() == .achou("access-1"))
-        #expect(cofre.lerRefreshToken() == .achou("refresh-1"))
+        #expect(cofre.buscarAccessToken() == .achou("access-1"))
+        #expect(cofre.buscarRefreshToken() == .achou("refresh-1"))
     }
 
     /// O pedido de envio do sync (`POST /ciclos`) também não sai.
@@ -205,9 +230,10 @@ struct TokenComIPhoneTrancadoTests {
         #expect(pedidos.first?.value(forHTTPHeaderField: "Authorization") == "Bearer access-vencido")
         #expect(registro.vezes == 0)
         #expect(cofre.gravacoes == 0)
+        #expect(cofre.apagadas == 0)
         cofre.refreshTrancado = false
-        #expect(cofre.lerAccessToken() == .achou("access-vencido"))
-        #expect(cofre.lerRefreshToken() == .achou("refresh-1"))
+        #expect(cofre.buscarAccessToken() == .achou("access-vencido"))
+        #expect(cofre.buscarRefreshToken() == .achou("refresh-1"))
     }
 
     /// (d) Sem token nenhum (`.naoExiste`): continua como sempre — o pedido sai
