@@ -8,11 +8,12 @@ do PDF nunca é gravada ou logada. Os parsers devolvem a estrutura interna
 
 import csv
 import io
+import logging
 import re
 import unicodedata
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 import filetype
 from fastapi import UploadFile
@@ -20,6 +21,8 @@ from fastapi import UploadFile
 from dtos.fatura import MAXIMO_COMPRAS, CompraLida, FaturaLida
 from enums.categoria_enum import Categoria
 from services.pdfium_seguro import trava_pdfium
+
+logger = logging.getLogger(__name__)
 
 TAMANHO_MAXIMO_PDF = 10 * 1024 * 1024
 TAMANHO_MAXIMO_TEXTO = 2 * 1024 * 1024
@@ -175,7 +178,14 @@ def desproteger_pdf(conteudo: bytes, senha: str | None) -> bytes:
                 novo.save(buffer)
                 return buffer.getvalue()
             except pdfium.PdfiumError as erro:
-                raise ErroFatura(422, f"Não foi possível processar o PDF: {erro}")
+                logger.warning(
+                    "pdfium falhou ao regravar PDF protegido (%s): %s",
+                    type(erro).__name__,
+                    erro,
+                )
+                raise ErroFatura(
+                    422, "Não foi possível abrir este PDF; envie outro arquivo"
+                )
             finally:
                 novo.close()
         finally:
@@ -202,14 +212,24 @@ def _data_ofx(valor: str | None) -> date | None:
         return None
 
 
+# Grupos de 3 dígitos separados só por ponto ou só por vírgula são milhar,
+# não decimal — dinheiro nunca tem 3 casas ("1.500" = 1500, "1,500" = 1500).
+_RE_MILHAR_PONTO = re.compile(r"^-?[1-9]\d{0,2}(\.\d{3})+$")
+_RE_MILHAR_VIRGULA = re.compile(r"^-?[1-9]\d{0,2}(,\d{3})+$")
+
+
 def _para_decimal(valor: str | None) -> Decimal | None:
-    """Aceita '1234.56', '1.234,56', '1234,56' e sinal negativo."""
+    """Aceita '1234.56', '1.234,56', '1234,56', milhar e sinal negativo."""
     if not valor:
         return None
     texto = valor.strip().replace("R$", "").replace(" ", "")
     if not texto:
         return None
-    if "," in texto and "." in texto:
+    if _RE_MILHAR_PONTO.match(texto):
+        texto = texto.replace(".", "")
+    elif _RE_MILHAR_VIRGULA.match(texto):
+        texto = texto.replace(",", "")
+    elif "," in texto and "." in texto:
         # O separador mais à direita é o decimal.
         if texto.rfind(",") > texto.rfind("."):
             texto = texto.replace(".", "").replace(",", ".")
@@ -483,16 +503,28 @@ def montar_fatura_lida(bruta: FaturaBruta) -> FaturaLida:
         )
         validas = validas[:MAXIMO_COMPRAS]
 
+    # Dinheiro não passa de 2 casas: o que vai à prévia e à soma é o que o
+    # servidor grava (o DTO não arredonda sozinho).
+    for compra in validas:
+        compra.valor = compra.valor.quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+    total = (
+        bruta.total_fatura.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if bruta.total_fatura is not None
+        else None
+    )
+
     soma_confere = None
     diferenca = None
-    if bruta.total_fatura is not None:
+    if total is not None:
         soma = Decimal("0")
         for compra in validas:
             if compra.tipo == "ESTORNO":
                 soma -= compra.valor
             else:
                 soma += compra.valor
-        diferenca = (soma - bruta.total_fatura).quantize(Decimal("0.01"))
+        diferenca = (soma - total).quantize(Decimal("0.01"))
         soma_confere = abs(diferenca) <= TOLERANCIA_SOMA
         if not soma_confere:
             avisos.append(
@@ -504,7 +536,7 @@ def montar_fatura_lida(bruta: FaturaBruta) -> FaturaLida:
         final_cartao=bruta.final_cartao,
         fechamento=bruta.fechamento,
         vencimento=bruta.vencimento,
-        total_fatura=bruta.total_fatura,
+        total_fatura=total,
         soma_confere=soma_confere,
         diferenca=diferenca,
         avisos=avisos,
