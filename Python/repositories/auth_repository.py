@@ -28,7 +28,7 @@ def criar_usuario(db: Session, usuario: models.User) -> models.User:
             db.add(usuario)
             db.flush()
     except IntegrityError:
-        raise ValueError("Dados de cadastro ja em uso")
+        raise ValueError("Este e-mail ou nome de usuário já está cadastrado.")
     db.refresh(usuario)
     return usuario
 

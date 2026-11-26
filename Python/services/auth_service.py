@@ -115,7 +115,7 @@ def iniciar_sessao(db: Session, user_id: str) -> tuple[str, str]:
 def registrar(db: Session, dados: RegisterRequest) -> models.User:
     if auth_repository.buscar_por_email(db, dados.email) or \
        auth_repository.buscar_por_username(db, dados.username):
-        raise ValueError("Dados de cadastro ja em uso")
+        raise ValueError("Este e-mail ou nome de usuário já está cadastrado.")
 
     novo_usuario = models.User(
         nome=dados.nome,
@@ -131,10 +131,10 @@ def login(db: Session, dados: LoginRequest) -> tuple[models.User, str, str]:
     usuario = auth_repository.buscar_por_email(db, dados.email)
 
     if not usuario:
-        raise ValueError("Credenciais invalidas")
+        raise ValueError("E-mail ou senha incorretos.")
 
     if not _verificar_senha(dados.senha, usuario.senha_hash):
-        raise ValueError("Credenciais invalidas")
+        raise ValueError("E-mail ou senha incorretos.")
 
     if REVOKE_OLD_REFRESH_TOKENS_ON_LOGIN:
         auth_repository.revogar_todos_refresh_tokens_por_usuario(db, usuario.id)
