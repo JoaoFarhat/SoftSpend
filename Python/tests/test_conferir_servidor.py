@@ -8,6 +8,7 @@ certificados dependerem só do teste.
 
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -351,6 +352,24 @@ def test_alerta_sem_permissao_da_falta():
     assert ARN_SNS not in linha
 
 
+def test_alerta_oserror_da_falta(tmp_path, monkeypatch):
+    """OSError genérico (não PermissionError nem FileNotFoundError, que têm
+    ramo próprio) vira FALTA — sem esse ramo, um alerta.env ilegível
+    derrubava o script e o servidor parecia conferido."""
+    arquivo = _alerta_env(
+        tmp_path, "ALERTA_SNS_TOPICO=arn:aws:sns:sa-east-1:123:x\n"
+    )
+
+    def _read_text(*args, **kwargs):
+        raise OSError("disco")
+
+    monkeypatch.setattr(Path, "read_text", _read_text)
+    resultado = cs.conferir_alertas({}, None, tmp_path, arquivo=arquivo)
+    assert resultado.ok is False
+    assert resultado.motivo == "arquivo ilegível (OSError)"
+    assert "arn:" not in resultado.motivo
+
+
 def test_alerta_valor_nao_arn_da_falta(tmp_path):
     arquivo = _alerta_env(tmp_path, "ALERTA_SNS_TOPICO=email@exemplo.com\n")
     linha = cs._linha(cs.conferir_alertas({}, None, None, arquivo))
@@ -426,6 +445,28 @@ def test_env_mais_velho_que_o_inicio_da_ok(ambiente, capsys):
     os.utime(arquivo_env, (passado, passado))
     assert _rodar(ambiente) == 0
     assert "API iniciada depois" in _linhas(capsys)
+
+
+def test_env_no_mesmo_segundo_do_inicio_da_ok(ambiente, capsys):
+    """`.env` gravado na fração do mesmo segundo do restart (mtime
+    INICIO + 0,5 s): o início vem truncado em segundos do
+    `systemctl --timestamp=unix`, então a fração a mais não pode dar
+    FALTA falso de ".env mudou depois que a API iniciou"."""
+    arquivo_env = ambiente["pasta"] / ".env"
+    mesmo_segundo = INICIO_SERVICO + 0.5
+    os.utime(arquivo_env, (mesmo_segundo, mesmo_segundo))
+    assert _rodar(ambiente) == 0
+    assert "API iniciada depois" in _linhas(capsys)
+
+
+def test_env_um_segundo_depois_do_inicio_da_falta(ambiente, capsys):
+    arquivo_env = ambiente["pasta"] / ".env"
+    depois = INICIO_SERVICO + 1
+    os.utime(arquivo_env, (depois, depois))
+    assert _rodar(ambiente) == 1
+    falta = [l for l in _linhas(capsys).splitlines() if l.startswith("FALTA")]
+    assert len(falta) == 1
+    assert "restart" in falta[0]
 
 
 def test_servico_parado_da_falta(ambiente, capsys, monkeypatch):
