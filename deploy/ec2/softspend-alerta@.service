@@ -1,0 +1,14 @@
+[Unit]
+Description=SoftSpend - aviso por e-mail quando uma unidade falha (docs/backup-mysql.md §7)
+
+[Service]
+Type=oneshot
+# root: precisa ler /etc/softspend/alerta.env (root, modo 600).
+User=root
+# O "-" não exige o arquivo: sem ele (ou com o tópico vazio) o alerta sai 0.
+EnvironmentFile=-/etc/softspend/alerta.env
+ExecStart=/home/ubuntu/SoftSpend/Python/.venv/bin/python /home/ubuntu/SoftSpend/deploy/ec2/alertar.py %i
+StandardOutput=journal
+StandardError=journal
+NoNewPrivileges=yes
+PrivateTmp=yes

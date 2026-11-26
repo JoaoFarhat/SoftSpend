@@ -118,6 +118,27 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Alerta por e-mail quando uma unidade diária falha (docs/backup-mysql.md §7)
+#
+# O template softspend-alerta@.service é chamado pelo OnFailure= do backup e
+# das assinaturas, e publica no tópico SNS de ALERTA_SNS_TOPICO. Com a
+# variável vazia o alerta não publica nada. Nunca sobrescreve o alerta.env.
+# ---------------------------------------------------------------------------
+echo "Instalando alerta por e-mail..."
+sudo cp "$(dirname "$0")/softspend-alerta@.service" /etc/systemd/system/
+if [ ! -f "$BACKUP_ETC/alerta.env" ]; then
+    sudo install -m 600 -o root -g root "$(dirname "$0")/alerta.env.example" "$BACKUP_ETC/alerta.env"
+fi
+sudo systemctl daemon-reload
+if sudo grep -Eq '^ALERTA_SNS_TOPICO=[^[:space:]]+' "$BACKUP_ETC/alerta.env"; then
+    echo "Alertas ligados: o OnFailure do backup e das assinaturas publica no SNS."
+else
+    echo "AVISO: alertas desligados. Preencha ALERTA_SNS_TOPICO em"
+    echo "      $BACKUP_ETC/alerta.env (docs/backup-mysql.md §4.2) e rode"
+    echo "      este script de novo."
+fi
+
+# ---------------------------------------------------------------------------
 # nginx + TLS
 #
 # A config final referencia os certificados do Let's Encrypt. Numa maquina nova

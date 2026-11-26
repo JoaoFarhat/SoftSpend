@@ -121,7 +121,13 @@ acessa o S3 pela internet.
 
 - [ ] **Tópico SNS** `softspend-alertas` e uma assinatura de e-mail (o
       usuário confirma o e-mail que a AWS manda). Acrescentar
-      `sns:Publish` nesse tópico à política da função.
+      `sns:Publish` nesse tópico à política da função da EC2. O ARN vai em
+      `ALERTA_SNS_TOPICO`, no `/etc/softspend/alerta.env` (criado pelo
+      `setup.sh` a partir do `deploy/ec2/alerta.env.example`): quando o
+      `softspend-backup.service` ou o `softspend-assinaturas.service`
+      falham, o `OnFailure=` dispara o `softspend-alerta@.service`, que
+      roda `deploy/ec2/alertar.py` e publica o aviso. Com a variável
+      vazia, o alerta não publica nada.
 - [ ] **Alarme CloudWatch** de "backup não chegou": ativar **métricas de
       requisição** do S3 só para o prefixo `diario/` (custa cerca de US$ 0,30
       por mês) e criar um alarme em `PutRequests` com soma `< 1` em 25 horas e
@@ -170,13 +176,19 @@ pendente, não faz dump (um backup por merge seria ruído). Mexer no
 
 ## 7. Como saber que o backup funciona
 
-1. **Falhou:** o script sai com erro e, na fase 2, publica uma mensagem no
-   SNS com o motivo (sem dados do banco na mensagem).
+1. **Falhou:** o `OnFailure=` da unidade dispara `softspend-alerta@.service`,
+   que roda `deploy/ec2/alertar.py` e publica no tópico de
+   `ALERTA_SNS_TOPICO` (`/etc/softspend/alerta.env`, modelo
+   `deploy/ec2/alerta.env.example`) um e-mail só com a unidade, a máquina e
+   a hora UTC — nunca trecho de log nem dado do banco. Sem tópico
+   configurado, o alerta não publica e a falha fica só no journal e em
+   `/var/log/softspend/`.
 2. **Não rodou:** o alarme do CloudWatch (§4.2).
 3. **Conferência mensal** (o teste do §8.2) também falha alto se o último
    backup não existe ou não restaura.
-4. Sem a fase 2, o mínimo é o usuário abrir o bucket 1 vez por semana e ver
-   que há um arquivo novo por dia; o Claude escreve esse lembrete como tarefa.
+4. Sem o tópico do §4.2, o mínimo é o usuário abrir o bucket 1 vez por
+   semana e ver que há um arquivo novo por dia; o Claude escreve esse
+   lembrete como tarefa.
 
 ## 8. Teste de restauração
 

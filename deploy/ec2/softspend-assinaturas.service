@@ -2,6 +2,7 @@
 Description=SoftSpend - conciliação diária das assinaturas com a Apple (docs/assinatura.md §2.7)
 Wants=network-online.target
 After=network-online.target mysql.service
+OnFailure=softspend-alerta@%n.service
 
 [Service]
 Type=oneshot
