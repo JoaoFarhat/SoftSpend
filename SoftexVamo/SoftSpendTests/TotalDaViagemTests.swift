@@ -64,7 +64,9 @@ struct TotalDaViagemTests {
     }
 
     func lerViagem(_ c: CicloSoftex) {
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.salvarOuAtualizarCicloLocal(cicloDoServidor(c, gastoTotal: 100))
     }
@@ -110,7 +112,9 @@ struct TotalDaViagemTests {
         apagado.deletadoEm = .now
         try ctx.save()
 
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.salvarOuAtualizarCicloLocal(cicloDoServidor(c, gastoTotal: 150))
 
@@ -130,7 +134,9 @@ struct TotalDaViagemTests {
         g.deletadoEm = .now
         try ctx.save()
 
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.salvarOuAtualizarCicloLocal(cicloDoServidor(c, gastoTotal: 40))
 

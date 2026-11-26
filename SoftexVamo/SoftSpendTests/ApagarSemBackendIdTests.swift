@@ -62,7 +62,9 @@ struct ApagarSemBackendIdTests {
     func viewModel() throws -> (CiclosViewModel, CicloSoftex) {
         let ctx = ModelContext(container)
         let ciclo = try #require(try ctx.fetch(FetchDescriptor<CicloSoftex>()).first)
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.allCiclos = [ciclo]
         vm.atualCiclo = ciclo

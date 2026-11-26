@@ -86,7 +86,9 @@ struct DescartarNotaIlegivelTests {
 
     /// O que o botão "Descartar nota" da tela chama.
     func descartarNota(_ gastoId: UUID) async throws {
+        var envios = 0
         let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ModelContext(container)
         try await vm.removerComprovante(gastoId: gastoId)
     }

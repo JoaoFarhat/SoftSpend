@@ -64,7 +64,9 @@ struct NomeArquivoExportacaoTests {
         )
         await assinatura.carregarEstado()
 
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.assinatura = assinatura
         let ciclo = CicloSoftex(valor_total: 600, gasto_total: 0, periodo: "",
                               diaria: 100, titulo: "SP/RJ", dias: [])

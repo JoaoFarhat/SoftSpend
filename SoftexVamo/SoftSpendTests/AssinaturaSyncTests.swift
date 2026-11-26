@@ -250,7 +250,9 @@ struct AssinaturaSyncTests {
         let ctx = ModelContext(container)
         let viagem = try #require(try ctx.fetch(FetchDescriptor<CicloSoftex>()).first)
         #expect(!viagem.podeTerSidoCriadoNoServidor)
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.allCiclos = [viagem]
         vm.atualCiclo = viagem
