@@ -55,7 +55,7 @@ ao_sair() {
     # Apaga o banco de teste mesmo com falha (e mesmo no sucesso): ele só
     # existe para esta conferência.
     if [ "$BANCO_CRIADO" -eq 1 ]; then
-        mysql "--defaults-extra-file=$RESTORE_CNF" "$RESTORE_DB" -e "DROP DATABASE IF EXISTS $RESTORE_DB" || true
+        mysql "--defaults-extra-file=$RESTORE_CNF" -e "DROP DATABASE IF EXISTS "$RESTORE_DB"" || true
     fi
     if [ -n "$TMPDIR_TESTE" ] && [ -d "$TMPDIR_TESTE" ]; then
         rm -rf "$TMPDIR_TESTE"
@@ -96,8 +96,11 @@ META="${DUMP%.sql.gz}.meta.json"
 log "dump escolhido: $(basename "$DUMP") ($(stat -c %s "$DUMP") bytes)"
 
 ETAPA="restauração"
-mysql "--defaults-extra-file=$RESTORE_CNF" "$RESTORE_DB" -e "DROP DATABASE IF EXISTS $RESTORE_DB"
-mysql "--defaults-extra-file=$RESTORE_CNF" "$RESTORE_DB" -e "CREATE DATABASE $RESTORE_DB"
+# DROP/CREATE conectam sem banco padrão: o banco de teste pode não existir
+# (mysql com banco padrão falharia com ERROR 1049 antes de rodar o SQL).
+# O nome vai só dentro do -e; a carga e as consultas usam o banco como padrão.
+mysql "--defaults-extra-file=$RESTORE_CNF" -e "DROP DATABASE IF EXISTS "$RESTORE_DB""
+mysql "--defaults-extra-file=$RESTORE_CNF" -e "CREATE DATABASE "$RESTORE_DB""
 BANCO_CRIADO=1
 gunzip -c "$DUMP" | mysql "--defaults-extra-file=$RESTORE_CNF" "$RESTORE_DB"
 

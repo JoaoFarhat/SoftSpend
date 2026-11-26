@@ -327,6 +327,18 @@ def test_sh_todo_drop_create_e_carga_usa_restore_db():
     assert len(carga) == 1 and '"$RESTORE_DB"' in carga[0]
 
 
+def test_sh_drop_create_conectam_sem_banco_padrao():
+    """`mysql <banco> -e ...` falha com ERROR 1049 se o banco não existe —
+    exatamente o caso do teste, que apaga o banco no fim de cada volta.
+    Nos comandos de DROP/CREATE o nome fica só dentro do `-e`."""
+    for linha in _SH.splitlines():
+        if "DROP DATABASE" not in linha and "CREATE DATABASE" not in linha:
+            continue
+        assert " -e " in linha, linha
+        antes_do_e = linha.split(" -e ", 1)[0]
+        assert '"$RESTORE_DB"' not in antes_do_e, linha
+
+
 def test_sh_usa_restore_cnf_e_chama_conferir():
     assert "--defaults-extra-file=$RESTORE_CNF" in _SH
     assert "conferir-restauracao" in _SH
