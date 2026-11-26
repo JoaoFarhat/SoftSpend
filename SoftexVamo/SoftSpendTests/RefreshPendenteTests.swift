@@ -86,7 +86,7 @@ struct RefreshPendenteTests {
         let gastos = api.gastos
         return api.dias.map { d in
             DiaSoftex(from: DiaSoftexResponse(
-                id: d.id, clientId: d.clientId, data: d.data, saldo: d.saldo,
+                id: d.id, clientId: d.clientId, data: d.data, dataLocal: d.dataLocal, saldo: d.saldo,
                 gastos: gastos.filter { $0.diaId == d.id }.map { g in
                     GastosDiaResponse(
                         id: g.id, clientId: g.clientId, dia_id: g.diaId, valor: g.valor, titulo: g.titulo,
@@ -298,7 +298,7 @@ struct RefreshPendenteTests {
         let diaServidor = try #require(api.dias.first)
         let gastoServidor = try #require(api.gastos.first)
         let servidor = [DiaSoftex(from: DiaSoftexResponse(
-            id: diaServidor.id, clientId: diaServidor.clientId, data: diaServidor.data, saldo: 70,
+            id: diaServidor.id, clientId: diaServidor.clientId, data: diaServidor.data, dataLocal: diaServidor.dataLocal, saldo: 70,
             gastos: [GastosDiaResponse(
                 id: gastoServidor.id, clientId: gastoServidor.clientId, dia_id: diaServidor.id,
                 valor: 30, titulo: "Almoço e café", categoria: .ALIMENTACAO, comprovante_url: nil,

@@ -240,6 +240,22 @@ resposta recebe `marcarFalha` sozinho ("Falha ao sincronizar dia"). 404
 descarta os dias do lote; 429 marca o lote aguardando o limite e para o sync.
 Testes em `SoftSpendTests/DiasEmLoteTests.swift`.
 
+**Data do dia (`data_local`, spec `docs/data-do-dia.md`)**: o dia da viagem é
+uma data de calendário, não o instante. `DiaLoteRequest.dataLocal` sai dos
+componentes `ano/mês/dia` de `dia.data` no `Calendar.current` do aparelho
+(`DiaDoCalendario.texto`, em `Services/DiaDoCalendario.swift`), e o servidor a
+grava em `dias.data_dia` (lê-la em UTC errava um dia em todo fuso a leste de
+Greenwich). Na resposta, `DiaSoftexResponse.dataLocal` (opcional — servidor
+antigo não devolve) reconstrói `DiaSoftex.data` como o início daquele dia no
+fuso do aparelho (`DiaDoCalendario.inicioDoDia`), então dois aparelhos em
+fusos diferentes concordam sobre qual é o dia. No `enviarDiasEmLote`, a data
+da resposta só substitui a local se o usuário não a mexeu durante o envio
+(`atual.data == envio.foto.data`); quando difere, a foto marca mudança e a
+passada seguinte converge. O `calendario` entra por parâmetro no helper e no
+`init(from:)` para os testes não dependerem do fuso do CI. Sem `@Model`
+alterado — o `Date` do `DiaSoftex` continua, sem V2 do `SoftSpendSchemaV1`.
+Testes em `SoftSpendTests/DiaDoCalendarioTests.swift`.
+
 **Backoff exponencial**: base 60s, teto 3600s (1h). `marcarFalha` incrementa
 `tentativas` e seta `proximaTentativaEm`. `deveTentar` só retorna `true` se
 `proximaTentativaEm <= agora`. Exceção: `429` do limite por minuto

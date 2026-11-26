@@ -67,7 +67,8 @@ struct ExclusaoNoServidorTests {
     /// O dia do servidor, no formato da resposta de `GET /dias`.
     func diaDoServidor(_ d: DiaSoftex, gastos: [Int] = []) -> DiaSoftex {
         DiaSoftex(from: DiaSoftexResponse(
-            id: d.backendId, clientId: d.clientId, data: d.data, saldo: d.saldo,
+            id: d.backendId, clientId: d.clientId, data: d.data,
+            dataLocal: DiaDoCalendario.texto(de: d.data), saldo: d.saldo,
             gastos: gastos.map { respostaGasto($0, dia: d.backendId ?? 0) }
         ))
     }
