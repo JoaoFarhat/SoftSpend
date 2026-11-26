@@ -149,13 +149,12 @@ jobs:
             if ! checar_saude; then
               sudo journalctl -u softspend -n 50 --no-pager || true
               if [ -z "$MIGROU" ]; then
-                git reset --hard "$ANTES"
-                pip install -r requirements.txt
-                sudo systemctl restart softspend
-                if checar_saude; then
+                # A volta inteira fica num if so: com o set -e, um passo que
+                # falha cai no else e avisa em vez de encerrar calado.
+                if git reset --hard "$ANTES" && pip install -r requirements.txt && sudo systemctl restart softspend && checar_saude; then
                   echo "deploy desfeito: voltou para $ANTES"
                 else
-                  echo "a volta também falhou"
+                  echo "a volta também falhou — conferir na EC2"
                 fi
               else
                 echo "health check falhou depois de migration; código não foi desfeito, conferir na EC2"
