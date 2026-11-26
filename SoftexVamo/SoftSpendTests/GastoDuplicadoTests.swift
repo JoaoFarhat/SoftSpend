@@ -58,7 +58,9 @@ struct GastoDuplicadoTests {
     }
 
     func viewModel(_ local: Local) -> CiclosViewModel {
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.allCiclos = [local.ciclo]
         vm.atualCiclo = local.ciclo

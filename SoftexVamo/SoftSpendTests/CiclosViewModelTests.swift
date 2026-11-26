@@ -27,7 +27,9 @@ struct CiclosViewModelTests {
         let gasto = GastosDia(valor: dec("43.10"), titulo: "Almoço", categoria: .ALIMENTACAO, dia: dia)
         ctx.insert(gasto)
 
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.atualCiclo = ciclo
 
@@ -40,7 +42,9 @@ struct CiclosViewModelTests {
     /// 100 / 3 = 33,333…: a diária gravada (e o saldo de cada dia) é a mesma
     /// que o servidor guarda, arredondada a 2 casas — não a divisão crua.
     @Test func viagemNovaGravaDiariaArredondada() async throws {
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         let hoje = Calendar.current.startOfDay(for: .now)
         let fim = Calendar.current.date(byAdding: .day, value: 2, to: hoje)!
@@ -94,7 +98,9 @@ struct CiclosViewModelTests {
     @Test func abrirViagemSincronizadaSemDiasNaoRecriaDias() throws {
         let c = viagem(backendId: 42)
         // Offline: `abrirViagem` não dispara a busca de dias na rede de verdade.
+        var envios = 0
         let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.allCiclos = [c]
 
@@ -108,7 +114,9 @@ struct CiclosViewModelTests {
     /// pelo `periodo` para dar para lançar gastos.
     @Test func abrirViagemNuncaSincronizadaRecriaDiasPeloPeriodo() throws {
         let c = viagem(backendId: nil)
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.allCiclos = [c]
 
@@ -124,7 +132,9 @@ struct CiclosViewModelTests {
     /// elas fazia a limpeza (T5) tirar um dia vivo daqui até a próxima leitura.
     @Test func viagemDe30DiasSaiEmUmaLeitura() async throws {
         let c = viagem(backendId: 7)
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.allCiclos = [c]
         vm.atualCiclo = c
@@ -149,7 +159,9 @@ struct CiclosViewModelTests {
     /// Viagem com mais de 100 dias: todas as páginas do servidor são buscadas.
     @Test func carregaTodasAsPaginasDeDias() async throws {
         let c = viagem(periodo: "01/07 - 14/08", backendId: 7)
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.allCiclos = [c]
         vm.atualCiclo = c
@@ -183,7 +195,9 @@ struct CiclosViewModelTests {
         let pendente = DiaSoftex(data: .now, saldo: 100)
         ctx.insert(pendente)
         pendente.ciclo = c
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.atualCiclo = c
 
@@ -216,7 +230,9 @@ struct CiclosViewModelTests {
         let gasto = GastosDia(valor: 10, titulo: "Café", categoria: .ALIMENTACAO, dia: dia)
         gasto.syncStatus = .synced
         ctx.insert(gasto)
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.atualCiclo = c
 
@@ -231,7 +247,9 @@ struct CiclosViewModelTests {
     @Test func tetoDePaginasNaoApagaDias() async throws {
         let c = viagem(backendId: 7)
         let antigo = diaSincronizado(999, em: c)
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.atualCiclo = c
 
@@ -254,7 +272,9 @@ struct CiclosViewModelTests {
         let novo = DiaSoftex(data: .now, saldo: 100)
         ctx.insert(novo)
         novo.ciclo = c
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.atualCiclo = c
 
@@ -272,7 +292,9 @@ struct CiclosViewModelTests {
     @Test func buscaDeOutraViagemNaoMexeNaAberta() async throws {
         let c = viagem(backendId: 7)
         let antigo = diaSincronizado(999, em: c)
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.atualCiclo = c
         var chamadas = 0
