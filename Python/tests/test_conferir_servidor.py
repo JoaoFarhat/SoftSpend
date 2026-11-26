@@ -6,6 +6,7 @@ e `certificados_apple/` com um `.cer`, para o head do Alembic e os
 certificados dependerem só do teste.
 """
 
+import os
 import subprocess
 
 import pytest
@@ -18,6 +19,10 @@ from scripts import conferir_servidor as cs
 
 HEAD = "revteste123"
 USER_DEMO = "user-demo"
+
+# Horário de início do serviço usado pelo fixture: depois de qualquer
+# `.env` criado agora, para a checagem de reinício sair OK por padrão.
+INICIO_SERVICO = 1_900_000_000
 
 # Segredos sentinelas: nunca podem aparecer na saída.
 SEGREDO_ACCESS = "access-SEGREDO-sentinel-0123456789abcdef"
@@ -48,6 +53,8 @@ def ambiente(tmp_path, monkeypatch):
     monkeypatch.setattr(
         cs, "_estado_timer", lambda nome: ("enabled", "active")
     )
+    # Idem o `systemctl show` do serviço: início depois do `.env` (OK).
+    monkeypatch.setattr(cs, "_inicio_servico", lambda: INICIO_SERVICO)
     pasta = tmp_path / "Python"
     (pasta / "alembic" / "versions").mkdir(parents=True)
     (pasta / "alembic" / "versions" / f"{HEAD}_rev.py").write_text(
@@ -55,6 +62,7 @@ def ambiente(tmp_path, monkeypatch):
     )
     (pasta / "certificados_apple").mkdir()
     (pasta / "certificados_apple" / "raiz.cer").write_bytes(b"certificado")
+    (pasta / ".env").write_text("SECRET_KEY=x\n", encoding="utf-8")
 
     engine = create_engine(f"sqlite:///{tmp_path}/servidor.db")
     Base.metadata.create_all(engine)
@@ -312,3 +320,63 @@ def test_is_enabled_vazio_diz_nao_instalado_no_falta(monkeypatch):
     assert linha.startswith("FALTA")
     assert "não instalado" in linha
     assert "(/" not in linha
+
+
+def test_env_mais_novo_que_o_inicio_da_falta(ambiente, capsys):
+    """`.env` editado depois do início do serviço: a API roda os valores
+    antigos e a checagem manda reiniciar."""
+    arquivo_env = ambiente["pasta"] / ".env"
+    futuro = INICIO_SERVICO + 3600
+    os.utime(arquivo_env, (futuro, futuro))
+    assert _rodar(ambiente) == 1
+    falta = [l for l in _linhas(capsys).splitlines() if l.startswith("FALTA")]
+    assert len(falta) == 1
+    assert "restart" in falta[0]
+
+
+def test_env_mais_velho_que_o_inicio_da_ok(ambiente, capsys):
+    arquivo_env = ambiente["pasta"] / ".env"
+    passado = INICIO_SERVICO - 3600
+    os.utime(arquivo_env, (passado, passado))
+    assert _rodar(ambiente) == 0
+    assert "API iniciada depois" in _linhas(capsys)
+
+
+def test_servico_parado_da_falta(ambiente, capsys, monkeypatch):
+    monkeypatch.setattr(cs, "_inicio_servico", lambda: "")
+    assert _rodar(ambiente) == 1
+    assert "parado" in _linhas(capsys)
+
+
+def test_reinicio_sem_systemctl_da_falta(ambiente, capsys, monkeypatch):
+    monkeypatch.setattr(cs, "_inicio_servico", lambda: None)
+    assert _rodar(ambiente) == 1
+    assert "systemctl indisponível" in _linhas(capsys)
+
+
+# `_inicio_servico` de verdade (o que roda na EC2), com `subprocess.run`
+# trocado por monkeypatch — os testes acima substituem a função inteira.
+
+
+def test_inicio_servico_converte_timestamp_unix(monkeypatch):
+    def _run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="@1732530000\n")
+
+    monkeypatch.setattr(cs.subprocess, "run", _run)
+    assert cs._inicio_servico() == 1732530000
+
+
+def test_inicio_servico_vazio_devolve_vazio(monkeypatch):
+    def _run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="")
+
+    monkeypatch.setattr(cs.subprocess, "run", _run)
+    assert cs._inicio_servico() == ""
+
+
+def test_inicio_servico_sem_systemctl_devolve_none(monkeypatch):
+    def _run(*args, **kwargs):
+        raise FileNotFoundError("systemctl")
+
+    monkeypatch.setattr(cs.subprocess, "run", _run)
+    assert cs._inicio_servico() is None
