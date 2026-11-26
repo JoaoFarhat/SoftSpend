@@ -85,7 +85,9 @@ struct ExclusaoNoServidorTests {
     }
 
     func viewModel(aberto c: CicloSoftex) -> CiclosViewModel {
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.allCiclos = [c]
         vm.atualCiclo = c
@@ -374,7 +376,9 @@ struct ExclusaoNoServidorTests {
         ])
         // `estaConectado: { true }`: sem ele, um CI rodando sem rede faria o
         // teste cair no ramo offline e nunca chamar a API falsa.
+        var envios = 0
         let vm = CiclosViewModel(api: api, estaConectado: { true })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
 
         vm.fetchCiclosResumo()
@@ -416,7 +420,9 @@ struct ExclusaoNoServidorTests {
             (11...15).map(cicloDoServidor),
             (6...10).map(cicloDoServidor),
         ])
+        var envios = 0
         let vm = CiclosViewModel(api: api, estaConectado: { caixa.conectado })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
 
         vm.fetchCiclosResumo()
@@ -450,7 +456,9 @@ struct ExclusaoNoServidorTests {
             (11...15).map(cicloDoServidor),
             (6...10).map(cicloDoServidor),
         ])
+        var envios = 0
         let vm = CiclosViewModel(api: api, estaConectado: { caixa.conectado })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
 
         vm.fetchCiclosResumo()

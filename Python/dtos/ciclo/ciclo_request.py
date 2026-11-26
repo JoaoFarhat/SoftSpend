@@ -18,5 +18,5 @@ class CicloRequest(BaseModel):
     @classmethod
     def nao_somente_espacos(cls, v: str) -> str:
         if not v.strip():
-            raise ValueError("Campo nao pode conter apenas espacos")
+            raise ValueError("Campo não pode conter apenas espaços")
         return v.strip()

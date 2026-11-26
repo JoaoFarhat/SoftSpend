@@ -61,7 +61,9 @@ struct LimiteTituloTests {
         dia.ciclo = ciclo
         try ctx.save()
 
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.atualCiclo = ciclo
         try await vm.createNewGasto(title: Self.t150, value: 25, dia: dia, categoria: .ALIMENTACAO)
@@ -73,7 +75,9 @@ struct LimiteTituloTests {
 
     @Test func viagemCriadaCom150FicaCom100() async throws {
         let ctx = ModelContext(container)
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         let ida = Calendar.current.startOfDay(for: .now)
         let volta = Calendar.current.date(byAdding: .day, value: 2, to: ida)!
@@ -97,7 +101,9 @@ struct LimiteTituloTests {
         ctx.insert(gasto)
         try ctx.save()
 
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.atualCiclo = ciclo
         try await vm.editGasto(gastoId: gasto.id, novoDia: dia, titulo: Self.t150,
@@ -114,7 +120,9 @@ struct LimiteTituloTests {
         ctx.insert(ciclo)
         try ctx.save()
 
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.allCiclos = [ciclo]
         vm.atualCiclo = ciclo

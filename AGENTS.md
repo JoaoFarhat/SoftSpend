@@ -686,6 +686,36 @@ Cadeia de migrations:
     bloqueadas falham com `Table 'softspend.assinaturas' doesn't exist`. A
     AS2 não tem migration (o índice único de `original_transaction_id` já
     está nesta).
+12. `b8e4d2f6a1c3` — adiciona `dias.data_dia` (`DATE` anulável, índice
+    `(ciclo_id, data_dia)`) com backfill pela hora UTC do instante
+    (`docs/data-do-dia.md` §4). Sem ela, `POST /dias` e `/dias/lote`
+    falham com `Unknown column 'dias.data_dia'` e o `DiaResponse` devolve
+    `data_local` só pelo fallback. O downgrade só derruba índice e coluna.
+
+## Data do dia (servidor)
+
+Spec: `docs/data-do-dia.md` (tarefa D1). `dias.data` é um **instante** (a
+meia-noite local do aparelho em UTC); `dias.data_dia` é a **data de
+calendário** (`YYYY-MM-DD`) que o app manda em `data_local`. Ler o dia de
+calendário do instante em UTC erra em um dia em todo fuso a leste de
+Greenwich — por isso:
+
+- `DiaRequest` aceita `data_local` (`date` opcional, ±5 anos). Vindo, ele
+  manda em `data_dia`; sem ele (app antigo), `dia_de_calendario(data)` —
+  hora UTC ≥ 11 → dia UTC seguinte (fuso a leste), senão o próprio dia UTC.
+  O `data` continua gravado como veio. Reenvio por `client_id` devolve o
+  existente sem recalcular `data_dia`.
+- `DiaResponse.data_local` devolve `data_dia`, com o mesmo fallback para
+  linha que sobrou nula.
+- O helper único é `services/dia_calendario.py` (`dia_de_calendario`,
+  `data_do_dia` — `data_dia` ou fallback). Toda conta de "dia" lê
+  `data_do_dia`, nunca `dia.data` em UTC: `export_service` (relatório
+  CSV/PDF, com ordenação por `data_dia` e desempate por `id`),
+  `fatura_service.marcar_previa` (`dentro_da_viagem`, `dia_id`, pontuação)
+  e `open_finance_reconciliation_service._data_gasto` (janela do match).
+- Fora do escopo: `CreditCardBill.closing_date`/`due_date` e a `date` das
+  transações da fatura — já são datas de calendário, consistentes entre si.
+- Testes em `tests/test_data_do_dia.py`.
 
 ## Isolamento por usuário (UUID)
 

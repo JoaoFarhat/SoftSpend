@@ -10,30 +10,35 @@ nonisolated func diaDaSemana(_ data: Date, calendario: Calendar = .current) -> S
 }
 
 /// Aviso local de diária (tela 13): ao chegar a 80% da diária do dia e ao
-/// passar dela. No máximo um de cada por dia (chaves guardadas em `UserDefaults`).
+/// passar dela. No máximo um de cada por dia **e por viagem** (chaves guardadas
+/// em `UserDefaults`): viagens sobrepostas ou contas diferentes no mesmo
+/// aparelho não dividem a chave — sem o `cicloId`, o aviso da segunda viagem do
+/// dia nunca sairia. O `cicloId` é opcional para os usos sem viagem (demo).
 enum AvisoDiaria: Equatable {
-    case oitentaPorCento(livre: Decimal, data: Date)
-    case passou(valor: Decimal, data: Date)
+    case oitentaPorCento(livre: Decimal, cicloId: UUID? = nil, data: Date)
+    case passou(valor: Decimal, cicloId: UUID? = nil, data: Date)
 
     /// Preferência "Avisos de diária" (Ajustes, Tarefa 9). Ausente = ligada.
     static let chaveAtivos = "avisosDiariaAtivos"
-    /// Chaves dos avisos já enviados ("80-yyyy-MM-dd", "passou-yyyy-MM-dd").
+    /// Chaves dos avisos já enviados ("80-<id>-yyyy-MM-dd", "passou-<id>-yyyy-MM-dd";
+    /// a data fica no fim porque `registrar` ordena por `suffix(10)`).
     static let chaveEnviados = "avisosDiariaEnviados"
 
     private static let logger = Logger(subsystem: "br.com.softspend", category: "AvisoDiaria")
 
     // MARK: Regra
 
-    /// Avisos que o gasto de hoje pede e que ainda não foram dados hoje.
+    /// Avisos que o gasto de hoje pede e que ainda não foram dados hoje nesta
+    /// viagem (`cicloId` entra na chave).
     /// Passar da diária também conta como ter chegado a 80% (as duas chaves são gravadas).
-    static func avaliar(gastoHoje: Decimal, diaria: Decimal, jaAvisados: Set<String>, hoje: Date) -> [AvisoDiaria] {
+    static func avaliar(gastoHoje: Decimal, diaria: Decimal, jaAvisados: Set<String>, cicloId: UUID, hoje: Date) -> [AvisoDiaria] {
         guard diaria > 0 else { return [] }
         var avisos: [AvisoDiaria] = []
-        let oitenta = AvisoDiaria.oitentaPorCento(livre: max(0, diaria - gastoHoje), data: hoje)
+        let oitenta = AvisoDiaria.oitentaPorCento(livre: max(0, diaria - gastoHoje), cicloId: cicloId, data: hoje)
         if gastoHoje * 10 >= diaria * 8, !jaAvisados.contains(oitenta.chave) {
             avisos.append(oitenta)
         }
-        let passou = AvisoDiaria.passou(valor: gastoHoje - diaria, data: hoje)
+        let passou = AvisoDiaria.passou(valor: gastoHoje - diaria, cicloId: cicloId, data: hoje)
         if gastoHoje > diaria, !jaAvisados.contains(passou.chave) {
             avisos.append(passou)
         }
@@ -42,7 +47,13 @@ enum AvisoDiaria: Equatable {
 
     var data: Date {
         switch self {
-        case .oitentaPorCento(_, let data), .passou(_, let data): return data
+        case .oitentaPorCento(_, _, let data), .passou(_, _, let data): return data
+        }
+    }
+
+    var cicloId: UUID? {
+        switch self {
+        case .oitentaPorCento(_, let cicloId, _), .passou(_, let cicloId, _): return cicloId
         }
     }
 
@@ -59,21 +70,24 @@ enum AvisoDiaria: Equatable {
         return f
     }()
 
+    /// "80-<id>-yyyy-MM-dd" / "passou-<id>-yyyy-MM-dd"; sem `cicloId`,
+    /// "80-yyyy-MM-dd" / "passou-yyyy-MM-dd" como antes.
     var chave: String {
         let dia = Self.formatoChave.string(from: data)
+        let id = cicloId.map { "\($0.uuidString)-" } ?? ""
         switch self {
-        case .oitentaPorCento: return "80-\(dia)"
-        case .passou: return "passou-\(dia)"
+        case .oitentaPorCento: return "80-\(id)\(dia)"
+        case .passou: return "passou-\(id)\(dia)"
         }
     }
 
     /// Título e texto da notificação, como na tela 13.
     func conteudo(cidade: String, diaria: Decimal) -> (titulo: String, corpo: String) {
         switch self {
-        case .oitentaPorCento(let livre, _):
+        case .oitentaPorCento(let livre, _, _):
             return ("Você usou 80% da diária de hoje",
                     "Ainda dá para gastar \(formatarBRL(livre)) em \(cidade).")
-        case .passou(let valor, let data):
+        case .passou(let valor, _, let data):
             return ("Passou \(formatarBRL(valor)) da diária",
                     "\(diaDaSemana(data)), \(dataCurta(data)). Os próximos dias continuam com \(formatarBRLCurto(diaria)).")
         }
@@ -106,7 +120,7 @@ enum AvisoDiaria: Equatable {
         let resumo = ResumoViagem(ciclo: ciclo, hoje: hoje)
         guard case .durante = resumo.estado else { return }
         let avisos = avaliar(gastoHoje: resumo.gastoHoje, diaria: resumo.diaria,
-                             jaAvisados: avisados(em: defaults), hoje: hoje)
+                             jaAvisados: avisados(em: defaults), cicloId: ciclo.id, hoje: hoje)
         guard !avisos.isEmpty else { return }
         registrar(Set(avisos.map(\.chave)), em: defaults)
 

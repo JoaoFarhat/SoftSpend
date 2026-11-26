@@ -155,7 +155,9 @@ struct FormularioViagemTests {
             for: CicloSoftex.self, DiaSoftex.self, GastosDia.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ModelContext(container)
 
         var f = formulario()
@@ -350,7 +352,9 @@ struct FormularioViagemTests {
             for: CicloSoftex.self, DiaSoftex.self, GastosDia.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ModelContext(container)
 
         var f = FormularioViagem(ida: d(20), volta: d(25), calendario: cal, hoje: d(20))
@@ -374,7 +378,9 @@ struct FormularioViagemTests {
             for: CicloSoftex.self, DiaSoftex.self, GastosDia.self,
             configurations: ModelConfiguration(isStoredInMemoryOnly: true)
         )
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ModelContext(container)
         let cal = Calendar.current
         let hoje = cal.startOfDay(for: .now)

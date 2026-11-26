@@ -72,7 +72,9 @@ struct RefreshPendenteTests {
     }
 
     func viewModel(_ local: Local) -> CiclosViewModel {
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = local.ctx
         vm.allCiclos = [local.ciclo]
         vm.atualCiclo = local.ciclo
@@ -273,7 +275,9 @@ struct RefreshPendenteTests {
             id: 99, clientId: ciclo.clientId, valor_total: 300, gasto_total: 0,
             periodo: "01/09 - 03/09", diaria: 100, titulo: "Cuiabá, MT", dias: nil
         ))
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
 
         let resultado = vm.salvarOuAtualizarCicloLocal(servidor)
