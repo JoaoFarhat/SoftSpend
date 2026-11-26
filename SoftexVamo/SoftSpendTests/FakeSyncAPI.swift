@@ -36,6 +36,9 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
         let clientId: String?
         let cicloId: Int
         var data: Date
+        /// O `data_local` recebido no pedido (o servidor o guarda como a data
+        /// de calendário do dia e o devolve na resposta — `docs/data-do-dia.md`).
+        var dataLocal: String?
         var saldo: Decimal
     }
 
@@ -160,7 +163,7 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
     }
 
     private func respostaDia(_ d: DiaRemoto) -> DiaSoftex {
-        DiaSoftex(from: DiaSoftexResponse(id: d.id, clientId: d.clientId, data: d.data, saldo: d.saldo, gastos: nil))
+        DiaSoftex(from: DiaSoftexResponse(id: d.id, clientId: d.clientId, data: d.data, dataLocal: d.dataLocal, saldo: d.saldo, gastos: nil))
     }
 
     private func respostaGasto(_ g: GastoRemoto) -> GastosDia {
@@ -176,7 +179,7 @@ nonisolated final class FakeSyncAPI: SyncAPI, @unchecked Sendable {
            let existente = _dias.first(where: { $0.cicloId == ciclo.id && $0.clientId == clientId }) {
             return existente
         }
-        let dia = DiaRemoto(id: novoId(), clientId: pedido.clientId, cicloId: ciclo.id, data: pedido.data, saldo: ciclo.diaria)
+        let dia = DiaRemoto(id: novoId(), clientId: pedido.clientId, cicloId: ciclo.id, data: pedido.data, dataLocal: pedido.dataLocal, saldo: ciclo.diaria)
         _dias.append(dia)
         return dia
     }

@@ -196,7 +196,9 @@ struct BloqueiosAssinaturaTests {
         let f = Fabrica()
         f.responder(temAcesso: false)
         await f.vm.carregarEstado()
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.assinatura = f.vm
         vm.atualCiclo = cicloTeste()
         var rede = 0
@@ -213,7 +215,9 @@ struct BloqueiosAssinaturaTests {
         let f = Fabrica()
         f.responder(status: "active", temAcesso: true)
         await f.vm.carregarEstado()
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.assinatura = f.vm
         vm.atualCiclo = cicloTeste()
         var rede = 0
@@ -234,7 +238,9 @@ struct BloqueiosAssinaturaTests {
         let f = Fabrica()
         f.responder(status: "active", temAcesso: true)
         await f.vm.carregarEstado()
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.assinatura = f.vm
         vm.atualCiclo = cicloTeste()
         vm.exportarRemoto = { _, _, _ in
@@ -252,7 +258,9 @@ struct BloqueiosAssinaturaTests {
         let f = Fabrica()
         f.responder(status: "active", temAcesso: true)
         await f.vm.carregarEstado()
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.assinatura = f.vm
         vm.atualCiclo = cicloTeste()
         vm.exportarRemoto = { _, _, _ in

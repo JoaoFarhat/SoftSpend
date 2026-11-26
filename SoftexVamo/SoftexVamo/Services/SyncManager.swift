@@ -750,9 +750,14 @@ actor SyncActor: ModelActor {
             let clientId: String
             let foto: FotoDia
             let saldoEnviado: Decimal
+            /// O dia já tinha `backendId` antes do envio (reenvio depois de
+            /// mudança no meio do caminho): o saldo devolvido não é ajuste
+            /// inicial — é o saldo sem os gastos locais que ainda não
+            /// subiram, então a reconciliação não roda e o local fica.
+            let tinhaBackendId: Bool
         }
         let envios = dias.map {
-            Envio(uuid: $0.id, clientId: $0.clientId, foto: FotoDia($0), saldoEnviado: $0.saldo)
+            Envio(uuid: $0.id, clientId: $0.clientId, foto: FotoDia($0), saldoEnviado: $0.saldo, tinhaBackendId: $0.backendId != nil)
         }
         let pedidos = dias.map { DiaLoteRequest(clientId: $0.clientId, data: $0.data) }
         guard await mesmoUsuario() else { return }
@@ -771,13 +776,31 @@ actor SyncActor: ModelActor {
                 }
                 gravarDia(envio.uuid, etapa: "syncDias") { atual in
                     atual.backendId = remoto.backendId
-                    // Reconcilia saldo com servidor (backend pode ajustar inicial), a
-                    // menos que um gasto local tenha mexido no saldo durante o envio.
-                    if atual.saldo == envio.saldoEnviado {
+                    // A foto compara o que o usuário tem agora com o que foi
+                    // enviado — ANTES de aplicar a resposta. `remoto.data` é o
+                    // início daquele dia no fuso do aparelho (docs/data-do-dia.md)
+                    // e quase sempre difere da hora guardada: trocar `atual.data`
+                    // antes da foto marcava "mudou durante o envio" num dia que
+                    // ninguém tocou, e o lote subia uma segunda vez.
+                    let mesmaFoto = FotoDia(atual) == envio.foto
+                    let usuarioMexeuNoSaldo = atual.saldo != envio.saldoEnviado
+                    // Reconcilia saldo com servidor só na criação (o backend
+                    // pode ajustar o inicial) e se o usuário não mexeu no
+                    // saldo durante o envio. Dia que já tinha `backendId`
+                    // devolve o saldo de antes de gastos locais ainda não
+                    // enviados — reconciliar aqui apagava o gasto da tela até
+                    // a próxima leitura da lista.
+                    if !usuarioMexeuNoSaldo && !envio.tinhaBackendId {
                         atual.saldo = remoto.saldo
                     }
+                    // `data_local` da resposta manda: só substitui se o usuário
+                    // não mexeu na data no meio do envio. Mexendo, a passada
+                    // seguinte converge (o `data_local` reenviado é o mesmo).
+                    if atual.data == envio.foto.data {
+                        atual.data = remoto.data
+                    }
                     // diaId dos gastos é derivado de dia?.backendId — não precisa atualizar manualmente
-                    if FotoDia(atual) == envio.foto {
+                    if mesmaFoto && !usuarioMexeuNoSaldo {
                         marcarSucesso(atual)
                     } else {
                         marcarMudancaDuranteEnvio(atual)

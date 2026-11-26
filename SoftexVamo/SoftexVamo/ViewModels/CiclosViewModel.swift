@@ -44,6 +44,17 @@ final class CiclosViewModel: ObservableObject {
     /// offline quando o CI rodasse sem rede.
     private let estaConectado: @MainActor () -> Bool
 
+    /// Pedido de envio disparado depois de cada alteração local (criar,
+    /// editar ou apagar viagem, gasto ou comprovante); injetável para os
+    /// testes — produção usa `SyncManager.shared` (padrão, como o
+    /// `sincronizarAntesDeExportar`). Sem ele, um teste que chamasse uma
+    /// dessas operações dispararia o sync de verdade no banco do app
+    /// hospedeiro, com quem estiver logado no simulador — e nenhum teste
+    /// garantiria que a alteração pede o envio.
+    var pedirEnvio: @MainActor () async -> Void = {
+        await SyncManager.shared.sync(forcar: true)
+    }
+
     private var diasSkip = 0
     /// Teto do `limit` de `GET /ciclos/{id}/dias` (`le=100` no servidor).
     /// Com 100, a leitura por `skip` só tem mais de uma página em viagem com
@@ -947,7 +958,7 @@ final class CiclosViewModel: ObservableObject {
         salvarLocal()
 
         Task {
-            await SyncManager.shared.sync(forcar: true)
+            await pedirEnvio()
         }
     }
     
@@ -982,7 +993,7 @@ final class CiclosViewModel: ObservableObject {
             salvarLocal()
 
             Task {
-                await SyncManager.shared.sync(forcar: true)
+                await pedirEnvio()
             }
         } else {
             modelContext?.delete(ciclo)
@@ -1048,7 +1059,7 @@ final class CiclosViewModel: ObservableObject {
         self.index = allCiclos.firstIndex(where: { $0.id == aberta.id }) ?? 0
 
         Task {
-            await SyncManager.shared.sync(forcar: true)
+            await pedirEnvio()
         }
     }
     
@@ -1087,7 +1098,7 @@ final class CiclosViewModel: ObservableObject {
         try modelContext.save()
 
         Task {
-            await SyncManager.shared.sync(forcar: true)
+            await pedirEnvio()
         }
     }
 
@@ -1105,7 +1116,7 @@ final class CiclosViewModel: ObservableObject {
         try modelContext.save()
 
         Task {
-            await SyncManager.shared.sync(forcar: true)
+            await pedirEnvio()
         }
     }
     
@@ -1122,7 +1133,7 @@ final class CiclosViewModel: ObservableObject {
         try modelContext.save()
 
         Task {
-            await SyncManager.shared.sync(forcar: true)
+            await pedirEnvio()
         }
     }
     
@@ -1169,7 +1180,7 @@ final class CiclosViewModel: ObservableObject {
         try modelContext.save()
 
         Task {
-            await SyncManager.shared.sync(forcar: true)
+            await pedirEnvio()
         }
     }
     
@@ -1224,7 +1235,7 @@ final class CiclosViewModel: ObservableObject {
         try modelContext.save()
         
         Task {
-            await SyncManager.shared.sync(forcar: true)
+            await pedirEnvio()
         }
     }
 

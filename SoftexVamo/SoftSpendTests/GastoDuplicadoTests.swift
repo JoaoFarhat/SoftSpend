@@ -52,13 +52,16 @@ struct GastoDuplicadoTests {
     /// O dia do servidor, no formato da resposta de `GET /dias`.
     func diaDoServidor(_ dia: DiaSoftex, gastos: [GastosDiaResponse] = []) -> DiaSoftex {
         DiaSoftex(from: DiaSoftexResponse(
-            id: dia.backendId, clientId: dia.clientId, data: dia.data, saldo: dia.saldo,
+            id: dia.backendId, clientId: dia.clientId, data: dia.data,
+            dataLocal: DiaDoCalendario.texto(de: dia.data), saldo: dia.saldo,
             gastos: gastos
         ))
     }
 
     func viewModel(_ local: Local) -> CiclosViewModel {
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
         vm.allCiclos = [local.ciclo]
         vm.atualCiclo = local.ciclo

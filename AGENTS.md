@@ -241,6 +241,22 @@ resposta recebe `marcarFalha` sozinho ("Falha ao sincronizar dia"). 404
 descarta os dias do lote; 429 marca o lote aguardando o limite e para o sync.
 Testes em `SoftSpendTests/DiasEmLoteTests.swift`.
 
+**Data do dia (`data_local`, spec `docs/data-do-dia.md`)**: o dia da viagem é
+uma data de calendário, não o instante. `DiaLoteRequest.dataLocal` sai dos
+componentes `ano/mês/dia` de `dia.data` no `Calendar.current` do aparelho
+(`DiaDoCalendario.texto`, em `Services/DiaDoCalendario.swift`), e o servidor a
+grava em `dias.data_dia` (lê-la em UTC errava um dia em todo fuso a leste de
+Greenwich). Na resposta, `DiaSoftexResponse.dataLocal` (opcional — servidor
+antigo não devolve) reconstrói `DiaSoftex.data` como o início daquele dia no
+fuso do aparelho (`DiaDoCalendario.inicioDoDia`), então dois aparelhos em
+fusos diferentes concordam sobre qual é o dia. No `enviarDiasEmLote`, a data
+da resposta só substitui a local se o usuário não a mexeu durante o envio
+(`atual.data == envio.foto.data`); quando difere, a foto marca mudança e a
+passada seguinte converge. O `calendario` entra por parâmetro no helper e no
+`init(from:)` para os testes não dependerem do fuso do CI. Sem `@Model`
+alterado — o `Date` do `DiaSoftex` continua, sem V2 do `SoftSpendSchemaV1`.
+Testes em `SoftSpendTests/DiaDoCalendarioTests.swift`.
+
 **Backoff exponencial**: base 60s, teto 3600s (1h). `marcarFalha` incrementa
 `tentativas` e seta `proximaTentativaEm`. `deveTentar` só retorna `true` se
 `proximaTentativaEm <= agora`. Exceção: `429` do limite por minuto
@@ -729,6 +745,36 @@ Cadeia de migrations:
     bloqueadas falham com `Table 'softspend.assinaturas' doesn't exist`. A
     AS2 não tem migration (o índice único de `original_transaction_id` já
     está nesta).
+12. `b8e4d2f6a1c3` — adiciona `dias.data_dia` (`DATE` anulável, índice
+    `(ciclo_id, data_dia)`) com backfill pela hora UTC do instante
+    (`docs/data-do-dia.md` §4). Sem ela, `POST /dias` e `/dias/lote`
+    falham com `Unknown column 'dias.data_dia'` e o `DiaResponse` devolve
+    `data_local` só pelo fallback. O downgrade só derruba índice e coluna.
+
+## Data do dia (servidor)
+
+Spec: `docs/data-do-dia.md` (tarefa D1). `dias.data` é um **instante** (a
+meia-noite local do aparelho em UTC); `dias.data_dia` é a **data de
+calendário** (`YYYY-MM-DD`) que o app manda em `data_local`. Ler o dia de
+calendário do instante em UTC erra em um dia em todo fuso a leste de
+Greenwich — por isso:
+
+- `DiaRequest` aceita `data_local` (`date` opcional, ±5 anos). Vindo, ele
+  manda em `data_dia`; sem ele (app antigo), `dia_de_calendario(data)` —
+  hora UTC ≥ 11 → dia UTC seguinte (fuso a leste), senão o próprio dia UTC.
+  O `data` continua gravado como veio. Reenvio por `client_id` devolve o
+  existente sem recalcular `data_dia`.
+- `DiaResponse.data_local` devolve `data_dia`, com o mesmo fallback para
+  linha que sobrou nula.
+- O helper único é `services/dia_calendario.py` (`dia_de_calendario`,
+  `data_do_dia` — `data_dia` ou fallback). Toda conta de "dia" lê
+  `data_do_dia`, nunca `dia.data` em UTC: `export_service` (relatório
+  CSV/PDF, com ordenação por `data_dia` e desempate por `id`),
+  `fatura_service.marcar_previa` (`dentro_da_viagem`, `dia_id`, pontuação)
+  e `open_finance_reconciliation_service._data_gasto` (janela do match).
+- Fora do escopo: `CreditCardBill.closing_date`/`due_date` e a `date` das
+  transações da fatura — já são datas de calendário, consistentes entre si.
+- Testes em `tests/test_data_do_dia.py`.
 
 ## Isolamento por usuário (UUID)
 

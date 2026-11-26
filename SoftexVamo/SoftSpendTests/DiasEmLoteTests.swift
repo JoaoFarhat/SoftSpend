@@ -92,6 +92,97 @@ struct DiasEmLoteTests {
         }
     }
 
+    /// Cada pedido do lote leva `data_local` — a data de calendário do dia no
+    /// `Calendar.current` (`docs/data-do-dia.md`) — e o servidor a grava e a
+    /// devolve na resposta.
+    @Test func loteEnviaDataLocalDeCadaDia() async throws {
+        try criarViagemOffline(dias: 3)
+
+        #expect(await sync() == 0)
+
+        let lote = try #require(api.lotesDias.first)
+        #expect(lote.count == 3)
+        for pedido in lote {
+            #expect(pedido.dataLocal == DiaDoCalendario.texto(de: pedido.data))
+        }
+        #expect(Set(api.dias.map(\.dataLocal)) == Set(lote.map(\.dataLocal)))
+    }
+
+    /// Dia criado com hora fora da meia-noite (15h): a resposta traz
+    /// `data_local` e o app normaliza `data` para o início do dia — essa
+    /// troca não é mudança do usuário. Um único `postDiasLote` e o dia fica
+    /// `.synced` (antes, a foto comparada depois da troca marcava "mudou
+    /// durante o envio" e o lote subia uma segunda vez).
+    @Test func diaComHoraForaDaMeiaNoiteSobeNumEnvioSo() async throws {
+        try criarViagemOffline(dias: 3)
+        let cal = Calendar.current
+        let ctx = ModelContext(container)
+        let dia15h = try #require(try ctx.fetch(
+            FetchDescriptor<DiaSoftex>(sortBy: [SortDescriptor(\.data)])).first)
+        let meiaNoiteDaData = cal.startOfDay(for: dia15h.data)
+        dia15h.data = try #require(cal.date(bySettingHour: 15, minute: 0, second: 0, of: dia15h.data))
+        try ctx.save()
+
+        #expect(await sync() == 0)
+
+        #expect(api.chamadas == [.postCiclo, .postDiasLote])
+        #expect(api.lotesDias.map(\.count) == [3])
+        let dias = try diasLocais()
+        for dia in dias {
+            #expect(dia.syncStatus == .synced)
+            #expect(dia.backendId != nil)
+        }
+        // A resposta normalizou a data para o início daquele dia no fuso.
+        #expect(dias.first?.data == meiaNoiteDaData)
+    }
+
+    /// Saldo mexido durante o envio (um gasto entrou no meio): conta como
+    /// mudança do usuário — o dia volta a `.pending` (sem backoff) e sobe de
+    /// novo na passada seguinte, com o saldo local preservado.
+    @Test func saldoEditadoDuranteOEnvioFicaPending() async throws {
+        try criarViagemOffline(dias: 3)
+        let post1 = api.segurar(.postDiasLote)
+        let tarefa = iniciarSync()
+        await post1.aguardarChegada()
+
+        // Como a tela faria: muda o saldo do dia num contexto próprio e salva.
+        let edicao = ModelContext(container)
+        let emVoo = try #require(try edicao.fetch(
+            FetchDescriptor<DiaSoftex>(sortBy: [SortDescriptor(\.data)])).first)
+        emVoo.saldo = 42
+        let editadoId = emVoo.id
+        try edicao.save()
+
+        let post2 = api.segurar(.postDiasLote)
+        await post1.liberar()
+        try #require(await post2.chegouAntes(doFimDe: tarefa), "o dia com saldo mexido durante o envio não foi reenviado")
+
+        // Estado intermediário: só o mexido ficou pendente; já tem backendId.
+        let meio = try diasLocais()
+        for dia in meio where dia.id != editadoId {
+            #expect(dia.syncStatus == .synced)
+        }
+        let aindaPendente = try #require(meio.first { $0.id == editadoId })
+        #expect(aindaPendente.syncStatus == .pending)
+        #expect(aindaPendente.tentativas == 0)
+        #expect(aindaPendente.proximaTentativaEm == nil)
+        #expect(aindaPendente.syncError == nil)
+        #expect(aindaPendente.backendId != nil)
+        // A resposta não sobrescreveu o saldo que o usuário mudou.
+        #expect(aindaPendente.saldo == 42)
+
+        await post2.liberar()
+        #expect(await tarefa.value == 0)
+        #expect(api.lotesDias.map(\.count) == [3, 1])
+        let fim = try diasLocais()
+        for dia in fim {
+            #expect(dia.syncStatus == .synced)
+        }
+        // O dia já tinha backendId no reenvio: o saldo do servidor (sem o
+        // gasto local que mudou o saldo) não substitui o do usuário.
+        #expect(fim.first { $0.id == editadoId }?.saldo == 42)
+    }
+
     /// Acima de 60, em partes de 60: 70 dias viram duas chamadas (60 + 10).
     @Test func setentaDiasSobemEmDoisLotes() async throws {
         try criarViagemOffline(dias: 70)

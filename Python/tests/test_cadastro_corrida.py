@@ -108,7 +108,9 @@ def test_cadastro_em_corrida_devolve_400_e_sessao_segue_usavel(
         },
     )
     assert repetido.status_code == 400, repetido.text
-    assert repetido.json()["error"] == "Dados de cadastro ja em uso"
+    assert repetido.json()["error"] == (
+        "Este e-mail ou nome de usuário já está cadastrado."
+    )
 
     db = client.SessionLocal()
     try:

@@ -50,22 +50,30 @@ nonisolated final class DiaSoftex {
         self.syncStatusRaw = SyncStatus.pending.rawValue
     }
     
-    convenience init(from dto: DiaSoftexResponse) {
+    convenience init(from dto: DiaSoftexResponse, calendario: Calendar = .current) {
+        // Com `data_local`, o instante é o início daquele dia no fuso do
+        // aparelho (docs/data-do-dia.md): dois aparelhos em fusos diferentes
+        // concordam sobre qual é o dia. Sem ele (servidor antigo), `data`
+        // vale como antes. `inicioDoDia` ilegível cai no mesmo fallback.
+        let data = dto.dataLocal
+            .flatMap { DiaDoCalendario.inicioDoDia(de: $0, calendario: calendario) }
+            ?? dto.data
         self.init(
             clientId: dto.clientId ?? UUID().uuidString,
-            data: dto.data,
+            data: data,
             saldo: dto.saldo,
             gastos: dto.gastos?.map { GastosDia(from: $0) } ?? []
         )
         self.backendId = dto.id
         self.syncStatus = .synced
     }
-    
+
     func toDTO() -> DiaSoftexResponse {
         DiaSoftexResponse(
             id: backendId,
             clientId: clientId,
             data: data,
+            dataLocal: DiaDoCalendario.texto(de: data),
             saldo: saldo,
             gastos: gastos.map { $0.toDTO() }
         )

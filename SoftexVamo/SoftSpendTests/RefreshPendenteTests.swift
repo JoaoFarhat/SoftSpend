@@ -72,7 +72,9 @@ struct RefreshPendenteTests {
     }
 
     func viewModel(_ local: Local) -> CiclosViewModel {
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = local.ctx
         vm.allCiclos = [local.ciclo]
         vm.atualCiclo = local.ciclo
@@ -84,7 +86,7 @@ struct RefreshPendenteTests {
         let gastos = api.gastos
         return api.dias.map { d in
             DiaSoftex(from: DiaSoftexResponse(
-                id: d.id, clientId: d.clientId, data: d.data, saldo: d.saldo,
+                id: d.id, clientId: d.clientId, data: d.data, dataLocal: d.dataLocal, saldo: d.saldo,
                 gastos: gastos.filter { $0.diaId == d.id }.map { g in
                     GastosDiaResponse(
                         id: g.id, clientId: g.clientId, dia_id: g.diaId, valor: g.valor, titulo: g.titulo,
@@ -273,7 +275,9 @@ struct RefreshPendenteTests {
             id: 99, clientId: ciclo.clientId, valor_total: 300, gasto_total: 0,
             periodo: "01/09 - 03/09", diaria: 100, titulo: "Cuiabá, MT", dias: nil
         ))
-        let vm = CiclosViewModel()
+        var envios = 0
+        let vm = CiclosViewModel(estaConectado: { false })
+        vm.pedirEnvio = { envios += 1 }
         vm.modelContext = ctx
 
         let resultado = vm.salvarOuAtualizarCicloLocal(servidor)
@@ -294,7 +298,7 @@ struct RefreshPendenteTests {
         let diaServidor = try #require(api.dias.first)
         let gastoServidor = try #require(api.gastos.first)
         let servidor = [DiaSoftex(from: DiaSoftexResponse(
-            id: diaServidor.id, clientId: diaServidor.clientId, data: diaServidor.data, saldo: 70,
+            id: diaServidor.id, clientId: diaServidor.clientId, data: diaServidor.data, dataLocal: diaServidor.dataLocal, saldo: 70,
             gastos: [GastosDiaResponse(
                 id: gastoServidor.id, clientId: gastoServidor.clientId, dia_id: diaServidor.id,
                 valor: 30, titulo: "Almoço e café", categoria: .ALIMENTACAO, comprovante_url: nil,
