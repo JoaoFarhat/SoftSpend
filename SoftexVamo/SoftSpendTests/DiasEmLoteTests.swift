@@ -174,9 +174,13 @@ struct DiasEmLoteTests {
         await post2.liberar()
         #expect(await tarefa.value == 0)
         #expect(api.lotesDias.map(\.count) == [3, 1])
-        for dia in try diasLocais() {
+        let fim = try diasLocais()
+        for dia in fim {
             #expect(dia.syncStatus == .synced)
         }
+        // O dia já tinha backendId no reenvio: o saldo do servidor (sem o
+        // gasto local que mudou o saldo) não substitui o do usuário.
+        #expect(fim.first { $0.id == editadoId }?.saldo == 42)
     }
 
     /// Acima de 60, em partes de 60: 70 dias viram duas chamadas (60 + 10).
