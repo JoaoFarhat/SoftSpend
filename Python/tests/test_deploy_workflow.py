@@ -8,9 +8,31 @@ _TEXTO = (
 ).read_text(encoding="utf-8")
 
 
+def _job_test() -> str:
+    """Trecho do job `test` (do `  test:` até o próximo job)."""
+    inicio = _TEXTO.index("\n  test:")
+    fim = _TEXTO.index("\n  deploy:")
+    return _TEXTO[inicio:fim]
+
+
 def _job_deploy() -> str:
     """Trecho do job `deploy` (do `  deploy:` até o fim do arquivo)."""
     return _TEXTO[_TEXTO.index("\n  deploy:") :]
+
+
+def test_job_test_roda_no_python_312_e_314():
+    job = _job_test()
+    assert re.search(r"^    strategy:\s*$", job, re.MULTILINE)
+    assert re.search(r"^      fail-fast:\s*false\s*$", job, re.MULTILINE)
+    assert re.search(r'^      matrix:\s*$', job, re.MULTILINE)
+    assert '"3.12"' in job
+    assert '"3.14"' in job
+    assert "python-version: ${{ matrix.python-version }}" in job
+
+
+def test_job_deploy_espera_o_job_test():
+    job = _job_deploy()
+    assert re.search(r"^    needs:\s*test\s*$", job, re.MULTILINE)
 
 
 def test_job_deploy_tem_environment_producao():
