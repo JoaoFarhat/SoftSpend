@@ -105,17 +105,19 @@ nonisolated private final class CofreQueTroca: CofreDeTokens, @unchecked Sendabl
 
     func lerAccessToken() -> String? { accessToken }
     func lerRefreshToken() -> String? { refreshToken }
-    func gravarAccessToken(_ token: String) {
+    func gravarAccessToken(_ token: String) -> ResultadoGravacaoToken {
         lock.withLock {
             _accessToken = token
             _gravacoes.append("access:\(token)")
         }
+        return .gravou
     }
-    func gravarRefreshToken(_ token: String) {
+    func gravarRefreshToken(_ token: String) -> ResultadoGravacaoToken {
         lock.withLock {
             _refreshToken = token
             _gravacoes.append("refresh:\(token)")
         }
+        return .gravou
     }
     func apagarTokens() {
         lock.withLock {

@@ -194,7 +194,8 @@ confere nada (é o que os testes antigos usam). `mesmoUsuario()` roda
 upload/DELETE de comprovante) e **depois** de cada `await` dela, com sucesso ou
 erro: se o usuário não é mais o `userId` do `sync`, liga
 `usuarioTrocouNesteSync` (zerado no começo do `sync`). Daí em diante nenhuma etapa
-chama a API (`deveParar`, junto com o `limiteAtingidoNesteSync`), as passadas
+chama a API (`deveParar`, junto com o `limiteAtingidoNesteSync` e o
+`tokenIndisponivelNesteSync` do iPhone trancado), as passadas
 restantes não rodam e a resposta em voo é ignorada — nada é marcado (sem
 `marcarFalha`, sem sucesso, sem descarte). O item fica como estava e sobe
 quando A entrar de novo. O `SyncManager.sync` relê o usuário no começo de cada
@@ -250,6 +251,64 @@ s`. O primeiro 429 também liga `limiteAtingidoNesteSync` (zerado no começo de
 `sync`): todas as etapas param de chamar a API e as passadas restantes não
 rodam, mesmo com `forcar: true`. Testes em
 `SoftSpendTests/LimitePorMinutoTests.swift`.
+
+**Token trancado (iPhone bloqueado no meio do envio)**: os tokens ficam no
+Keychain com `WhenUnlockedThisDeviceOnly`. Além do `lerAccessToken`/
+`lerRefreshToken` (`String?`), o `CofreDeTokens` tem `buscarAccessToken`/
+`buscarRefreshToken`, que devolvem `ResultadoLeituraToken`
+(`Network/KeychainManager.swift`), no mesmo contrato do `ArmazemDeChave`:
+`.achou`, `.naoExiste` (`errSecItemNotFound` ou bytes que não viram texto),
+`.indisponivel(OSStatus)` (só os status que esperam o desbloqueio — a tabela
+é `statusEsperaDesbloqueio`) e `.ilegivel(OSStatus)` (os demais, que o
+desbloqueio não resolve). O padrão da extensão converte o `String?`
+(`nil` = `.naoExiste`), então cofre de teste antigo não muda; o
+`CofreDeTokensKeychain` lê o status de verdade e rebaixa `.indisponivel`
+para `.ilegivel` quando o iPhone está claramente destrancado (closure
+injetável `iPhoneProvavelmenteTrancado`).
+
+**Keychain recusando gravação e leitura ilegível** (`docs/keychain-login.md`):
+a gravação de token devolve `ResultadoGravacaoToken` (`.gravou`/
+`.recusou(OSStatus)`). Na renovação, a recusa guarda o par novo num
+`ParDeTokensPendente` em memória no `NetworkManager` — o pedido segue com o
+token novo, as leituras olham o pendente antes do Keychain e a gravação é
+retentada no começo de cada pedido, na volta ao primeiro plano e antes de
+uma nova renovação (`gravarParRenovado` e `tentarGravarParPendente`, sob a
+mesma trava `gravacaoDoPar`); renovação que grava os dois descarta o
+pendente velho (senão o refresh dele, já trocado, voltaria por cima do novo:
+reuso); logout/troca/`deleteAccount` o descartam — e a revogação
+do logout lê o refresh do pendente (o atual) antes de descartar, nunca o
+antigo já trocado do Keychain. Na entrada (`saveUser`), a recusa fecha o
+acesso: apaga o que gravou, revoga a sessão nova em segundo plano e mostra a
+mensagem própria. `.ilegivel` na leitura lança `APIError.loginIlegivel` e
+chama `logoutPorLoginIlegivel` (logout local sem revogar + mensagem na tela
+de entrada) uma vez só. Testes em `SoftSpendTests/FalhaDoKeychainLoginTests.swift`.
+
+- Access token `.indisponivel`: o `makeRequest` (agora `throws`) lança
+  `APIError.chaveIndisponivel` ("Desbloqueie o iPhone para continuar.") e o
+  pedido não sai — sem rede, sem 401, sem logout. `.naoExiste` segue como
+  antes (pedido sem token → 401 → refresh → logout).
+- No 401: access ou refresh `.indisponivel` lança `.chaveIndisponivel` antes
+  do `decidirApos401` e sem chamar `/auth/refresh`. No 401 do reenvio, o mesmo
+  antes de comparar a sessão. Dentro do `TokenRefresher`, a conferência de
+  sessão depois da rede (`conferirMesmaSessao`) lança `.chaveIndisponivel` se o
+  cofre trancou no meio. O `deslogar` só roda se o `buscarRefreshToken` ainda
+  é igual ao da sessão (`.indisponivel` nunca é).
+  `deveDeslogarAposFalhaDeRefresh` devolve `false` para `.chaveIndisponivel`.
+- Gravar token é `SecItemUpdate`; `SecItemAdd` só quando o update dá
+  `errSecItemNotFound`. Nunca apagar antes de gravar (o add pode falhar com o
+  iPhone trancado e o token sumia).
+- No `SyncActor`, `.chaveIndisponivel` em qualquer etapa (inclusive
+  `recuperarBackendId` e comprovantes) segue o caminho do 429 por minuto pelo
+  mesmo `deveEsperarSemFalhar`: `marcarAguardandoLimite` (`.pending`, sem
+  tentativa, sem `syncError`, `proximaTentativaEm = agora + 60 s`) e liga
+  `tokenIndisponivelNesteSync` (zerado no começo do `sync`, entra no
+  `deveParar`): nenhuma outra chamada à API e as passadas restantes não rodam.
+- `AuthService.checkAuthentication` continua só lendo: sem token legível não
+  entra, nunca apaga.
+
+Testes em `SoftSpendTests/TokenComIPhoneTrancadoTests.swift`
+(`CofreDeTokensFalso`; `ProtocoloFalso`, `URLProtocol` próprio do arquivo com
+estado estático, por isso a suíte é `.serialized`).
 
 **Logging**: `SyncActor` usa `os.Logger` (subsystem `br.com.softspend`,
 category `SyncActor`) para logar falhas de save.
