@@ -59,8 +59,28 @@ jobs:
           script: |
             set -e
             cd ~/SoftSpend
+
+            # Health check com retry: devolve 0 se a API respondeu em ate 10
+            # tentativas, 1 se nao. Sem "exit" aqui dentro: quem decide o
+            # destino do deploy e o chamador.
+            checar_saude() {
+              for i in {1..10}; do
+                if curl -fsS http://127.0.0.1:8000/health; then
+                  echo "Health check OK"
+                  return 0
+                fi
+                if [ "$i" -eq 10 ]; then
+                  echo "Health check falhou após 10 tentativas"
+                  return 1
+                fi
+                sleep 2
+              done
+            }
+
             # .env é gitignored; git reset --hard não o toca, então não
             # precisamos fazer backup em /tmp (que é legível por todos).
+            # ANTES guarda o commit que esta rodando, para o rollback.
+            ANTES="$(git rev-parse HEAD)"
             git fetch origin
             git reset --hard origin/main
 
@@ -114,7 +134,9 @@ jobs:
             # terminar e, se falhar, o set -e para o deploy antes da migration.
             ATUAL="$(alembic -c alembic/alembic.ini current 2>/dev/null | awk '{print $1}')"
             NOVO="$(alembic -c alembic/alembic.ini heads | awk '{print $1}')"
+            MIGROU=""
             if [ "$ATUAL" != "$NOVO" ]; then
+              MIGROU=1
               if systemctl cat softspend-backup.service >/dev/null 2>&1; then
                 sudo systemctl start softspend-backup.service
               else
@@ -123,15 +145,24 @@ jobs:
             fi
             alembic -c alembic/alembic.ini upgrade head
             sudo systemctl restart softspend
-            # Health check com retry antes de declarar sucesso
-            for i in {1..10}; do
-              if curl -fsS http://127.0.0.1:8000/health; then
-                echo "Health check OK"
-                break
+
+            # Se a API nova nao sobe, mostra o log do servico e desfaz o
+            # deploy voltando ao commit que rodava antes — menos quando houve
+            # migration, porque o banco ja esta no schema novo. Nos dois
+            # casos o job sai vermelho.
+            if ! checar_saude; then
+              sudo journalctl -u softspend -n 50 --no-pager || true
+              if [ -z "$MIGROU" ]; then
+                git reset --hard "$ANTES"
+                pip install -r requirements.txt
+                sudo systemctl restart softspend
+                if checar_saude; then
+                  echo "deploy desfeito: voltou para $ANTES"
+                else
+                  echo "a volta também falhou"
+                fi
+              else
+                echo "health check falhou depois de migration; código não foi desfeito, conferir na EC2"
               fi
-              if [ "$i" -eq 10 ]; then
-                echo "Health check falhou após 10 tentativas"
-                exit 1
-              fi
-              sleep 2
-            done
+              exit 1
+            fi
