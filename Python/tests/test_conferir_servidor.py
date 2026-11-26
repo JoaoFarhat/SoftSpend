@@ -447,6 +447,28 @@ def test_env_mais_velho_que_o_inicio_da_ok(ambiente, capsys):
     assert "API iniciada depois" in _linhas(capsys)
 
 
+def test_env_no_mesmo_segundo_do_inicio_da_ok(ambiente, capsys):
+    """`.env` gravado na fração do mesmo segundo do restart (mtime
+    INICIO + 0,5 s): o início vem truncado em segundos do
+    `systemctl --timestamp=unix`, então a fração a mais não pode dar
+    FALTA falso de ".env mudou depois que a API iniciou"."""
+    arquivo_env = ambiente["pasta"] / ".env"
+    mesmo_segundo = INICIO_SERVICO + 0.5
+    os.utime(arquivo_env, (mesmo_segundo, mesmo_segundo))
+    assert _rodar(ambiente) == 0
+    assert "API iniciada depois" in _linhas(capsys)
+
+
+def test_env_um_segundo_depois_do_inicio_da_falta(ambiente, capsys):
+    arquivo_env = ambiente["pasta"] / ".env"
+    depois = INICIO_SERVICO + 1
+    os.utime(arquivo_env, (depois, depois))
+    assert _rodar(ambiente) == 1
+    falta = [l for l in _linhas(capsys).splitlines() if l.startswith("FALTA")]
+    assert len(falta) == 1
+    assert "restart" in falta[0]
+
+
 def test_servico_parado_da_falta(ambiente, capsys, monkeypatch):
     monkeypatch.setattr(cs, "_inicio_servico", lambda: "")
     assert _rodar(ambiente) == 1
