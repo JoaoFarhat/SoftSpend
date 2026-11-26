@@ -179,10 +179,12 @@ struct FalhaDoKeychainLoginTests {
 
         // ...e o pedido seguinte o usa (a retentativa de gravação ainda é
         // recusada e o par segue pendente).
+        // Três pedidos ao todo: o 1º pedido levou 401 e foi reenviado com o
+        // token novo; o 2º (o terceiro da lista) sai direto com ele.
         _ = try await rede.fetchFeatures()
         let pedidosFeatures = ProtocoloComRota.estado.pedidos(para: "/api/features")
-        try #require(pedidosFeatures.count == 2)
-        #expect(pedidosFeatures[1].value(forHTTPHeaderField: "Authorization") == "Bearer token-novo")
+        try #require(pedidosFeatures.count == 3)
+        #expect(pedidosFeatures[2].value(forHTTPHeaderField: "Authorization") == "Bearer token-novo")
 
         // Nenhum pedido de renovação reenviou o refresh antigo: uma só
         // chamada a `/auth/refresh`.
@@ -227,6 +229,9 @@ struct FalhaDoKeychainLoginTests {
         // Contador próprio: a rota roda dentro da trava do `EstadoComRota`,
         // então não pode chamar `pedidos(para:)`.
         let renovacoes = OSAllocatedUnfairLock(initialState: 0)
+        // O `token-novo` vale no reenvio do 1º pedido e vence depois: com 401
+        // já no reenvio, o 1º pedido deslogava em vez de deixar o par pendente.
+        let usosDoTokenNovo = OSAllocatedUnfairLock(initialState: 0)
         ProtocoloComRota.estado.zerar { pedido in
             let caminho = pedido.url?.path ?? ""
             if caminho.hasSuffix("/auth/refresh") {
@@ -242,7 +247,16 @@ struct FalhaDoKeychainLoginTests {
                 return (200, jsonAuthRenovadoDeNovo)
             }
             switch pedido.value(forHTTPHeaderField: "Authorization") {
-            case "Bearer access-vencido", "Bearer token-novo":
+            case "Bearer access-vencido":
+                return (401, #"{"error":"expirado","request_id":"r-exp"}"#)
+            case "Bearer token-novo":
+                let usosAnteriores = usosDoTokenNovo.withLock { n -> Int in
+                    defer { n += 1 }
+                    return n
+                }
+                if usosAnteriores == 0 {
+                    return (200, #"{"open_finance":true}"#)
+                }
                 return (401, #"{"error":"expirado","request_id":"r-exp"}"#)
             default:
                 return (200, #"{"open_finance":true}"#)
