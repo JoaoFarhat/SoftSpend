@@ -8,6 +8,7 @@ certificados dependerem só do teste.
 
 import os
 import subprocess
+from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -349,6 +350,24 @@ def test_alerta_sem_permissao_da_falta():
     assert "sem permissão" in linha
     assert "sudo" in linha
     assert ARN_SNS not in linha
+
+
+def test_alerta_oserror_da_falta(tmp_path, monkeypatch):
+    """OSError genérico (não PermissionError nem FileNotFoundError, que têm
+    ramo próprio) vira FALTA — sem esse ramo, um alerta.env ilegível
+    derrubava o script e o servidor parecia conferido."""
+    arquivo = _alerta_env(
+        tmp_path, "ALERTA_SNS_TOPICO=arn:aws:sns:sa-east-1:123:x\n"
+    )
+
+    def _read_text(*args, **kwargs):
+        raise OSError("disco")
+
+    monkeypatch.setattr(Path, "read_text", _read_text)
+    resultado = cs.conferir_alertas({}, None, tmp_path, arquivo=arquivo)
+    assert resultado.ok is False
+    assert resultado.motivo == "arquivo ilegível (OSError)"
+    assert "arn:" not in resultado.motivo
 
 
 def test_alerta_valor_nao_arn_da_falta(tmp_path):
