@@ -58,3 +58,58 @@ def test_backup_condicionado_a_migration_pendente_e_ao_servico():
     assert "alembic -c alembic/alembic.ini heads" in job
     assert "systemctl cat softspend-backup.service" in job
     assert "backup não instalado, migration sem cópia" in job
+
+
+def test_antes_e_capturado_antes_do_fetch_e_do_reset():
+    linhas = _TEXTO.splitlines()
+    rev = next(i for i, l in enumerate(linhas) if "git rev-parse HEAD" in l)
+    fetch = next(i for i, l in enumerate(linhas) if "git fetch origin" in l)
+    reset = next(
+        i for i, l in enumerate(linhas) if "git reset --hard origin/main" in l
+    )
+    assert rev < fetch < reset
+
+
+def test_health_check_virou_funcao_sem_exit_dentro():
+    job = _job_deploy()
+    inicio = job.index("checar_saude()")
+    fim = job.index("\n            }", inicio)
+    funcao = job[inicio:fim]
+    assert "for i in {1..10}" in funcao
+    assert "curl -fsS http://127.0.0.1:8000/health" in funcao
+    assert "return 0" in funcao
+    assert "return 1" in funcao
+    assert "exit" not in funcao
+
+
+def test_migrou_marcado_quando_atual_difere_do_novo():
+    job = _job_deploy()
+    assert 'MIGROU=""' in job
+    linhas = job.splitlines()
+    cond = next(
+        i for i, l in enumerate(linhas) if '"$ATUAL" != "$NOVO"' in l
+    )
+    assert "MIGROU=1" in linhas[cond + 1]
+
+
+def test_reset_para_antes_so_no_ramo_sem_migrou():
+    job = _job_deploy()
+    assert job.count('git reset --hard "$ANTES"') == 1
+    trecho = job[job.index('[ -z "$MIGROU" ]') :]
+    trecho = trecho[: trecho.index("health check falhou depois de migration")]
+    assert 'git reset --hard "$ANTES"' in trecho
+    assert "pip install -r requirements.txt" in trecho
+    assert "deploy desfeito: voltou para $ANTES" in trecho
+    assert "a volta também falhou" in trecho
+
+
+def test_ramo_de_falha_mostra_journalctl_e_termina_em_exit_1():
+    job = _job_deploy()
+    assert "sudo journalctl -u softspend -n 50 --no-pager" in job
+    linhas = [l.strip() for l in job.splitlines() if l.strip()]
+    i_exit = len(linhas) - 1 - linhas[::-1].index("exit 1")
+    assert all(l == "fi" for l in linhas[i_exit + 1 :])
+
+
+def test_health_check_continua_na_url_local():
+    assert "curl -fsS http://127.0.0.1:8000/health" in _job_deploy()
