@@ -249,8 +249,9 @@ def test_gasto_total_no_ciclo_vivo_na_sessao_acompanha_operacoes(ambiente):
     """O UPDATE de `incrementar_gasto_total` vai direto ao banco; sem o
     `db.expire` do service, um `Ciclo` vivo na sessao entrega o valor velho.
 
-    Segurar a referencia aqui reproduz determinísticamente o que antes so
-    aparecia quando o GC atrasava no meio da suíte inteira.
+    A `ambiente.session` é uma sessão só de leitura, separada das sessões
+    das requisições: segurar a referência e expirá-la antes de cada leitura
+    confere o valor gravado no banco ao longo das operações.
     """
     client = ambiente.como(USER_A)
     ciclo, dias = _viagem(client, "ciclo-sessao-viva")
@@ -258,19 +259,23 @@ def test_gasto_total_no_ciclo_vivo_na_sessao_acompanha_operacoes(ambiente):
     ciclo_vivo = ambiente.session.get(models.Ciclo, ciclo["id"])
 
     _gasto(client, dias[0]["id"], "gasto-vivo-1")
+    ambiente.session.expire_all()
     assert ciclo_vivo.gasto_total == 30.00
 
     gasto = _gasto(client, dias[0]["id"], "gasto-vivo-2", valor="10.00")
+    ambiente.session.expire_all()
     assert ciclo_vivo.gasto_total == 40.00
 
     response = client.put(
         f"/gastos/{gasto['id']}", json=_gasto_payload(valor="25.00")
     )
     assert response.status_code == 200
+    ambiente.session.expire_all()
     assert ciclo_vivo.gasto_total == 55.00
 
     response = client.delete(f"/gastos/{gasto['id']}")
     assert response.status_code == 204
+    ambiente.session.expire_all()
     assert ciclo_vivo.gasto_total == 30.00
 
 
@@ -292,7 +297,9 @@ def test_dias_com_mesma_data_paginam_sem_repetir_nem_pular(ambiente):
     def _capturar(orm_execute_state):
         statements.append(str(orm_execute_state.statement))
 
-    event.listen(ambiente.session, "do_orm_execute", _capturar)
+    # O SQL sai pelas sessões de cada requisição, criadas pelo mesmo
+    # `sessionmaker` do `override_db` — não pela sessão de leitura do teste.
+    event.listen(ambiente.sessionmaker, "do_orm_execute", _capturar)
     try:
         paginas = [
             client.get(
@@ -301,7 +308,7 @@ def test_dias_com_mesma_data_paginam_sem_repetir_nem_pular(ambiente):
             for i in range(4)
         ]
     finally:
-        event.remove(ambiente.session, "do_orm_execute", _capturar)
+        event.remove(ambiente.sessionmaker, "do_orm_execute", _capturar)
 
     assert paginas[3] == []
     assert [pagina[0]["id"] for pagina in paginas[:3]] == ids

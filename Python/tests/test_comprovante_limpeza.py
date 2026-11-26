@@ -13,6 +13,7 @@ S3; cada caso confere a key removida exatamente uma vez.
 from unittest.mock import patch
 
 import pytest
+from sqlalchemy import event
 from sqlalchemy.exc import IntegrityError
 
 import models
@@ -146,28 +147,30 @@ def test_comprovante_nao_sai_do_bucket_quando_o_commit_falha(ambiente):
     _, _, gasto = _criar_ciclo_dia_gasto(client)
     _definir_comprovante(ambiente.session, gasto["id"], KEY_1)
 
-    assert client.delete(f"/gastos/{gasto['id']}").status_code == 204
-
-    # Falha real no commit (o insert abaixo esbarra na PK de users): a key
-    # anotada não pode vazar para o storage, senão o comprovante de um gasto
-    # que continuou vivo seria apagado do bucket.
-    ambiente.session.add(
-        models.User(
-            id=USER_A,
-            nome="Duplicado",
-            username="duplicado",
-            email="duplicado@example.com",
-            senha_hash="hash",
+    # Falha real no commit (o insert abaixo esbarra na PK de users) na
+    # sessão da própria requisição: a key anotada não pode vazar para o
+    # storage, senão o comprovante de um gasto que continuou vivo seria
+    # apagado do bucket.
+    def _sabotar_commit(session):
+        session.add(
+            models.User(
+                id=USER_A,
+                nome="Duplicado",
+                username="duplicado",
+                email="duplicado@example.com",
+                senha_hash="hash",
+            )
         )
-    )
-    with patch(REMOVER) as remover, pytest.raises(IntegrityError):
-        ambiente.session.commit()
 
-    # O `except` do `get_db` chama rollback; sem ele a sessão não abre outra
-    # transação para a releitura abaixo.
-    ambiente.session.rollback()
+    event.listen(ambiente.sessionmaker, "before_commit", _sabotar_commit)
+    try:
+        with patch(REMOVER) as remover, pytest.raises(IntegrityError):
+            client.delete(f"/gastos/{gasto['id']}")
+    finally:
+        event.remove(ambiente.sessionmaker, "before_commit", _sabotar_commit)
 
     remover.assert_not_called()
+    ambiente.session.expire_all()
     sobreviveu = ambiente.session.get(models.Gasto, gasto["id"])
     assert sobreviveu is not None
     assert sobreviveu.comprovante_key == KEY_1
