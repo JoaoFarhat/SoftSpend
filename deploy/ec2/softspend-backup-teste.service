@@ -1,0 +1,31 @@
+[Unit]
+Description=SoftSpend - teste mensal de restauração do backup (docs/backup-mysql.md §8.2)
+Wants=network-online.target
+After=network-online.target mysql.service
+OnFailure=softspend-alerta@%n.service
+
+[Service]
+Type=oneshot
+# root: precisa ler /etc/softspend/restore.cnf (root, modo 600).
+User=root
+# Mesmo ambiente do backup (BACKUP_S3_BUCKET, para baixar o dump se não
+# houver cópia local). Nunca o .env da API.
+EnvironmentFile=/etc/softspend/backup.env
+Environment=SOFTSPEND_BACKUP_ENV_CARREGADO=1
+# Trava de segurança do testar-restauracao.sh: o script sai 1 antes de tocar
+# no MySQL se o banco de destino não for exatamente este.
+Environment=RESTORE_DB=softspend_restore_test
+ExecStart=/bin/bash /home/ubuntu/SoftSpend/deploy/ec2/testar-restauracao.sh
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=1h
+# A t3.small também serve a API: prioridade baixa de CPU e disco.
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/var/backups/softspend /var/log/softspend
