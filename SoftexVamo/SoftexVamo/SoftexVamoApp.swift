@@ -75,6 +75,14 @@ struct SoftexVamoApp: App {
                 if fase == .active, !authService.isAuthenticated {
                     authService.checkAuthentication()
                 }
+                // Par de tokens renovado que o Keychain recusou gravar
+                // (ex.: o iPhone trancou na ida e volta): a volta para o
+                // primeiro plano é uma das horas de tentar gravar de novo
+                // (docs/keychain-login.md §1.1, regra 4). Sem pendente o
+                // custo é zero.
+                if fase == .active {
+                    NetworkManager.shared.tentarGravarParPendente()
+                }
                 // Estado da assinatura relido ao voltar para o primeiro plano,
                 // reenviando as compras pendentes (só com login; sem login não
                 // faz nada).

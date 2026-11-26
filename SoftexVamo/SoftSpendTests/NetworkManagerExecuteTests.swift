@@ -120,8 +120,14 @@ nonisolated private final class CofreEmMemoria: CofreDeTokens, @unchecked Sendab
 
     func lerAccessToken() -> String? { accessToken }
     func lerRefreshToken() -> String? { refreshToken }
-    func gravarAccessToken(_ token: String) { lock.withLock { _accessToken = token } }
-    func gravarRefreshToken(_ token: String) { lock.withLock { _refreshToken = token } }
+    func gravarAccessToken(_ token: String) -> ResultadoGravacaoToken {
+        lock.withLock { _accessToken = token }
+        return .gravou
+    }
+    func gravarRefreshToken(_ token: String) -> ResultadoGravacaoToken {
+        lock.withLock { _refreshToken = token }
+        return .gravou
+    }
     func apagarTokens() {
         lock.withLock {
             _accessToken = nil
