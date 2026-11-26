@@ -12,7 +12,7 @@ from decimal import Decimal
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import sessionmaker
 
 USER_A = "user-a"
 USER_B = "user-b"
@@ -34,9 +34,16 @@ def _app(monkeypatch):
 
 
 class _Ambiente:
-    def __init__(self, app, session):
+    def __init__(self, app, session, sessionmaker_):
         self.app = app
+        # Sessão só do teste, para leitura direta do banco entre
+        # requisições. `expire_all()` antes de reler o que uma requisição
+        # mudou — os objetos ficam com o valor que tinham quando foram
+        # carregados.
         self.session = session
+        # O mesmo sessionmaker do `override_db`: `event.listen` nele
+        # captura o SQL emitido pelas sessões de cada requisição.
+        self.sessionmaker = sessionmaker_
 
     def como(self, user_id: str, **kwargs) -> TestClient:
         from dependencies import get_current_user_id
@@ -58,7 +65,8 @@ def ambiente(monkeypatch, tmp_path):
 
     engine = create_engine(f"sqlite:///{tmp_path}/core.db")
     Base.metadata.create_all(engine)
-    session = Session(engine)
+    SessionLocal = sessionmaker(bind=engine)
+    session = SessionLocal()
     session.add_all(
         [
             models.User(
@@ -80,11 +88,23 @@ def ambiente(monkeypatch, tmp_path):
     session.commit()
 
     def override_db():
-        yield session
+        # Como o `get_db` de `database.py`: uma Session por requisição,
+        # aberta no início e fechada no fim. A mesma Session não pode ser
+        # dividida entre as requisições, que o TestClient pode rodar em
+        # threads diferentes.
+        db = SessionLocal()
+        try:
+            yield db
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
 
     app.dependency_overrides[get_db] = override_db
     try:
-        yield _Ambiente(app, session)
+        yield _Ambiente(app, session, SessionLocal)
     finally:
         app.dependency_overrides.clear()
         session.close()
