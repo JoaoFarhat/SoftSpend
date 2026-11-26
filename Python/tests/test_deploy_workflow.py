@@ -119,10 +119,34 @@ def test_reset_para_antes_so_no_ramo_sem_migrou():
     assert job.count('git reset --hard "$ANTES"') == 1
     trecho = job[job.index('[ -z "$MIGROU" ]') :]
     trecho = trecho[: trecho.index("health check falhou depois de migration")]
-    assert 'git reset --hard "$ANTES"' in trecho
-    assert "pip install -r requirements.txt" in trecho
     assert "deploy desfeito: voltou para $ANTES" in trecho
     assert "a volta também falhou" in trecho
+
+
+def test_volta_automatica_roda_inteira_dentro_de_um_if():
+    """Os passos da volta (reset, deps, restart, health) ficam na condicao
+    de um unico if: se qualquer um falha, o set -e nao encerra calado —
+    cai no else que avisa "a volta também falhou"."""
+    job = _job_deploy()
+    trecho = job[job.index('[ -z "$MIGROU" ]') :]
+    trecho = trecho[: trecho.index("health check falhou depois de migration")]
+    cond = next(
+        l.strip()
+        for l in trecho.splitlines()
+        if 'git reset --hard "$ANTES"' in l
+    )
+    assert cond.startswith("if ")
+    assert "&& pip install -r requirements.txt" in cond
+    assert "&& sudo systemctl restart softspend" in cond
+    assert "&& checar_saude" in cond
+    assert cond.endswith("; then")
+    soltos = [
+        l.strip()
+        for l in trecho.splitlines()
+        if l.strip()
+        in ("pip install -r requirements.txt", "sudo systemctl restart softspend")
+    ]
+    assert soltos == []
 
 
 def test_ramo_de_falha_mostra_journalctl_e_termina_em_exit_1():
@@ -131,6 +155,9 @@ def test_ramo_de_falha_mostra_journalctl_e_termina_em_exit_1():
     linhas = [l.strip() for l in job.splitlines() if l.strip()]
     i_exit = len(linhas) - 1 - linhas[::-1].index("exit 1")
     assert all(l == "fi" for l in linhas[i_exit + 1 :])
+    # O exit 1 continua depois do ramo da volta: o job sai vermelho nos
+    # dois casos (volta ok ou falha).
+    assert job.index('[ -z "$MIGROU" ]') < job.index("exit 1")
 
 
 def test_health_check_continua_na_url_local():
