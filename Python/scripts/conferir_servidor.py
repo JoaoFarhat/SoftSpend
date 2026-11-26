@@ -341,7 +341,10 @@ def conferir_reinicio(ambiente: dict, sessao, pasta: Path) -> Resultado:
     if not isinstance(inicio, int):
         return Resultado(False, nome, "início do serviço desconhecido")
     try:
-        mudanca_env = (pasta / ".env").stat().st_mtime
+        # O início vem em segundos inteiros (`--timestamp=unix`); truncar o
+        # mtime evita o FALTA falso de quem edita o .env e reinicia no
+        # mesmo segundo.
+        mudanca_env = int((pasta / ".env").stat().st_mtime)
     except OSError:
         return Resultado(False, nome, ".env não encontrado")
     if mudanca_env > inicio:
