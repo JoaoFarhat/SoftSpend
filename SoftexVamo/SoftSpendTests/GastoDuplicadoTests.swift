@@ -52,7 +52,8 @@ struct GastoDuplicadoTests {
     /// O dia do servidor, no formato da resposta de `GET /dias`.
     func diaDoServidor(_ dia: DiaSoftex, gastos: [GastosDiaResponse] = []) -> DiaSoftex {
         DiaSoftex(from: DiaSoftexResponse(
-            id: dia.backendId, clientId: dia.clientId, data: dia.data, saldo: dia.saldo,
+            id: dia.backendId, clientId: dia.clientId, data: dia.data,
+            dataLocal: DiaDoCalendario.texto(de: dia.data), saldo: dia.saldo,
             gastos: gastos
         ))
     }
