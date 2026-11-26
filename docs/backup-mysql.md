@@ -216,16 +216,22 @@ produção**:
 ### 8.2 Teste automático mensal
 
 Depois do primeiro, um segundo timer (`softspend-backup-teste.timer`, dia 1
-às 07:30 UTC) roda o mesmo roteiro sozinho: baixa o dump mais recente,
-restaura em `softspend_restore_test`, compara com o `.meta.json`
-(`alembic_version` igual ao do dump e contagens iguais), apaga o banco
-temporário e registra o resultado. Falha avisa pelo SNS. Detalhes:
+às **08:30 UTC** — e não 07:30, para não cair junto com a conciliação das
+assinaturas) roda o mesmo roteiro sozinho, no
+`deploy/ec2/testar-restauracao.sh` (via `softspend-backup-teste.service`):
+usa o dump local mais recente de `/var/backups/softspend` (ou baixa o mais
+novo de `diario/` com o `.meta.json` quando não há), restaura em
+`softspend_restore_test`, compara com o `.meta.json` (`alembic_version`
+igual ao do dump e contagens iguais), apaga o banco temporário e registra o
+resultado em `/var/log/softspend/backup.log`, sem dado das tabelas. Falha
+avisa pelo SNS (`OnFailure=`). Detalhes:
 
-- Usuário próprio `softspend_restore` com permissão **só** em
-  `softspend_restore_test` (`CREATE`, `DROP`, `ALTER`, `INSERT`, `SELECT`
-  nesse banco). Nunca em `softspend`.
+- Usuário próprio `softspend_restore` com `ALL PRIVILEGES` **só** em
+  `softspend_restore_test.*` (a carga do dump pede `LOCK TABLES`, triggers,
+  rotinas e views, além de `CREATE`/`DROP`/`INSERT`/`SELECT`). Nunca em
+  `softspend`.
 - O script **recusa** rodar se o banco de destino não se chamar
-  `softspend_restore_test`.
+  `softspend_restore_test`: sai 1 antes de qualquer comando no MySQL.
 - Restaurar consome CPU e disco numa `t3.small` que também serve a API; por
   isso o horário de madrugada e `nice`/`ionice` baixos.
 
@@ -290,9 +296,13 @@ Arquivos em `deploy/ec2/`:
 - `backup-mysql.sh` — o script do §3 (`--dry-run` faz dump e validação sem
   enviar; `--destino pre-migration` é o que a B3 vai usar).
 - `backup_mysql.py` — ajudante em Python (nome do arquivo, espaço livre,
-  validação, `.meta.json`, envio com `boto3`, limpeza local). Testes em
+  validação, `.meta.json`, envio e download com `boto3`, limpeza local,
+  conferência da restauração do §8.2). Testes em
   `Python/tests/test_backup_mysql.py`.
-- `softspend-backup.service` e `softspend-backup.timer` — systemd.
+- `softspend-backup.service` e `softspend-backup.timer` — systemd (backup).
+- `testar-restauracao.sh` — o script do §8.2.
+- `softspend-backup-teste.service` e `softspend-backup-teste.timer` —
+  systemd (teste mensal).
 - `backup.env.example` — modelo do `/etc/softspend/backup.env`.
 
 Detalhes que valem saber:
@@ -304,6 +314,9 @@ Detalhes que valem saber:
   `AWS_ACCESS_KEY_ID` no ambiente (o backup usa só a função IAM).
 - Um dump que não passa na validação é apagado, para não contar como "um dos
   2 últimos" na limpeza.
+- O teste mensal só roda em `softspend_restore_test`: o
+  `testar-restauracao.sh` sai antes de tocar no MySQL se o destino for
+  outro, e o `trap` apaga o banco de teste no fim, mesmo com falha.
 - O log vai para o journal e para `/var/log/softspend/backup.log` (o
   logrotate existente já pega todos os `*.log` da pasta).
 
@@ -315,7 +328,7 @@ arquivos para `~/SoftSpend`):
    `~/SoftSpend/Python/.venv/bin/python -c "import boto3; print(boto3.client('sts', region_name='sa-east-1').get_caller_identity()['Arn'])"`
 2. `cd ~/SoftSpend/deploy/ec2 && ./setup.sh`. Cria `/etc/softspend/`,
    `/var/backups/softspend/` (modo `700`), o `backup.env` a partir do modelo e
-   instala o timer **desligado**. (Ele também reinicia a API e o nginx.)
+   instala os timers **desligados**. (Ele também reinicia a API e o nginx.)
 3. `mysql --version` e criar o usuário só de backup:
 
    ```sql
@@ -348,3 +361,31 @@ arquivos para `~/SoftSpend`):
    conferir o próximo horário em `systemctl list-timers softspend-backup.timer`.
 9. Fazer o teste de restauração do §8.1. Só depois dele o backup conta como
    existente.
+10. Criar o usuário só de restauração, com acesso **só** ao banco
+    descartável (o `ALL` é o que a carga do dump pede — `LOCK TABLES`,
+    triggers, rotinas, views — e nunca vale para `softspend`):
+
+    ```sql
+    -- sudo mysql
+    CREATE USER 'softspend_restore'@'localhost' IDENTIFIED BY '<outra senha forte>';
+    GRANT ALL PRIVILEGES ON softspend_restore_test.* TO 'softspend_restore'@'localhost';
+    ```
+
+11. Criar `/etc/softspend/restore.cnf` (root, modo `600`):
+
+    ```bash
+    sudo install -m 600 -o root -g root /dev/null /etc/softspend/restore.cnf
+    sudo nano /etc/softspend/restore.cnf
+    ```
+
+    ```ini
+    [client]
+    user=softspend_restore
+    password=<outra senha forte>
+    ```
+
+12. Ligar o timer do teste mensal:
+    `sudo systemctl enable --now softspend-backup-teste.timer` e conferir em
+    `systemctl list-timers softspend-backup-teste.timer`. Para uma primeira
+    volta sem esperar o dia 1: `sudo systemctl start softspend-backup-teste`
+    e `journalctl -u softspend-backup-teste -n 50`.

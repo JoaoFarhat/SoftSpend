@@ -9,7 +9,10 @@ dá para testar com `pytest`:
 - `validar`   confere o dump (gzip íntegro, termina com `-- Dump completed`,
               maior que 10 KB) e grava o `.meta.json` ao lado;
 - `enviar`    sobe dump e meta ao S3 em `<destino>/AAAA/MM/` e confere o tamanho;
-- `limpar`    apaga os dumps locais mais antigos, mantendo os N últimos.
+- `limpar`    apaga os dumps locais mais antigos, mantendo os N últimos;
+- `baixar-mais-novo`       baixa o dump mais novo de `diario/` com o `.meta.json`;
+- `conferir-restauracao`   compara o banco de teste restaurado com o `.meta.json`
+              (`alembic_version` e as contagens; docs/backup-mysql.md, §8.2).
 
 Só usa a biblioteca padrão e o `boto3` (já na venv da API). Nunca lê o `.env`
 da API nem as variáveis `S3_*` (são as chaves do bucket dos comprovantes): o
@@ -42,6 +45,10 @@ ESPACO_MINIMO = 50 * 1024 * 1024  # 50 MB, quando ainda não há dump anterior
 DESTINOS = ("diario", "pre-migration")
 TABELAS_CONTADAS = ("users", "ciclos", "dias", "gastos_dia")
 FIM_DO_DUMP = b"-- Dump completed"
+# Banco descartável do teste mensal de restauração (§8.2). O
+# testar-restauracao.sh e o softspend-backup-teste.service só aceitam este nome:
+# o teste derruba e recria o banco, então qualquer outro seria perda de dados.
+BANCO_TESTE = "softspend_restore_test"
 
 
 class ErroBackup(Exception):
@@ -287,6 +294,104 @@ def enviar(dump: Path, destino: str, ambiente: dict[str, str], cliente=None) -> 
     return enviados
 
 
+def baixar_mais_recente(pasta: Path, ambiente: dict[str, str], cliente=None) -> Path:
+    """Baixa o dump mais novo de `diario/` com o `.meta.json`; devolve o dump local.
+
+    Usado pelo teste de restauração (§8.2) quando não há dump local. A chave
+    (`diario/AAAA/MM/nome-com-data-UTC`) ordena por data, então o mais novo é
+    o maior nome. Falha se o `.meta.json` não baixar junto: sem ele não há com
+    o que comparar.
+    """
+    bucket = conferir_config_envio(ambiente)
+    if cliente is None:
+        cliente = criar_cliente_s3(ambiente.get("AWS_DEFAULT_REGION") or ambiente.get("AWS_REGION"))
+    chaves = []
+    extras: dict = {}
+    while True:
+        pagina = cliente.list_objects_v2(Bucket=bucket, Prefix="diario/", **extras)
+        for obj in pagina.get("Contents", []):
+            if NOME_RE.match(obj["Key"].rsplit("/", 1)[-1]):
+                chaves.append(obj["Key"])
+        if not pagina.get("IsTruncated"):
+            break
+        extras = {"ContinuationToken": pagina["NextContinuationToken"]}
+    if not chaves:
+        raise ErroBackup(f"nenhum dump em s3://{bucket}/diario/")
+
+    chave = max(chaves)
+    pasta.mkdir(parents=True, exist_ok=True)
+    dump = pasta / Path(chave).name
+    cliente.download_file(bucket, chave, str(dump))
+    chave_meta = chave[: -len(SUFIXO_DUMP)] + SUFIXO_META
+    try:
+        cliente.download_file(bucket, chave_meta, str(caminho_meta(dump)))
+    except Exception as e:
+        dump.unlink(missing_ok=True)
+        raise ErroBackup(f".meta.json do dump não baixou (s3://{bucket}/{chave_meta}): {e}") from e
+    return dump
+
+
+# ---------------------------------------------------------------------------
+# Conferência da restauração (§8.2)
+# ---------------------------------------------------------------------------
+
+
+def comparar_restauracao(meta: dict, alembic_restaurado: str | None,
+                         contagens: dict[str, int]) -> None:
+    """Compara o banco de teste restaurado com o `.meta.json` do dump.
+
+    Sem diferença, não retorna nada. Com diferença, lança `ErroBackup`
+    nomeando cada campo que difere (`alembic_version` e/ou a contagem de cada
+    tabela de `TABELAS_CONTADAS`).
+    """
+    diferencas = []
+    esperado_alembic = meta.get("alembic_version") or ""
+    restaurado_alembic = alembic_restaurado or ""
+    if restaurado_alembic != esperado_alembic:
+        diferencas.append(
+            f"alembic_version: esperado {esperado_alembic!r} (do .meta.json), "
+            f"restaurado {restaurado_alembic!r}"
+        )
+    esperadas = meta.get("contagens") or {}
+    for tabela in TABELAS_CONTADAS:
+        esperado = esperadas.get(tabela)
+        restaurado = contagens.get(tabela)
+        if esperado is None:
+            diferencas.append(f"contagem de {tabela}: .meta.json não tem a tabela")
+        elif restaurado is None:
+            diferencas.append(f"contagem de {tabela}: não informada (restaurado)")
+        elif restaurado != esperado:
+            diferencas.append(
+                f"contagem de {tabela}: esperado {esperado} (do .meta.json), "
+                f"restaurado {restaurado}"
+            )
+    if diferencas:
+        raise ErroBackup("restauração diferente do .meta.json: " + "; ".join(diferencas))
+
+
+def ler_meta(caminho: Path) -> dict:
+    if not caminho.is_file():
+        raise ErroBackup(f".meta.json não encontrado: {caminho}")
+    try:
+        return json.loads(caminho.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise ErroBackup(f".meta.json inválido ({caminho}): {e}") from e
+
+
+def ler_contagens(itens: list[str]) -> dict[str, int]:
+    """Converte os `--contagem tabela=N` do CLI em dicionário."""
+    contagens = {}
+    for item in itens:
+        tabela, sep, valor = item.partition("=")
+        if not sep or not tabela.strip():
+            raise ErroBackup(f"--contagem inválida: {item!r} (use tabela=N)")
+        try:
+            contagens[tabela.strip()] = int(valor)
+        except ValueError:
+            raise ErroBackup(f"contagem não numérica em --contagem {item!r}") from None
+    return contagens
+
+
 # ---------------------------------------------------------------------------
 # Limpeza local
 # ---------------------------------------------------------------------------
@@ -324,6 +429,16 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("limpar")
     p.add_argument("pasta", type=Path)
     p.add_argument("--manter", type=int, default=2)
+    p = sub.add_parser("baixar-mais-novo",
+                       help="baixa o dump mais novo de diario/ com o .meta.json")
+    p.add_argument("pasta", type=Path)
+    p = sub.add_parser("conferir-restauracao",
+                       help="compara o banco restaurado com o .meta.json (§8.2)")
+    p.add_argument("meta", type=Path, help="caminho do .meta.json do dump")
+    p.add_argument("--alembic", default="",
+                   help="alembic_version lido do banco restaurado")
+    p.add_argument("--contagem", action="append", default=[], metavar="TABELA=N",
+                   help="contagem de linhas restaurada (repete por tabela)")
     args = parser.parse_args(argv)
 
     try:
@@ -345,6 +460,12 @@ def main(argv: list[str] | None = None) -> int:
         elif args.comando == "limpar":
             for apagado in limpar(args.pasta, args.manter):
                 print(f"apagado local: {apagado}")
+        elif args.comando == "baixar-mais-novo":
+            print(baixar_mais_recente(args.pasta, dict(os.environ)))
+        elif args.comando == "conferir-restauracao":
+            comparar_restauracao(ler_meta(args.meta), args.alembic,
+                                 ler_contagens(args.contagem))
+            print(f"restauração confere com {args.meta.name}")
     except ErroBackup as e:
         print(f"ERRO: {e}", file=sys.stderr)
         return 1

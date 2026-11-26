@@ -4,6 +4,7 @@ import gzip
 import importlib.util
 import json
 import os
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -241,3 +242,156 @@ def test_cli_validar_e_bucket_vazio(tmp_path, monkeypatch, capsys):
     monkeypatch.delenv("BACKUP_S3_BUCKET", raising=False)
     assert bm.main(["enviar", str(dump)]) == 1
     assert "BACKUP_S3_BUCKET vazio" in capsys.readouterr().err
+
+
+# --- teste mensal de restauração (§8.2) --------------------------------------
+
+_EC2 = Path(__file__).resolve().parents[2] / "deploy" / "ec2"
+_SH = (_EC2 / "testar-restauracao.sh").read_text(encoding="utf-8")
+_SERVICE = (_EC2 / "softspend-backup-teste.service").read_text(encoding="utf-8")
+_TIMER = (_EC2 / "softspend-backup-teste.timer").read_text(encoding="utf-8")
+
+
+def _meta_restauracao():
+    return {
+        "arquivo": "softspend-20261113T063012Z.sql.gz",
+        "alembic_version": "f2c4e6a8b0d2",
+        "contagens": {"users": 2, "ciclos": 3, "dias": 0, "gastos_dia": 1},
+    }
+
+
+def test_banco_de_teste_e_so_o_descartavel():
+    assert bm.BANCO_TESTE == "softspend_restore_test"
+    assert f"Environment=RESTORE_DB={bm.BANCO_TESTE}" in _SERVICE
+
+
+def test_comparar_restauracao_passa_com_tudo_igual():
+    bm.comparar_restauracao(
+        _meta_restauracao(), "f2c4e6a8b0d2",
+        {"users": 2, "ciclos": 3, "dias": 0, "gastos_dia": 1},
+    )
+
+
+def test_comparar_restauracao_falha_com_alembic_diferente():
+    with pytest.raises(bm.ErroBackup, match="alembic_version"):
+        bm.comparar_restauracao(
+            _meta_restauracao(), "aaaaaaaaaaaa",
+            {"users": 2, "ciclos": 3, "dias": 0, "gastos_dia": 1},
+        )
+
+
+@pytest.mark.parametrize("tabela", ["users", "ciclos", "dias", "gastos_dia"])
+def test_comparar_restauracao_falha_com_cada_contagem_diferente(tabela):
+    contagens = {"users": 2, "ciclos": 3, "dias": 0, "gastos_dia": 1}
+    contagens[tabela] += 1
+    with pytest.raises(bm.ErroBackup, match=tabela):
+        bm.comparar_restauracao(_meta_restauracao(), "f2c4e6a8b0d2", contagens)
+
+
+def test_cli_conferir_restauracao(tmp_path, capsys):
+    meta = tmp_path / "softspend-20261113T063012Z.meta.json"
+    meta.write_text(json.dumps(_meta_restauracao()), encoding="utf-8")
+    base = ["conferir-restauracao", str(meta), "--alembic", "f2c4e6a8b0d2",
+            "--contagem", "users=2", "--contagem", "ciclos=3",
+            "--contagem", "dias=0", "--contagem", "gastos_dia=1"]
+    assert bm.main(base) == 0
+
+    errado = base.copy()
+    errado[errado.index("--contagem") + 1] = "users=5"
+    assert bm.main(errado) == 1
+    assert "users" in capsys.readouterr().err
+
+
+# --- o .sh, lido como texto ---------------------------------------------------
+
+
+def test_sh_confere_restore_db_antes_do_primeiro_drop():
+    checagem = _SH.index('if [ "$RESTORE_DB" != "softspend_restore_test" ]')
+    primeiro_drop = _SH.index("DROP DATABASE")
+    assert checagem < primeiro_drop
+
+
+def test_sh_trap_apaga_o_banco_mesmo_com_falha():
+    m = re.search(r"trap\s+(\w+)\s+EXIT", _SH)
+    assert m, "precisa de um trap EXIT"
+    funcao = m.group(1)
+    corpo = _SH[_SH.index(f"{funcao}()"):]
+    assert "DROP DATABASE" in corpo
+
+
+def test_sh_todo_drop_create_e_carga_usa_restore_db():
+    for linha in _SH.splitlines():
+        if "DROP DATABASE" in linha or "CREATE DATABASE" in linha:
+            assert '"$RESTORE_DB"' in linha, linha
+    carga = [l for l in _SH.splitlines() if "gunzip -c" in l and "mysql" in l]
+    assert len(carga) == 1 and '"$RESTORE_DB"' in carga[0]
+
+
+def test_sh_usa_restore_cnf_e_chama_conferir():
+    assert "--defaults-extra-file=$RESTORE_CNF" in _SH
+    assert "conferir-restauracao" in _SH
+    assert "backup_mysql.py" in _SH
+
+
+# --- units do systemd, lidas como texto ---------------------------------------
+
+
+def test_service_e_oneshot_com_onfailure_e_pouca_prioridade():
+    assert "Type=oneshot" in _SERVICE
+    assert "OnFailure=softspend-alerta@%n.service" in _SERVICE
+    assert "EnvironmentFile=/etc/softspend/backup.env" in _SERVICE
+    assert "Nice=10" in _SERVICE
+    assert "IOSchedulingClass=best-effort" in _SERVICE
+    assert "IOSchedulingPriority=7" in _SERVICE
+    assert "testar-restauracao.sh" in _SERVICE
+
+
+def test_timer_e_mensal_e_persistent():
+    assert re.search(r"^OnCalendar=\*-\*-01 ", _TIMER, re.MULTILINE)
+    assert "Persistent=true" in _TIMER
+    assert "Unit=softspend-backup-teste.service" in _TIMER
+
+
+# --- download do dump mais novo (fallback do .sh) -----------------------------
+
+
+class ClienteS3Falso:
+    def __init__(self, objetos):
+        self.objetos = objetos
+        self.baixados = []
+
+    def list_objects_v2(self, Bucket, Prefix, **kwargs):
+        return {
+            "Contents": [{"Key": k} for k in sorted(self.objetos)
+                         if k.startswith(Prefix)]
+        }
+
+    def download_file(self, bucket, chave, destino):
+        self.baixados.append(chave)
+        Path(destino).write_bytes(self.objetos[chave])
+
+
+def test_baixar_mais_recente_pega_o_mais_novo_com_meta(tmp_path):
+    objetos = {
+        "diario/2026/10/softspend-20261031T063000Z.sql.gz": b"velho",
+        "diario/2026/10/softspend-20261031T063000Z.meta.json": b"{}",
+        "diario/2026/11/softspend-20261113T063012Z.sql.gz": b"novo",
+        "diario/2026/11/softspend-20261113T063012Z.meta.json": b"{}",
+        "diario/2026/11/nao-e-dump.txt": b"x",
+    }
+    cliente = ClienteS3Falso(objetos)
+    dump = bm.baixar_mais_recente(
+        tmp_path / "dl", {"BACKUP_S3_BUCKET": "b"}, cliente=cliente)
+    assert dump.name == "softspend-20261113T063012Z.sql.gz"
+    assert dump.read_bytes() == b"novo"
+    assert bm.caminho_meta(dump).is_file()
+    assert cliente.baixados == [
+        "diario/2026/11/softspend-20261113T063012Z.sql.gz",
+        "diario/2026/11/softspend-20261113T063012Z.meta.json",
+    ]
+
+
+def test_baixar_mais_recente_sem_dump_falha(tmp_path):
+    with pytest.raises(bm.ErroBackup, match="nenhum dump"):
+        bm.baixar_mais_recente(
+            tmp_path, {"BACKUP_S3_BUCKET": "b"}, cliente=ClienteS3Falso({}))

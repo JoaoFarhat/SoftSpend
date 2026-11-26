@@ -1,0 +1,14 @@
+[Unit]
+Description=SoftSpend - teste mensal de restauração do backup, dia 1 às 05:30 de Brasília (08:30 UTC)
+
+[Timer]
+# 08:30 UTC, depois da conciliação das assinaturas (07:30 UTC), para não
+# disputar a máquina e o MySQL com ela.
+OnCalendar=*-*-01 08:30:00 UTC
+# Se a EC2 estava desligada no dia 1, roda assim que ligar.
+Persistent=true
+RandomizedDelaySec=300
+Unit=softspend-backup-teste.service
+
+[Install]
+WantedBy=timers.target

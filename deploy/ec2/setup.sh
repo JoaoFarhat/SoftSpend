@@ -84,6 +84,24 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Teste mensal de restauração do backup (docs/backup-mysql.md, §8.2 e §12)
+#
+# Instala o timer, mas só o liga quando /etc/softspend/restore.cnf existe
+# (criado pelo roteiro do §12). Nunca cria nem sobrescreve esse arquivo.
+# ---------------------------------------------------------------------------
+echo "Instalando teste mensal de restauração do backup..."
+sudo cp "$(dirname "$0")/softspend-backup-teste.service" "$(dirname "$0")/softspend-backup-teste.timer" /etc/systemd/system/
+sudo systemctl daemon-reload
+if sudo test -f "$BACKUP_ETC/restore.cnf"; then
+    sudo systemctl enable --now softspend-backup-teste.timer
+    echo "Timer do teste de restauração ligado: systemctl list-timers softspend-backup-teste.timer"
+else
+    echo "AVISO: teste de restauração instalado mas desligado. Crie o usuário"
+    echo "      softspend_restore e o $BACKUP_ETC/restore.cnf"
+    echo "      (docs/backup-mysql.md §12) e rode este script de novo."
+fi
+
+# ---------------------------------------------------------------------------
 # Conciliação diária das assinaturas (docs/assinatura.md §2.7)
 #
 # Instala o timer, mas só o liga quando o .env da API tem as variáveis APPLE_*
