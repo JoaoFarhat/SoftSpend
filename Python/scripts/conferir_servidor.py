@@ -196,9 +196,10 @@ def conferir_liberacao(ambiente: dict, sessao, pasta: Path) -> Resultado:
     return Resultado(True, nome, f"{len(ids)} id(s) liberado(s) existe(m) ({info})")
 
 
-TIMERS_DIARIOS = (
+TIMERS = (
     "softspend-assinaturas.timer",
     "softspend-backup.timer",
+    "softspend-backup-teste.timer",
 )
 
 
@@ -253,12 +254,13 @@ def _inicio_servico() -> int | str | None:
 
 
 def conferir_timers(ambiente: dict, sessao, pasta: Path) -> Resultado:
-    """Os timers diários (conciliação das assinaturas e backup) ficam
-    desligados quando o `setup.sh` rodou antes das `APPLE_*`/`backup.env`;
-    aqui isso vira FALTA em vez de passar em silêncio."""
-    nome = "timers diários"
+    """Os timers diários (conciliação das assinaturas e backup) e o teste
+    mensal de restauração ficam desligados quando o `setup.sh` rodou antes
+    das `APPLE_*`, do `backup.env` ou do `restore.cnf`; aqui isso vira
+    FALTA em vez de passar em silêncio."""
+    nome = "timers"
     desligados = []
-    for timer in TIMERS_DIARIOS:
+    for timer in TIMERS:
         estado = _estado_timer(timer)
         if estado is None:
             return Resultado(False, nome, "systemctl indisponível")
@@ -275,7 +277,54 @@ def conferir_timers(ambiente: dict, sessao, pasta: Path) -> Resultado:
             nome,
             f"{'; '.join(desligados)} — rodar o setup.sh de novo",
         )
-    return Resultado(True, nome, "assinaturas e backup enabled/active")
+    return Resultado(
+        True, nome, "assinaturas, backup e teste de restauração enabled/active"
+    )
+
+
+ARQUIVO_ALERTA = Path("/etc/softspend/alerta.env")
+
+
+def conferir_alertas(
+    ambiente: dict, sessao, pasta: Path, arquivo: Path | None = None
+) -> Resultado:
+    """Os avisos por e-mail nascem desligados: o `setup.sh` instala o
+    `alerta.env` com `ALERTA_SNS_TOPICO` vazio, e sem tópico o `alertar.py`
+    não publica nada — o backup pode falhar sem avisar ninguém. O ARN
+    nunca aparece na saída (o arquivo é do root e fala com a AWS)."""
+    nome = "alertas por e-mail"
+    arquivo = ARQUIVO_ALERTA if arquivo is None else arquivo
+    try:
+        conteudo = arquivo.read_text(encoding="utf-8")
+    except PermissionError:
+        return Resultado(
+            False,
+            nome,
+            "sem permissão para ler (o arquivo é do root) — rodar com sudo",
+        )
+    except FileNotFoundError:
+        return Resultado(False, nome, "arquivo não existe — rodar o setup.sh")
+    except OSError as exc:
+        return Resultado(
+            False, nome, f"arquivo ilegível ({type(exc).__name__})"
+        )
+    topico = ""
+    for linha in conteudo.splitlines():
+        linha = linha.strip()
+        if not linha or linha.startswith("#"):
+            continue
+        chave, _, valor = linha.partition("=")
+        if chave.strip() == "ALERTA_SNS_TOPICO":
+            topico = valor.strip().strip('"').strip("'")
+    if not topico:
+        return Resultado(
+            False,
+            nome,
+            f"alertas desligados (ALERTA_SNS_TOPICO vazio em {arquivo})",
+        )
+    if not topico.startswith("arn:aws:sns:"):
+        return Resultado(False, nome, "valor não parece um ARN do SNS")
+    return Resultado(True, nome, "ALERTA_SNS_TOPICO com ARN do SNS")
 
 
 def conferir_reinicio(ambiente: dict, sessao, pasta: Path) -> Resultado:
@@ -316,6 +365,7 @@ CHECAGENS = (
     conferir_certificados,
     conferir_liberacao,
     conferir_timers,
+    conferir_alertas,
     conferir_reinicio,
 )
 

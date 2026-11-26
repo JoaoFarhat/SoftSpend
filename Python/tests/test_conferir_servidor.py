@@ -28,6 +28,7 @@ INICIO_SERVICO = 1_900_000_000
 SEGREDO_ACCESS = "access-SEGREDO-sentinel-0123456789abcdef"
 SEGREDO_REFRESH = "refresh-SEGREDO-sentinel-0123456789abcde"
 SEGREDO_APPLE = "apple-SEGREDO-sentinel-0123456789abcdefgh"
+ARN_SNS = "arn:aws:sns:sa-east-1:123456789012:softspend-alertas"
 
 
 def _ambiente_ok() -> dict:
@@ -49,12 +50,16 @@ def _ambiente_ok() -> dict:
 @pytest.fixture
 def ambiente(tmp_path, monkeypatch):
     """Banco SQLite + pasta Python/ falsa, tudo pronto para sair 0."""
-    # Os timers só existem na EC2; nos testes, os dois ligados por padrão.
+    # Os timers só existem na EC2; nos testes, os três ligados por padrão.
     monkeypatch.setattr(
         cs, "_estado_timer", lambda nome: ("enabled", "active")
     )
     # Idem o `systemctl show` do serviço: início depois do `.env` (OK).
     monkeypatch.setattr(cs, "_inicio_servico", lambda: INICIO_SERVICO)
+    # O alerta.env é do root na EC2; nos testes, um temporário com tópico.
+    alerta = tmp_path / "alerta.env"
+    alerta.write_text(f"ALERTA_SNS_TOPICO={ARN_SNS}\n", encoding="utf-8")
+    monkeypatch.setattr(cs, "ARQUIVO_ALERTA", alerta)
     pasta = tmp_path / "Python"
     (pasta / "alembic" / "versions").mkdir(parents=True)
     (pasta / "alembic" / "versions" / f"{HEAD}_rev.py").write_text(
@@ -202,7 +207,7 @@ def test_segredos_nao_aparecem_na_saida(ambiente, capsys):
         ACESSO_LIBERADO_USUARIOS="id-que-nao-existe",
     ) == 1
     capturado = capsys.readouterr()
-    for segredo in (SEGREDO_ACCESS, SEGREDO_REFRESH, SEGREDO_APPLE):
+    for segredo in (SEGREDO_ACCESS, SEGREDO_REFRESH, SEGREDO_APPLE, ARN_SNS):
         assert segredo not in capturado.out
         assert segredo not in capturado.err
 
@@ -250,7 +255,7 @@ def test_billing_enforcement_aparece_mas_nao_e_falta(ambiente, capsys):
 def test_timers_ligados_dao_ok(ambiente, capsys):
     assert _rodar(ambiente) == 0
     assert any(
-        l.startswith("OK timers diários") for l in _linhas(capsys).splitlines()
+        l.startswith("OK timers") for l in _linhas(capsys).splitlines()
     )
 
 
@@ -268,10 +273,91 @@ def test_timer_assinaturas_desligado_da_falta(ambiente, capsys, monkeypatch):
     assert "setup.sh" in falta[0]
 
 
+def test_timer_restauracao_desligado_da_falta(ambiente, capsys, monkeypatch):
+    def _estado(nome):
+        if nome == "softspend-backup-teste.timer":
+            return ("disabled", "inactive")
+        return ("enabled", "active")
+
+    monkeypatch.setattr(cs, "_estado_timer", _estado)
+    assert _rodar(ambiente) == 1
+    falta = [l for l in _linhas(capsys).splitlines() if l.startswith("FALTA")]
+    assert len(falta) == 1
+    assert "softspend-backup-teste.timer" in falta[0]
+    assert "setup.sh" in falta[0]
+
+
 def test_sem_systemctl_da_falta(ambiente, capsys, monkeypatch):
     monkeypatch.setattr(cs, "_estado_timer", lambda nome: None)
     assert _rodar(ambiente) == 1
     assert "systemctl indisponível" in _linhas(capsys)
+
+
+# `conferir_alertas`: o alerta.env de verdade é do root na EC2; aqui cada
+# caso usa um arquivo temporário (ou um objeto que simula PermissionError).
+
+
+def _alerta_env(tmp_path, conteudo: str):
+    arquivo = tmp_path / "alerta.env"
+    arquivo.write_text(conteudo, encoding="utf-8")
+    return arquivo
+
+
+def test_alerta_com_topico_da_ok_sem_mostrar_arn(tmp_path):
+    arquivo = _alerta_env(tmp_path, f"ALERTA_SNS_TOPICO={ARN_SNS}\n")
+    resultado = cs.conferir_alertas({}, None, None, arquivo)
+    linha = cs._linha(resultado)
+    assert resultado.ok
+    assert linha.startswith("OK")
+    assert ARN_SNS not in linha
+
+
+@pytest.mark.parametrize(
+    "conteudo",
+    [
+        "ALERTA_SNS_TOPICO=\n",
+        "ALERTA_SNS_TOPICO=   \n",
+        "# alerta.env sem o tópico\n",
+        f"OUTRA_VARIAVEL={ARN_SNS}\n",
+    ],
+)
+def test_alerta_vazio_ou_ausente_da_falta(tmp_path, conteudo):
+    arquivo = _alerta_env(tmp_path, conteudo)
+    linha = cs._linha(cs.conferir_alertas({}, None, None, arquivo))
+    assert linha.startswith("FALTA")
+    assert "alertas desligados" in linha
+    assert "ALERTA_SNS_TOPICO" in linha
+    assert ARN_SNS not in linha
+
+
+def test_alerta_arquivo_inexistente_da_falta(tmp_path):
+    arquivo = tmp_path / "sem-pasta" / "alerta.env"
+    linha = cs._linha(cs.conferir_alertas({}, None, None, arquivo))
+    assert linha.startswith("FALTA")
+    assert "arquivo não existe" in linha
+    assert "setup.sh" in linha
+    assert ARN_SNS not in linha
+
+
+def test_alerta_sem_permissao_da_falta():
+    class _SemPermissao:
+        def read_text(self, encoding="utf-8"):
+            raise PermissionError("acesso negado")
+
+    linha = cs._linha(cs.conferir_alertas({}, None, None, _SemPermissao()))
+    assert linha.startswith("FALTA")
+    assert "sem permissão" in linha
+    assert "sudo" in linha
+    assert ARN_SNS not in linha
+
+
+def test_alerta_valor_nao_arn_da_falta(tmp_path):
+    arquivo = _alerta_env(tmp_path, "ALERTA_SNS_TOPICO=email@exemplo.com\n")
+    linha = cs._linha(cs.conferir_alertas({}, None, None, arquivo))
+    assert linha.startswith("FALTA")
+    assert "ARN do SNS" in linha
+    assert "email@exemplo.com" not in linha
+    assert ARN_SNS not in linha
 
 
 # `_estado_timer` de verdade (o que roda na EC2), com `subprocess.run`
