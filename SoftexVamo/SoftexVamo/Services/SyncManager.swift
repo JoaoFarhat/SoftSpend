@@ -216,6 +216,12 @@ actor SyncActor: ModelActor {
     /// toma mais 429. Vale mesmo com `forcar: true`.
     private var limiteAtingidoNesteSync = false
 
+    /// O token não pôde ser lido neste `sync` (iPhone trancado: o
+    /// `NetworkManager` lançou `.chaveIndisponivel` sem mandar o pedido). Como
+    /// o `limiteAtingidoNesteSync`: o item espera 60 s sem contar tentativa e
+    /// as etapas param — todo pedido seguinte daria o mesmo erro.
+    private var tokenIndisponivelNesteSync = false
+
     /// O usuário logado deixou de ser o dono deste `sync` (logout, ou logout +
     /// login de outra conta no meio do envio). O `NetworkManager` lê o token
     /// a cada pedido: seguir mandaria os dados de uma conta com o login da
@@ -250,10 +256,10 @@ actor SyncActor: ModelActor {
         self.usuarioAtual = usuarioAtual
     }
 
-    /// Alguma trava deste `sync` (429 por minuto ou troca de conta) mandou
-    /// parar de chamar a API.
+    /// Alguma trava deste `sync` (429 por minuto, token trancado ou troca de
+    /// conta) mandou parar de chamar a API.
     private var deveParar: Bool {
-        limiteAtingidoNesteSync || usuarioTrocouNesteSync
+        limiteAtingidoNesteSync || tokenIndisponivelNesteSync || usuarioTrocouNesteSync
     }
 
     /// O usuário logado ainda é o dono deste `sync`? Chamado **antes** de cada
@@ -391,6 +397,7 @@ actor SyncActor: ModelActor {
         descartarAntigosApagadosEmOutroAparelho(userId: userId)
         aguardandoAssinaturaNesteSync = []
         limiteAtingidoNesteSync = false
+        tokenIndisponivelNesteSync = false
         usuarioTrocouNesteSync = false
         userIdDoSync = userId
 
@@ -408,6 +415,10 @@ actor SyncActor: ModelActor {
             logger.info("SyncActor: passada \(passada, privacy: .public), pendentesDepois=\(pendentesDepois, privacy: .public), mudouDuranteEnvio=\(self.mudouDuranteEnvio, privacy: .public)")
             if limiteAtingidoNesteSync {
                 logger.info("SyncActor: limite por minuto (429) atingido, passadas restantes canceladas")
+                break
+            }
+            if tokenIndisponivelNesteSync {
+                logger.info("SyncActor: token ilegível (iPhone trancado), passadas restantes canceladas")
                 break
             }
             if usuarioTrocouNesteSync {
@@ -510,7 +521,7 @@ actor SyncActor: ModelActor {
             }
         } catch {
             guard await mesmoUsuario() else { return }
-            if atingiuLimitePorMinuto(error) {
+            if deveEsperarSemFalhar(error) {
                 gravarCiclo(cicloUUID, etapa: "sincronizarEdicaoCiclo-limite") { atual, _ in
                     marcarAguardandoLimite(atual, agora: agora)
                 }
@@ -670,7 +681,7 @@ actor SyncActor: ModelActor {
                     logger.info("syncCiclos: POST recusado, assinatura necessária")
                     continue
                 }
-                if atingiuLimitePorMinuto(error) {
+                if deveEsperarSemFalhar(error) {
                     gravarCiclo(cicloUUID, etapa: "syncCiclos-limite") { atual, _ in
                         marcarAguardandoLimite(atual, agora: agora)
                     }
@@ -798,7 +809,7 @@ actor SyncActor: ModelActor {
             }
         } catch {
             guard await mesmoUsuario() else { return }
-            if atingiuLimitePorMinuto(error) {
+            if deveEsperarSemFalhar(error) {
                 for envio in envios {
                     gravarDia(envio.uuid, etapa: "syncDias-limite") { atual in
                         marcarAguardandoLimite(atual, agora: agora)
@@ -903,7 +914,7 @@ actor SyncActor: ModelActor {
                 }
             } catch {
                 guard await mesmoUsuario() else { break }
-                if atingiuLimitePorMinuto(error) {
+                if deveEsperarSemFalhar(error) {
                     gravarGasto(gastoUUID, etapa: "syncGastos-limite") { atual in
                         marcarAguardandoLimite(atual, agora: agora)
                     }
@@ -956,7 +967,7 @@ actor SyncActor: ModelActor {
                 try await sincronizarComprovante(gasto, backendId: backendId, foto: foto, agora: agora)
             } catch {
                 guard await mesmoUsuario() else { break }
-                if atingiuLimitePorMinuto(error) {
+                if deveEsperarSemFalhar(error) {
                     gravarGasto(gastoUUID, etapa: "syncComprovantes-limite") { atual in
                         marcarAguardandoLimite(atual, agora: agora)
                     }
@@ -1103,7 +1114,16 @@ actor SyncActor: ModelActor {
     /// agendar o item com `marcarAguardandoLimite` e interromper o laço
     /// (`break`/`continue`/`return`). Outros erros devolvem `false` sem
     /// mudar nada.
-    private func atingiuLimitePorMinuto(_ error: Error) -> Bool {
+    ///
+    /// O token trancado (`APIError.chaveIndisponivel`: iPhone bloqueado, o
+    /// `NetworkManager` nem mandou o pedido) segue o mesmo caminho — não é
+    /// falha, espera 60 s e as etapas param — mas liga
+    /// `tokenIndisponivelNesteSync`, não o do 429.
+    private func deveEsperarSemFalhar(_ error: Error) -> Bool {
+        if case APIError.chaveIndisponivel = error {
+            tokenIndisponivelNesteSync = true
+            return true
+        }
         guard isLimitePorMinuto(error) else { return false }
         limiteAtingidoNesteSync = true
         return true
@@ -1134,7 +1154,7 @@ actor SyncActor: ModelActor {
     /// que já existe devolveria o item; o 403 garante que ele não está lá.
     private func classificar(_ error: Error) -> Recuperacao {
         if isNotFoundError(error) || isAssinaturaNecessaria(error) { return .naoExiste }
-        if atingiuLimitePorMinuto(error) { return .aguardandoLimite }
+        if deveEsperarSemFalhar(error) { return .aguardandoLimite }
         return .falhou(error.localizedDescription)
     }
 
@@ -1259,7 +1279,7 @@ actor SyncActor: ModelActor {
                 try await api.deleteGasto(gastoId: backendId)
             } catch {
                 guard await mesmoUsuario() else { break }
-                if atingiuLimitePorMinuto(error) {
+                if deveEsperarSemFalhar(error) {
                     marcarAguardandoLimite(gasto, agora: agora)
                     continue
                 }
@@ -1319,7 +1339,7 @@ actor SyncActor: ModelActor {
                 try await api.deleteDia(diaId: backendId)
             } catch {
                 guard await mesmoUsuario() else { break }
-                if atingiuLimitePorMinuto(error) {
+                if deveEsperarSemFalhar(error) {
                     marcarAguardandoLimite(dia, agora: agora)
                     continue
                 }
@@ -1372,7 +1392,7 @@ actor SyncActor: ModelActor {
                 try await api.deleteCiclo(cicloId: backendId)
             } catch {
                 guard await mesmoUsuario() else { break }
-                if atingiuLimitePorMinuto(error) {
+                if deveEsperarSemFalhar(error) {
                     marcarAguardandoLimite(ciclo, agora: agora)
                     continue
                 }

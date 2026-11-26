@@ -34,7 +34,12 @@ Regras, no `TokenRefresher`:
 2. Se qualquer gravação foi recusada, o par novo fica numa **sessão em memória**
    (`ParDeTokensPendente`: refresh, access, ainda não gravados) guardada no
    `NetworkManager`. A renovação **dá certo** — o pedido segue com o token
-   novo, sem erro e sem logout.
+   novo, sem erro e sem logout. Se as **duas** gravaram, o pendente de uma
+   renovação anterior é descartado: o refresh dele já foi trocado no servidor
+   por este, e deixá-lo valer nas leituras (ou regravá-lo na retentativa)
+   seria reuso — todas as sessões derrubadas. A gravação do par renovado e a
+   retentativa do pendente passam pela mesma trava (`gravacaoDoPar`), e a
+   retentativa lê o pendente já dentro dela.
 3. Enquanto houver par pendente, ele vale como "o cofre": leitura de access e
    refresh (`buscarAccessToken`/`buscarRefreshToken`, a comparação de sessão do
    `execute` e do `TokenRefresher`) olha o pendente antes do Keychain. O
@@ -158,6 +163,10 @@ mensagem permanente só na próxima vez que o login for pedido (entrar de novo).
    memória e **nenhum** pedido de renovação reenvia o refresh antigo.
 4. Pendente: a primeira tentativa de gravar volta recusada, a segunda grava os
    dois (nesta ordem) e o pendente some.
+   - Renovação seguinte que grava: com um pendente de uma renovação recusada,
+     a renovação seguinte grava o par novo; a leitura devolve o par novo e
+     nenhuma tentativa posterior regrava o refresh antigo
+     (`renovacaoQueGravaDescartaOParPendenteVelho`).
 5. Logout, troca de conta e `deleteAccount` descartam o pendente.
 6. `.ilegivel` no access: o pedido não sai, vem `loginIlegivel`, logout local
    uma vez só (vários pedidos em voo não chamam o logout várias vezes).
