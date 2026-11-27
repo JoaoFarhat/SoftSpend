@@ -23,3 +23,6 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    codigos_redefinicao = relationship(
+        "CodigoRedefinicaoSenha", back_populates="user", cascade="all, delete-orphan"
+    )
