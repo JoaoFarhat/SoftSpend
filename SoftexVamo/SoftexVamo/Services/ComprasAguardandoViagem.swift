@@ -29,8 +29,8 @@ nonisolated struct CompraAguardandoViagem: Codable, Identifiable, Equatable, Sen
 /// O arquivo usa a proteção padrão do iOS (disponível depois do primeiro
 /// desbloqueio), para a ação "Registrar gasto" rodar com o aparelho trancado.
 /// Arquivo ausente lê como lista vazia, sem derrubar o app. Arquivo corrompido
-/// é movido para `compras-apple-pay.json.corrompido-<data>` e lê como lista
-/// vazia — sobrescrever direto perderia os itens de todos os usuários. Arquivo
+/// é movido para `compras-apple-pay.json.corrompido-<data>-<uuid>` e lê como
+/// lista vazia — sobrescrever direto perderia os itens de todos os usuários. Arquivo
 /// que existe mas não lê (permissão, I/O) faz `adicionar`/`remover` abortarem:
 /// ler como vazio deixaria a próxima gravação apagar a fila inteira.
 ///
@@ -151,7 +151,7 @@ final class ComprasAguardandoViagem {
     // MARK: - Arquivo (sempre chamado sob `trava`)
 
     /// Lê o arquivo. Ausente lê como lista vazia. Corrompido (JSON que não
-    /// decodifica) é movido para `….corrompido-<data>` — guarda os itens dos
+    /// decodifica) é movido para `….corrompido-<data>-<uuid>` — guarda os itens dos
     /// outros usuários em vez de sobrescrever — e lê como lista vazia.
     /// Arquivo que existe mas não lê (permissão, I/O) **lança**: tratar como
     /// vazio deixaria `adicionar`/`remover` regravarem `[]` por cima e a fila
@@ -173,12 +173,13 @@ final class ComprasAguardandoViagem {
         return lista
     }
 
-    /// Move o arquivo ilegível para `<nome>.corrompido-<yyyyMMdd-HHmmss>`
-    /// (nome único: um corrompido anterior fica guardado). Se o move falha,
-    /// lança — o arquivo ruim não pode ficar para ser sobrescrito na próxima
-    /// gravação.
+    /// Move o arquivo ilegível para
+    /// `<nome>.corrompido-<yyyyMMdd-HHmmss>-<uuid>` (`QuarentenaArquivo` —
+    /// nome único mesmo no mesmo segundo) e poda as cópias além das mais
+    /// novas. Se o move falha, lança — o arquivo ruim não pode ficar para
+    /// ser sobrescrito na próxima gravação.
     private func quarentenar() throws {
-        let copia = arquivo.appendingPathExtension("corrompido-\(Self.carimbo.string(from: .now))")
+        let copia = QuarentenaArquivo.destino(para: arquivo, em: .now)
         do {
             try FileManager.default.moveItem(at: arquivo, to: copia)
             Self.logger.error("Fila corrompida movida para \(copia.lastPathComponent, privacy: .public)")
@@ -186,14 +187,8 @@ final class ComprasAguardandoViagem {
             Self.logger.error("Fila corrompida; não deu para mover: \(error.localizedDescription, privacy: .public)")
             throw error
         }
+        QuarentenaArquivo.podar(de: arquivo)
     }
-
-    private static let carimbo: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyyMMdd-HHmmss"
-        return f
-    }()
 
     private func gravar(_ lista: [CompraAguardandoViagem]) throws {
         let dados = try JSONEncoder().encode(lista)
