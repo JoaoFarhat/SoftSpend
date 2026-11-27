@@ -45,6 +45,9 @@ jobs:
     needs: test
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    # A migration roda dentro do SSH: um MySQL que nao responde nao pode
+    # prender o deploy pelas 6h padrao do Actions.
+    timeout-minutes: 15
     environment:
       name: producao
       url: https://softspend.com.br/health
