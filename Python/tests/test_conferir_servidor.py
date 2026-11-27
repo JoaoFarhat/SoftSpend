@@ -45,6 +45,7 @@ def _ambiente_ok() -> dict:
         "APPLE_PRIVATE_KEY": SEGREDO_APPLE,
         "BILLING_ENFORCEMENT": "on",
         "ACESSO_LIBERADO_USUARIOS": USER_DEMO,
+        "TRUST_PROXY": "true",
     }
 
 
@@ -235,6 +236,47 @@ def test_segredos_curtos_ou_iguais_dao_falta(ambiente, capsys):
     assert "32 caracteres" in _linhas(capsys)
     assert _rodar(ambiente, REFRESH_TOKEN_SECRET_KEY=SEGREDO_ACCESS) == 1
     assert "iguais" in _linhas(capsys)
+
+
+# `conferir_proxy`: com TRUST_PROXY=false atrás do nginx, o rate limit de
+# login/cadastro conta o app inteiro como 127.0.0.1.
+
+
+@pytest.mark.parametrize("valor", ["true", "TRUE"])
+def test_proxy_ativado_da_ok(valor):
+    linha = cs._linha(cs.conferir_proxy({"TRUST_PROXY": valor}, None, None))
+    assert linha.startswith("OK")
+    assert "TRUST_PROXY=true" in linha
+
+
+def test_proxy_rede_cobre_loopback_da_ok():
+    linha = cs._linha(
+        cs.conferir_proxy(
+            {"TRUST_PROXY": "true", "TRUSTED_PROXY_IPS": "127.0.0.0/8"},
+            None,
+            None,
+        )
+    )
+    assert linha.startswith("OK")
+
+
+@pytest.mark.parametrize("amb", [{}, {"TRUST_PROXY": "false"}])
+def test_proxy_desativado_da_falta(amb):
+    linha = cs._linha(cs.conferir_proxy(amb, None, None))
+    assert linha.startswith("FALTA")
+    assert "TRUST_PROXY não é true" in linha
+
+
+@pytest.mark.parametrize(
+    "ips", ["10.0.0.1", "nao-e-um-ip", "", "10.0.0.0/8"]
+)
+def test_proxy_ips_sem_loopback_da_falta(ips):
+    env = {"TRUST_PROXY": "true", "TRUSTED_PROXY_IPS": ips}
+    linha = cs._linha(cs.conferir_proxy(env, None, None))
+    assert linha.startswith("FALTA")
+    assert "TRUSTED_PROXY_IPS sem 127.0.0.1" in linha
+    if ips:
+        assert ips not in linha
 
 
 def test_sem_certificado_da_falta(ambiente, capsys):
