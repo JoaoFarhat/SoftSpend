@@ -44,19 +44,26 @@ struct RegisterView: View {
     @State private var senha: String = ""
     @State private var confirmarSenha: String = ""
 
-    init(nome: String = "", email: String = "", senha: String = "") {
+    /// Volta ao login com o e-mail preenchido (quando o e-mail já tem conta).
+    /// Sem ela (demonstração, preview), só fecha a tela.
+    var entrarComEmail: ((String) -> Void)?
+    /// Abre o "Esqueci minha senha" com o e-mail do cadastro (o e-mail já tem conta).
+    var esqueciSenha: ((String) -> Void)?
+
+    init(nome: String = "", email: String = "", senha: String = "",
+         entrarComEmail: ((String) -> Void)? = nil,
+         esqueciSenha: ((String) -> Void)? = nil) {
+        self.entrarComEmail = entrarComEmail
+        self.esqueciSenha = esqueciSenha
         _nome = State(initialValue: nome)
         _email = State(initialValue: email)
         _senha = State(initialValue: senha)
         _confirmarSenha = State(initialValue: senha)
     }
 
-    private var senhaTemMinimo: Bool { senha.count >= 8 }
-    private var senhaTemMaiuscula: Bool { senha.contains(where: { $0.isUppercase }) }
-    private var senhaTemMinuscula: Bool { senha.contains(where: { $0.isLowercase }) }
-    private var senhaTemNumero: Bool { senha.contains(where: { $0.isNumber }) }
-    private var senhaTemEspecial: Bool { senha.contains(where: { "!@#$%^&*()_+-=[]{}|;:',.<>?/~`".contains($0) }) }
-    private var senhaValida: Bool { senhaTemMinimo && senhaTemMaiuscula && senhaTemMinuscula && senhaTemNumero && senhaTemEspecial }
+    private var regra: RegraSenha { RegraSenha(senha: senha) }
+    private var emailAparado: String { email.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var senhaValida: Bool { regra.valida }
 
     private var isFormValid: Bool {
         !nome.isEmpty &&
@@ -85,19 +92,17 @@ struct RegisterView: View {
                             .keyboardType(.emailAddress)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                            .onChange(of: email) { _, _ in
+                                // O aviso "já tem conta" era do e-mail anterior.
+                                if authService.emailJaCadastrado { authService.errorMessage = nil }
+                            }
 
                         CampoAcesso(rotulo: "Senha", texto: $senha, seguro: true)
                             .textContentType(.newPassword)
 
                         // Os requisitos aparecem enquanto a senha não atende a todos.
                         if !senha.isEmpty && !senhaValida {
-                            VStack(alignment: .leading, spacing: 4) {
-                                senhaRequisito("Mínimo 8 caracteres", atende: senhaTemMinimo)
-                                senhaRequisito("Uma letra maiúscula", atende: senhaTemMaiuscula)
-                                senhaRequisito("Uma letra minúscula", atende: senhaTemMinuscula)
-                                senhaRequisito("Um número", atende: senhaTemNumero)
-                                senhaRequisito("Um caractere especial (!@#$...)", atende: senhaTemEspecial)
-                            }
+                            RequisitosSenha(regra: regra)
                         }
 
                         CampoAcesso(rotulo: "Confirmar senha", texto: $confirmarSenha, seguro: true)
@@ -118,6 +123,30 @@ struct RegisterView: View {
                             Text(error)
                                 .font(.footnote)
                                 .foregroundStyle(Tema.estouro)
+                        }
+
+                        if authService.emailJaCadastrado {
+                            HStack(spacing: Espaco.g) {
+                                Button {
+                                    if let entrarComEmail {
+                                        entrarComEmail(emailAparado)
+                                    } else {
+                                        dismiss()
+                                    }
+                                } label: {
+                                    Text("Entrar com este e-mail").fontWeight(.semibold)
+                                }
+
+                                if let esqueciSenha {
+                                    Button {
+                                        esqueciSenha(emailAparado)
+                                    } label: {
+                                        Text("Esqueci minha senha").fontWeight(.semibold)
+                                    }
+                                }
+                            }
+                            .font(.footnote)
+                            .foregroundStyle(Tema.marcaTexto)
                         }
                     }
                     .padding(.horizontal, Espaco.g + 4)
@@ -179,7 +208,23 @@ struct RegisterView: View {
         return (try? AttributedString(markdown: fonte)) ?? AttributedString(fonte)
     }
 
-    private func senhaRequisito(_ texto: String, atende: Bool) -> some View {
+}
+
+/// Lista de requisitos da senha, marcando os já atendidos (cadastro e senha nova).
+struct RequisitosSenha: View {
+    let regra: RegraSenha
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            requisito("Mínimo 8 caracteres", atende: regra.temMinimo)
+            requisito("Uma letra maiúscula", atende: regra.temMaiuscula)
+            requisito("Uma letra minúscula", atende: regra.temMinuscula)
+            requisito("Um número", atende: regra.temNumero)
+            requisito("Um caractere especial (!@#$...)", atende: regra.temEspecial)
+        }
+    }
+
+    private func requisito(_ texto: String, atende: Bool) -> some View {
         HStack(spacing: 6) {
             Image(systemName: atende ? "checkmark.circle.fill" : "circle")
                 .font(.caption)

@@ -751,6 +751,11 @@ Cadeia de migrations:
     (`docs/data-do-dia.md` §4). Sem ela, `POST /dias` e `/dias/lote`
     falham com `Unknown column 'dias.data_dia'` e o `DiaResponse` devolve
     `data_local` só pelo fallback. O downgrade só derruba índice e coluna.
+13. `b9d4f1a3c6e8` — "Esqueci minha senha": tabela `codigos_redefinicao_senha`
+    (uma linha por usuário, só o HMAC do código, `expires_at`, `tentativas`;
+    FK para `users` com `ON DELETE CASCADE`). Sem ela, `POST
+    /auth/senha/esqueci` falha com `Table 'softspend.codigos_redefinicao_senha'
+    doesn't exist`.
 
 ## Data do dia (servidor)
 
@@ -1112,6 +1117,39 @@ expirado. Assim:
 - tokens sem `sid` (emitidos antes dessa regra) seguem aceitos até expirar.
 
 Custo: uma consulta indexada em `refresh_tokens.session_id` por requisição autenticada.
+
+Cadastro com e-mail que já tem conta: `POST /auth/register` responde `409
+email_in_use` (`auth_service.EmailJaCadastrado`); `username` repetido segue
+`400`. No app, `APIError.emailJaCadastrado` → `AuthService.emailJaCadastrado`,
+e a `RegisterView` mostra "Já existe uma conta com este e-mail." com "Entrar
+com este e-mail" e "Esqueci minha senha". O `AuthService.errorMessage` é
+compartilhado pelo login e pelo cadastro: a `LoginView` o limpa ao abrir e ao
+fechar cada tela.
+
+Esqueci minha senha (`services/redefinicao_senha_service.py`, código de 6
+dígitos, mesmo contrato do Safeel):
+
+- `POST /auth/senha/esqueci` `{email}` → `202 {expires_in_seconds: 900,
+  resend_after_seconds: 60}` **igual com ou sem conta** (não revela quem tem
+  conta); com conta, gera o código e o e-mail sai em background. Pedir de novo
+  antes de 60 s não gera outro. `503 email_unavailable` sem `EMAIL_REMETENTE`.
+- `POST /auth/senha/redefinir` `{email, codigo, nova_senha}` → `204`, troca a
+  senha e revoga todas as sessões. Errado, expirado (15 min), já usado, sem
+  pedido ou sem conta: o mesmo `400 invalid_reset_code`. 5 tentativas erradas
+  apagam o código (gravadas com `commit` antes do erro, senão o `get_db`
+  desfaria). `nova_senha` segue a regra do cadastro (`_validar_senha_forte`).
+- Ambas com 5/min por IP. No app: link "Esqueceu a senha?" na `LoginView` →
+  `RedefinirSenhaView` + `RedefinirSenhaViewModel` (API injetável
+  `RedefinicaoSenhaAPI`, fake em `SoftSpendTests/FakeRedefinicaoSenhaAPI.swift`);
+  depois da troca, entra direto com a senha nova.
+
+E-mail (`services/email_service.py`, AWS SES v2 via boto3):
+
+| Variável | Default | Descrição |
+| --- | --- | --- |
+| `EMAIL_REMETENTE` | — | **Obrigatória** para o "Esqueci minha senha"; ex. `SoftSpend <nao-responda@softspend.com.br>`. O domínio precisa estar verificado no SES (e a conta fora do sandbox para mandar a qualquer endereço) |
+| `SES_REGION` | `us-east-1` | Região do SES |
+| `SES_ACCESS_KEY_ID` / `SES_SECRET_ACCESS_KEY` | — | Opcionais; sem elas vale a cadeia padrão do boto3 (role da EC2) |
 
 ## TLS/HTTPS
 
