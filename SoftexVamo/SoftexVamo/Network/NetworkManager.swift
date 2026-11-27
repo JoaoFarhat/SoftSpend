@@ -1296,6 +1296,34 @@ final class NetworkManager: Sendable {
         // rodava.
         try await executeUpload(makeRequest(url: url, method: "DELETE"))
     }
+
+    // MARK: Esqueci minha senha (`RedefinicaoSenhaAPI`)
+
+    nonisolated func pedirCodigoRedefinicao(email: String) async throws -> EsqueciSenhaResponse {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/senha/esqueci") else {
+            throw URLError(.badURL)
+        }
+        let request = makeRequest(
+            url: url,
+            method: "POST",
+            body: try encoder.encode(EsqueciSenhaRequest(email: email)),
+            includeToken: false
+        )
+        return try decoder.decode(EsqueciSenhaResponse.self, from: try await execute(request, logout401: false))
+    }
+
+    nonisolated func redefinirSenha(email: String, codigo: String, novaSenha: String) async throws {
+        guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/senha/redefinir") else {
+            throw URLError(.badURL)
+        }
+        let request = makeRequest(
+            url: url,
+            method: "POST",
+            body: try encoder.encode(RedefinirSenhaRequest(email: email, codigo: codigo, novaSenha: novaSenha)),
+            includeToken: false
+        )
+        try await execute(request, logout401: false)
+    }
 }
 
 final class InsecureSessionDelegate: NSObject, URLSessionDelegate, Sendable {
