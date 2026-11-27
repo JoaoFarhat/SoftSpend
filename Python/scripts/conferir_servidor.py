@@ -163,6 +163,29 @@ def conferir_integracoes(ambiente: dict, sessao, pasta: Path) -> Resultado:
     return Resultado(True, nome, "S3_BUCKET e GEMINI_API_KEY presentes")
 
 
+def conferir_email(ambiente: dict, sessao, pasta: Path) -> Resultado:
+    """`EMAIL_REMETENTE` vazia derruba o "Esqueci minha senha" com 503. Sem
+    `SES_REGION` o `email_service._cliente` cai em `us-east-1`, mas o domínio
+    está verificado só em `sa-east-1`: o envio falha em background, a rota
+    segue respondendo 202 e a pessoa nunca recebe o código."""
+    nome = "e-mail SES"
+    if not (ambiente.get("EMAIL_REMETENTE") or "").strip():
+        return Resultado(
+            False,
+            nome,
+            "EMAIL_REMETENTE ausente — "
+            "POST /auth/senha/esqueci responde 503",
+        )
+    if not (ambiente.get("SES_REGION") or "").strip():
+        return Resultado(
+            False,
+            nome,
+            "SES_REGION ausente — SES cai em us-east-1 "
+            "e o envio falha em background",
+        )
+    return Resultado(True, nome, "EMAIL_REMETENTE e SES_REGION presentes")
+
+
 def conferir_apple(ambiente: dict, sessao, pasta: Path) -> Resultado:
     nome = "Apple"
     ausentes = [
@@ -396,6 +419,7 @@ CHECAGENS = (
     conferir_segredos_jwt,
     conferir_proxy,
     conferir_integracoes,
+    conferir_email,
     conferir_apple,
     conferir_certificados,
     conferir_liberacao,
