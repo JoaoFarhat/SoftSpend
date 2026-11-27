@@ -522,10 +522,9 @@ Spec: `docs/cartao-sem-open-finance.md` §1 (partes A e B implementadas).
   Ler+regravar é serializado por `NSLock`. A regra de arquivo é a
   `ArquivoJSONGuardado` (`Services/ArquivoJSONGuardado.swift`), a mesma da
   lista de cartões: ausente lê como lista vazia; corrompido vai para
-  `.corrompido-<data>-<uuid>` (o uuid curto no nome deixa único o destino de
-  dois corrompidos no mesmo segundo — só o carimbo dava `moveItem` em
-  destino existente; backups se acumulam) em vez de ser sobrescrito — e se
-  o move falhar, lança para não gravar por cima. Arquivo que existe mas não
+  `.corrompido-<data>-<uuid>` (`QuarentenaArquivo`: nome único mesmo no
+  mesmo segundo; a poda deixa só as 5 cópias mais novas) em vez de ser
+  sobrescrito — e se o move falhar, lança para não gravar por cima. Arquivo que existe mas não
   lê (permissão, I/O) também lança: ler como vazio deixaria a próxima
   gravação apagar os itens de todos. `adicionar` **lança** quando a leitura
   ou a gravação falha (o `registrar` propaga e a ação responde "lance no
@@ -754,6 +753,11 @@ Cadeia de migrations:
     (`docs/data-do-dia.md` §4). Sem ela, `POST /dias` e `/dias/lote`
     falham com `Unknown column 'dias.data_dia'` e o `DiaResponse` devolve
     `data_local` só pelo fallback. O downgrade só derruba índice e coluna.
+13. `b9d4f1a3c6e8` — "Esqueci minha senha": tabela `codigos_redefinicao_senha`
+    (uma linha por usuário, só o HMAC do código, `expires_at`, `tentativas`;
+    FK para `users` com `ON DELETE CASCADE`). Sem ela, `POST
+    /auth/senha/esqueci` falha com `Table 'softspend.codigos_redefinicao_senha'
+    doesn't exist`.
 
 ## Data do dia (servidor)
 
@@ -1064,9 +1068,10 @@ com o mesmo e-mail não duplica nada: avisa no stderr e sai sem gravar.
 Testes em `tests/test_conta_demo.py`.
 
 Para conferir se o servidor está pronto para a loja (banco conecta,
-`alembic_version` igual ao head, segredos e `APPLE_*` presentes, `.cer` em
-`certificados_apple/`, conta de demonstração liberada, timers da conferência
-das assinaturas e do backup ligados), rode na EC2, de
+`alembic_version` igual ao head, segredos e `APPLE_*` presentes,
+`EMAIL_REMETENTE` e `SES_REGION` definidas para o "Esqueci minha senha",
+`.cer` em `certificados_apple/`, conta de demonstração liberada, timers da
+conferência das assinaturas e do backup ligados), rode na EC2, de
 dentro de `Python/`: `python -m scripts.conferir_servidor`. Imprime uma
 linha `OK`/`FALTA` por item — nunca o valor de segredos — e sai 1 se faltar
 algo. Testes em `tests/test_conferir_servidor.py`.
@@ -1115,6 +1120,39 @@ expirado. Assim:
 - tokens sem `sid` (emitidos antes dessa regra) seguem aceitos até expirar.
 
 Custo: uma consulta indexada em `refresh_tokens.session_id` por requisição autenticada.
+
+Cadastro com e-mail que já tem conta: `POST /auth/register` responde `409
+email_in_use` (`auth_service.EmailJaCadastrado`); `username` repetido segue
+`400`. No app, `APIError.emailJaCadastrado` → `AuthService.emailJaCadastrado`,
+e a `RegisterView` mostra "Já existe uma conta com este e-mail." com "Entrar
+com este e-mail" e "Esqueci minha senha". O `AuthService.errorMessage` é
+compartilhado pelo login e pelo cadastro: a `LoginView` o limpa ao abrir e ao
+fechar cada tela.
+
+Esqueci minha senha (`services/redefinicao_senha_service.py`, código de 6
+dígitos, mesmo contrato do Safeel):
+
+- `POST /auth/senha/esqueci` `{email}` → `202 {expires_in_seconds: 900,
+  resend_after_seconds: 60}` **igual com ou sem conta** (não revela quem tem
+  conta); com conta, gera o código e o e-mail sai em background. Pedir de novo
+  antes de 60 s não gera outro. `503 email_unavailable` sem `EMAIL_REMETENTE`.
+- `POST /auth/senha/redefinir` `{email, codigo, nova_senha}` → `204`, troca a
+  senha e revoga todas as sessões. Errado, expirado (15 min), já usado, sem
+  pedido ou sem conta: o mesmo `400 invalid_reset_code`. 5 tentativas erradas
+  apagam o código (gravadas com `commit` antes do erro, senão o `get_db`
+  desfaria). `nova_senha` segue a regra do cadastro (`_validar_senha_forte`).
+- Ambas com 5/min por IP. No app: link "Esqueceu a senha?" na `LoginView` →
+  `RedefinirSenhaView` + `RedefinirSenhaViewModel` (API injetável
+  `RedefinicaoSenhaAPI`, fake em `SoftSpendTests/FakeRedefinicaoSenhaAPI.swift`);
+  depois da troca, entra direto com a senha nova.
+
+E-mail (`services/email_service.py`, AWS SES v2 via boto3):
+
+| Variável | Default | Descrição |
+| --- | --- | --- |
+| `EMAIL_REMETENTE` | — | **Obrigatória** para o "Esqueci minha senha"; ex. `SoftSpend <nao-responda@softspend.com.br>`. O domínio precisa estar verificado no SES (e a conta fora do sandbox para mandar a qualquer endereço) |
+| `SES_REGION` | `us-east-1` | Região do SES |
+| `SES_ACCESS_KEY_ID` / `SES_SECRET_ACCESS_KEY` | — | Opcionais; sem elas vale a cadeia padrão do boto3 (role da EC2) |
 
 ## TLS/HTTPS
 

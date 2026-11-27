@@ -74,8 +74,7 @@ nonisolated struct ArquivoJSONGuardado<Item: Codable>: Sendable {
     /// lança — o arquivo ruim não pode ficar para ser sobrescrito na próxima
     /// gravação.
     private func quarentenar() throws {
-        let copia = arquivo.appendingPathExtension(
-            "corrompido-\(Self.carimbo.string(from: .now))-\(Self.uuidCurto())")
+        let copia = QuarentenaArquivo.destino(para: arquivo, em: .now)
         do {
             try FileManager.default.moveItem(at: arquivo, to: copia)
             Self.logger.error("\(self.nomeNoLog, privacy: .public) corrompida movida para \(copia.lastPathComponent, privacy: .public)")
@@ -83,16 +82,6 @@ nonisolated struct ArquivoJSONGuardado<Item: Codable>: Sendable {
             Self.logger.error("\(self.nomeNoLog, privacy: .public) corrompida; não deu para mover: \(error.localizedDescription, privacy: .public)")
             throw error
         }
-    }
-
-    private static let carimbo: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyyMMdd-HHmmss"
-        return f
-    }()
-
-    private static func uuidCurto() -> String {
-        String(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(8))
+        QuarentenaArquivo.podar(de: arquivo)
     }
 }

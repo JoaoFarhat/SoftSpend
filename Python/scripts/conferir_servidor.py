@@ -12,6 +12,7 @@ Cada checagem é uma função pura que recebe o ambiente (`dict`), a sessão do
 banco e a pasta `Python/`; `main` só junta as três coisas e imprime.
 """
 
+import ipaddress
 import os
 import subprocess
 import sys
@@ -120,6 +121,36 @@ def conferir_segredos_jwt(ambiente: dict, sessao, pasta: Path) -> Resultado:
     return Resultado(True, nome, "presentes, diferentes, 32+ caracteres")
 
 
+def conferir_proxy(ambiente: dict, sessao, pasta: Path) -> Resultado:
+    """Atrás do nginx com `TRUST_PROXY=false`, o `limiter.get_real_ip` vê
+    todo pedido vindo de 127.0.0.1: o teto de 5 logins e 3 cadastros por
+    minuto passa a valer para o app inteiro. Um `.env` refeito a partir do
+    `.env.example` (que vem com `false`) cai nesse caso sem ninguém ver."""
+    nome = "proxy"
+    # A mesma conta do limiter.py (sem strip), para nunca discordar da API.
+    if ambiente.get("TRUST_PROXY", "false").lower() != "true":
+        return Resultado(
+            False,
+            nome,
+            "TRUST_PROXY não é true: "
+            "os limites de login contam todos como 127.0.0.1",
+        )
+    try:
+        redes = tuple(
+            ipaddress.ip_network(valor.strip())
+            for valor in ambiente.get(
+                "TRUSTED_PROXY_IPS", "127.0.0.1,::1"
+            ).split(",")
+            if valor.strip()
+        )
+    except ValueError:
+        return Resultado(False, nome, "TRUSTED_PROXY_IPS sem 127.0.0.1")
+    loopback = ipaddress.ip_address("127.0.0.1")
+    if not any(loopback in rede for rede in redes):
+        return Resultado(False, nome, "TRUSTED_PROXY_IPS sem 127.0.0.1")
+    return Resultado(True, nome, "TRUST_PROXY=true")
+
+
 def conferir_integracoes(ambiente: dict, sessao, pasta: Path) -> Resultado:
     nome = "S3 e IA"
     ausentes = [
@@ -130,6 +161,29 @@ def conferir_integracoes(ambiente: dict, sessao, pasta: Path) -> Resultado:
     if ausentes:
         return Resultado(False, nome, f"{', '.join(ausentes)} ausente")
     return Resultado(True, nome, "S3_BUCKET e GEMINI_API_KEY presentes")
+
+
+def conferir_email(ambiente: dict, sessao, pasta: Path) -> Resultado:
+    """`EMAIL_REMETENTE` vazia derruba o "Esqueci minha senha" com 503. Sem
+    `SES_REGION` o `email_service._cliente` cai em `us-east-1`, mas o domínio
+    está verificado só em `sa-east-1`: o envio falha em background, a rota
+    segue respondendo 202 e a pessoa nunca recebe o código."""
+    nome = "e-mail SES"
+    if not (ambiente.get("EMAIL_REMETENTE") or "").strip():
+        return Resultado(
+            False,
+            nome,
+            "EMAIL_REMETENTE ausente — "
+            "POST /auth/senha/esqueci responde 503",
+        )
+    if not (ambiente.get("SES_REGION") or "").strip():
+        return Resultado(
+            False,
+            nome,
+            "SES_REGION ausente — SES cai em us-east-1 "
+            "e o envio falha em background",
+        )
+    return Resultado(True, nome, "EMAIL_REMETENTE e SES_REGION presentes")
 
 
 def conferir_apple(ambiente: dict, sessao, pasta: Path) -> Resultado:
@@ -363,7 +417,9 @@ CHECAGENS = (
     conferir_banco,
     conferir_migracoes,
     conferir_segredos_jwt,
+    conferir_proxy,
     conferir_integracoes,
+    conferir_email,
     conferir_apple,
     conferir_certificados,
     conferir_liberacao,

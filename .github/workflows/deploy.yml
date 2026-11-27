@@ -41,10 +41,52 @@ jobs:
       - name: Run tests
         run: python3 -m pytest -q
 
+  migrations-mysql:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_DATABASE: softspend_teste
+          MYSQL_USER: teste
+          MYSQL_PASSWORD: senha_teste
+          MYSQL_ROOT_PASSWORD: senha_root_teste
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -psenha_root_teste --silent"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: ./Python
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run migrations on MySQL
+        env:
+          MYSQL_TESTE_URL: mysql+pymysql://teste:senha_teste@127.0.0.1:3306/softspend_teste
+        run: python3 -m pytest -q tests/test_migrations_mysql.py
+
   deploy:
-    needs: test
+    needs: [test, migrations-mysql]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    # A migration roda dentro do SSH: um MySQL que nao responde nao pode
+    # prender o deploy pelas 6h padrao do Actions.
+    timeout-minutes: 15
     environment:
       name: producao
       url: https://softspend.com.br/health

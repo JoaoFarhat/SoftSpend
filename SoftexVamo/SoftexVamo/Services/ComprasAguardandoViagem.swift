@@ -30,7 +30,8 @@ nonisolated struct CompraAguardandoViagem: Codable, Identifiable, Equatable, Sen
 /// desbloqueio), para a ação "Registrar gasto" rodar com o aparelho trancado.
 /// Arquivo ausente lê como lista vazia, sem derrubar o app. Arquivo corrompido
 /// é movido para `compras-apple-pay.json.corrompido-<data>-<uuid>` e lê como
-/// lista vazia — sobrescrever direto perderia os itens de todos os usuários.
+/// lista vazia (`QuarentenaArquivo`; a poda deixa só as 5 cópias mais novas) —
+/// sobrescrever direto perderia os itens de todos os usuários.
 /// Arquivo que existe mas não lê (permissão, I/O) faz `adicionar`/`remover`
 /// abortarem: ler como vazio deixaria a próxima gravação apagar a fila
 /// inteira. A regra de arquivo é a `ArquivoJSONGuardado`, a mesma da lista

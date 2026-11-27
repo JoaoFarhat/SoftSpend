@@ -103,7 +103,8 @@ enum AvisoDiaria: Equatable {
         Set(defaults.stringArray(forKey: chaveEnviados) ?? [])
     }
 
-    /// Grava as chaves, guardando só as dos últimos 60 dias.
+    /// Grava as chaves, guardando só as 120 chaves mais recentes
+    /// (ordenadas pela data no fim da chave).
     static func registrar(_ chaves: Set<String>, em defaults: UserDefaults = .standard) {
         let todas = avisados(em: defaults).union(chaves)
         let recentes = todas.sorted { $0.suffix(10) > $1.suffix(10) }.prefix(120)

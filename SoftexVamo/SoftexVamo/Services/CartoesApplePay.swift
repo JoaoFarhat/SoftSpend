@@ -31,7 +31,8 @@ nonisolated struct CartaoApplePay: Codable, Identifiable, Equatable, Sendable {
 /// Mesmas regras de arquivo da fila (a `ArquivoJSONGuardado` das duas):
 /// proteção padrão do iOS (a ação roda com o aparelho trancado), escrita
 /// atômica e ler+regravar serializado por `trava`. Arquivo ausente lê como
-/// lista vazia; corrompido vai para `.corrompido-<data>-<uuid>` (os cartões
+/// lista vazia; corrompido vai para `.corrompido-<data>-<uuid>`
+/// (`QuarentenaArquivo`; a poda deixa só as 5 cópias mais novas — os cartões
 /// dos outros usuários não se perdem num arquivo que dá para recuperar).
 /// Arquivo que existe mas não lê faz `registrarChegada` **lançar**: ler como
 /// vazio deixaria a gravação apagar a lista inteira — e sem a lista não dá

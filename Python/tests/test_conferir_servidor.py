@@ -38,6 +38,8 @@ def _ambiente_ok() -> dict:
         "REFRESH_TOKEN_SECRET_KEY": SEGREDO_REFRESH,
         "S3_BUCKET": "softspend-comprovantes",
         "GEMINI_API_KEY": "gemini-chave",
+        "EMAIL_REMETENTE": "SoftSpend <nao-responda@softspend.com.br>",
+        "SES_REGION": "sa-east-1",
         "APPLE_BUNDLE_ID": "br.com.softspend.app",
         "APPLE_APP_ID": "123456789",
         "APPLE_ISSUER_ID": "issuer-id",
@@ -45,6 +47,7 @@ def _ambiente_ok() -> dict:
         "APPLE_PRIVATE_KEY": SEGREDO_APPLE,
         "BILLING_ENFORCEMENT": "on",
         "ACESSO_LIBERADO_USUARIOS": USER_DEMO,
+        "TRUST_PROXY": "true",
     }
 
 
@@ -143,6 +146,54 @@ def test_integracoes_ausentes_dao_falta(ambiente, capsys, ausentes):
         assert nome in falta[0]
 
 
+# `conferir_email`: sem EMAIL_REMETENTE o "Esqueci minha senha" responde 503;
+# sem SES_REGION o email_service cai em us-east-1 (o domínio está verificado
+# em sa-east-1), o envio falha em background e a rota segue devolvendo 202.
+# O FALTA diz o nome da variável, nunca o valor.
+
+
+def test_email_configurado_da_ok(ambiente, capsys):
+    assert _rodar(ambiente) == 0
+    assert any(
+        l.startswith("OK e-mail SES")
+        for l in _linhas(capsys).splitlines()
+    )
+
+
+@pytest.mark.parametrize("vazio", [None, "", "   "])
+def test_sem_email_remetente_da_falta(ambiente, capsys, vazio):
+    env = dict(ambiente["env"])
+    if vazio is None:
+        del env["EMAIL_REMETENTE"]
+    else:
+        env["EMAIL_REMETENTE"] = vazio
+    assert cs.main(
+        ambiente=env, sessao=ambiente["session"], pasta=ambiente["pasta"]
+    ) == 1
+    falta = [l for l in _linhas(capsys).splitlines() if l.startswith("FALTA")]
+    assert len(falta) == 1
+    assert "EMAIL_REMETENTE" in falta[0]
+    assert "503" in falta[0]
+    assert "nao-responda@softspend.com.br" not in falta[0]
+
+
+@pytest.mark.parametrize("vazio", [None, "", "   "])
+def test_sem_ses_region_da_falta(ambiente, capsys, vazio):
+    env = dict(ambiente["env"])
+    if vazio is None:
+        del env["SES_REGION"]
+    else:
+        env["SES_REGION"] = vazio
+    assert cs.main(
+        ambiente=env, sessao=ambiente["session"], pasta=ambiente["pasta"]
+    ) == 1
+    falta = [l for l in _linhas(capsys).splitlines() if l.startswith("FALTA")]
+    assert len(falta) == 1
+    assert "SES_REGION" in falta[0]
+    assert "us-east-1" in falta[0]
+    assert "sa-east-1" not in falta[0]
+
+
 def test_main_sem_sessao_sai_1_sem_traceback(ambiente, capsys, monkeypatch):
     """Banco fora do ar: a fábrica de sessão falha, `main` segue sem sessão,
     sai 1 com FALTA nas checagens de banco e nenhum traceback na saída."""
@@ -235,6 +286,47 @@ def test_segredos_curtos_ou_iguais_dao_falta(ambiente, capsys):
     assert "32 caracteres" in _linhas(capsys)
     assert _rodar(ambiente, REFRESH_TOKEN_SECRET_KEY=SEGREDO_ACCESS) == 1
     assert "iguais" in _linhas(capsys)
+
+
+# `conferir_proxy`: com TRUST_PROXY=false atrás do nginx, o rate limit de
+# login/cadastro conta o app inteiro como 127.0.0.1.
+
+
+@pytest.mark.parametrize("valor", ["true", "TRUE"])
+def test_proxy_ativado_da_ok(valor):
+    linha = cs._linha(cs.conferir_proxy({"TRUST_PROXY": valor}, None, None))
+    assert linha.startswith("OK")
+    assert "TRUST_PROXY=true" in linha
+
+
+def test_proxy_rede_cobre_loopback_da_ok():
+    linha = cs._linha(
+        cs.conferir_proxy(
+            {"TRUST_PROXY": "true", "TRUSTED_PROXY_IPS": "127.0.0.0/8"},
+            None,
+            None,
+        )
+    )
+    assert linha.startswith("OK")
+
+
+@pytest.mark.parametrize("amb", [{}, {"TRUST_PROXY": "false"}])
+def test_proxy_desativado_da_falta(amb):
+    linha = cs._linha(cs.conferir_proxy(amb, None, None))
+    assert linha.startswith("FALTA")
+    assert "TRUST_PROXY não é true" in linha
+
+
+@pytest.mark.parametrize(
+    "ips", ["10.0.0.1", "nao-e-um-ip", "", "10.0.0.0/8"]
+)
+def test_proxy_ips_sem_loopback_da_falta(ips):
+    env = {"TRUST_PROXY": "true", "TRUSTED_PROXY_IPS": ips}
+    linha = cs._linha(cs.conferir_proxy(env, None, None))
+    assert linha.startswith("FALTA")
+    assert "TRUSTED_PROXY_IPS sem 127.0.0.1" in linha
+    if ips:
+        assert ips not in linha
 
 
 def test_sem_certificado_da_falta(ambiente, capsys):
