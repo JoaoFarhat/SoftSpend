@@ -39,9 +39,14 @@ nonisolated enum QuarentenaArquivo {
         }
     }
 
-    private static let carimbo: DateFormatter = {
+    /// Carimbo fixo em UTC, não no fuso do aparelho: a poda ordena as cópias
+    /// pelo nome, e um carimbo no fuso local sai de ordem quando o usuário
+    /// viaja — a cópia mais nova podia parecer velha e ser apagada. `internal`
+    /// (não `private`) para o teste conferir o fuso e a saída.
+    static let carimbo: DateFormatter = {
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
         f.dateFormat = "yyyyMMdd-HHmmss"
         return f
     }()
