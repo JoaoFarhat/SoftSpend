@@ -22,14 +22,13 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
 
 _PASTA = Path(__file__).resolve().parents[1]
 _INI = _PASTA / "alembic" / "alembic.ini"
 _URL = os.getenv("MYSQL_TESTE_URL")
-
-_HEAD = "b8e4d2f6a1c3"
 
 
 def _banco_e_de_teste(url: str) -> bool:
@@ -85,6 +84,24 @@ def mysql(monkeypatch):
 
 def _config() -> Config:
     return Config(str(_INI))
+
+
+def _head_atual() -> str:
+    """Última migration lida do próprio Alembic, sem constante fixa.
+
+    Com o head fixo o assert do fim do teste ficava vermelho no CI de
+    qualquer PR que acrescentasse uma migration (e, se entrasse assim,
+    parava o deploy da `main`). Falha com mensagem clara se o grafo
+    ramificar e houver mais de uma "última" — nesse caso falta um merge
+    entre os ramos das migrations.
+    """
+    heads = ScriptDirectory.from_config(_config()).get_heads()
+    if len(heads) != 1:
+        pytest.fail(
+            f"O Alembic tem {len(heads)} heads ({sorted(heads)}), não uma "
+            "última migration só — falta um merge entre os ramos"
+        )
+    return heads[0]
 
 
 def _data_dia_por_client_id(engine) -> dict:
@@ -163,7 +180,25 @@ def test_migrations_num_mysql_de_verdade(mysql):
         versao = conexao.execute(
             text("SELECT version_num FROM alembic_version")
         ).scalar()
-    assert versao == _HEAD
+    assert versao == _head_atual()
+
+
+def test_head_atual_e_uma_so_e_nao_e_pai_de_ninguem():
+    """Roda sem MySQL: o head é único e fecha a cadeia de versions/."""
+    head = _head_atual()
+    script = ScriptDirectory.from_config(_config())
+    filhos = [
+        rev.revision
+        for rev in script.walk_revisions()
+        if rev.down_revision is not None
+        and head
+        in (
+            rev.down_revision
+            if isinstance(rev.down_revision, tuple)
+            else (rev.down_revision,)
+        )
+    ]
+    assert not filhos, f"{head} é down_revision de {filhos}"
 
 
 def test_banco_sem_teste_no_nome_e_recusado():
