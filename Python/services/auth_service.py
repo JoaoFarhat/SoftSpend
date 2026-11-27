@@ -112,9 +112,21 @@ def iniciar_sessao(db: Session, user_id: str) -> tuple[str, str]:
     return access_token, refresh_token
 
 
+ERRO_EMAIL_JA_CADASTRADO = "email_in_use"
+
+
+class EmailJaCadastrado(ValueError):
+    """O e-mail do cadastro ja tem conta: a rota responde `409 email_in_use`
+    para o app oferecer "Entrar" em vez de um erro generico."""
+
+    def __init__(self):
+        super().__init__(ERRO_EMAIL_JA_CADASTRADO)
+
+
 def registrar(db: Session, dados: RegisterRequest) -> models.User:
-    if auth_repository.buscar_por_email(db, dados.email) or \
-       auth_repository.buscar_por_username(db, dados.username):
+    if auth_repository.buscar_por_email(db, dados.email):
+        raise EmailJaCadastrado()
+    if auth_repository.buscar_por_username(db, dados.username):
         raise ValueError("Este e-mail ou nome de usuário já está cadastrado.")
 
     novo_usuario = models.User(

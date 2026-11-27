@@ -82,3 +82,41 @@ nonisolated struct AuthResponse: Codable, Sendable {
         case tokenType = "token_type"
     }
 }
+
+/// `POST /auth/senha/esqueci`.
+nonisolated struct EsqueciSenhaRequest: Codable, Sendable {
+    let email: String
+
+    init(email: String) {
+        self.email = email.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// Resposta do `POST /auth/senha/esqueci`: a mesma com ou sem conta.
+nonisolated struct EsqueciSenhaResponse: Codable, Sendable, Equatable {
+    let expiresInSeconds: Int
+    let resendAfterSeconds: Int
+
+    enum CodingKeys: String, CodingKey {
+        case expiresInSeconds = "expires_in_seconds"
+        case resendAfterSeconds = "resend_after_seconds"
+    }
+}
+
+/// `POST /auth/senha/redefinir`.
+nonisolated struct RedefinirSenhaRequest: Codable, Sendable {
+    let email: String
+    let codigo: String
+    let novaSenha: String
+
+    init(email: String, codigo: String, novaSenha: String) {
+        self.email = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.codigo = codigo.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.novaSenha = novaSenha
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case email, codigo
+        case novaSenha = "nova_senha"
+    }
+}
