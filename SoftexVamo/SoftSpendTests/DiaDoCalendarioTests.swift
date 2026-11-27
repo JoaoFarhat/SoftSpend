@@ -136,8 +136,8 @@ struct DiaDoCalendarioTests {
     /// o aparelho em outro fuso na criação): o `postDiasLote` leva o
     /// `data_local` do dia e a resposta — que o servidor devolve com o mesmo
     /// `data_local` — corrige `dia.data` para o início do dia no fuso do
-    /// aparelho. A correção conta como mudança durante o envio (a foto não
-    /// bate), então o dia é reenviado na passada seguinte e converge.
+    /// aparelho. A correção não conta como mudança do usuário (a foto é
+    /// comparada antes de aplicá-la), então o dia sobe num envio só.
     @Test func syncCorrigeDataPeloDataLocalDaResposta() async throws {
         let ctx = ModelContext(container)
         let ciclo = CicloSoftex(
@@ -157,8 +157,8 @@ struct DiaDoCalendarioTests {
 
         #expect(await sync() == 0)
 
-        // Os dois envios levaram o mesmo data_local; o servidor o gravou.
-        #expect(api.chamadas == [.postCiclo, .postDiasLote, .postDiasLote])
+        // Um envio só, com o data_local do dia; o servidor o gravou.
+        #expect(api.chamadas == [.postCiclo, .postDiasLote])
         for lote in api.lotesDias {
             #expect(lote.allSatisfy { $0.dataLocal == dataLocalEsperado })
         }
