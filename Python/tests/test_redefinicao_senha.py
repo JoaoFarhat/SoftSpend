@@ -295,3 +295,74 @@ def test_nome_no_email_html_e_escapado():
     _, html = email_service._corpo_codigo("<b>Mal</b> Intencionado", "042917", 15)
     assert "<b>" not in html
     assert "&lt;b&gt;Mal&lt;/b&gt;" in html
+
+
+def test_insert_perdido_na_corrida_devolve_none(ambiente, monkeypatch):
+    """Dois pedidos juntos para o mesmo e-mail passam pelo SELECT sem achar
+    linha e correm para o insert: o que perde esbarrava no unique de
+    `user_id` e virava 500; agora devolve `None` (igual a reenvio cedo
+    demais, sem e-mail novo)."""
+    client, SessionLocal, _ = ambiente
+    _cadastrar(client)
+    import models
+    from services import redefinicao_senha_service as srv
+
+    # A linha do pedido que ganhou a corrida ja esta gravada.
+    vencedor = SessionLocal()
+    usuario = vencedor.query(models.User).filter_by(email=EMAIL).one()
+    agora = datetime.now(timezone.utc).replace(tzinfo=None)
+    vencedor.add(
+        models.CodigoRedefinicaoSenha(
+            user_id=usuario.id,
+            codigo_hash="0" * 64,
+            expires_at=agora + timedelta(minutes=15),
+            tentativas=0,
+            created_at=agora,
+        )
+    )
+    vencedor.commit()
+    vencedor.close()
+
+    # O SELECT do pedido que perdeu rodou antes do insert vencedor.
+    monkeypatch.setattr(srv, "_registro", lambda db, user_id: None)
+    perdedor = SessionLocal()
+    try:
+        assert srv.pedir_codigo(perdedor, EMAIL) is None
+        perdedor.commit()  # o savepoint desfez so o insert, a sessao saiu limpa
+        assert perdedor.query(models.CodigoRedefinicaoSenha).count() == 1
+    finally:
+        perdedor.close()
+
+
+def test_conta_apagada_no_meio_da_redefinicao_vira_codigo_invalido(ambiente, monkeypatch):
+    """A conta some depois do UPDATE que conta a tentativa: reler o `usuario`
+    expirado levantava ObjectDeletedError (500); agora vale o mesmo codigo
+    invalido de sempre."""
+    client, SessionLocal, enviados = ambiente
+    _cadastrar(client)
+    _pedir(client)
+    codigo = enviados[0][2]
+
+    import models
+    from services import redefinicao_senha_service as srv
+
+    db = SessionLocal()
+    outra = SessionLocal()
+    hash_original = srv.auth_service._hash_senha
+
+    def apagar_conta_no_meio(senha):
+        # O commit extra so solta a trava de leitura do `db` para a `outra`
+        # gravar no SQLite; em MySQL a exclusao nao precisaria dessa licenca.
+        db.commit()
+        outra.query(models.CodigoRedefinicaoSenha).delete()
+        outra.delete(outra.query(models.User).one())
+        outra.commit()
+        return hash_original(senha)
+
+    monkeypatch.setattr(srv.auth_service, "_hash_senha", apagar_conta_no_meio)
+    try:
+        with pytest.raises(srv.CodigoInvalido):
+            srv.redefinir(db, EMAIL, codigo, NOVA)
+    finally:
+        db.close()
+        outra.close()

@@ -1303,7 +1303,7 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/senha/esqueci") else {
             throw URLError(.badURL)
         }
-        let request = makeRequest(
+        let request = try makeRequest(
             url: url,
             method: "POST",
             body: try encoder.encode(EsqueciSenhaRequest(email: email)),
@@ -1316,7 +1316,7 @@ final class NetworkManager: Sendable {
         guard let url = URL(string: "\(APIConfig.shared.baseURL)/auth/senha/redefinir") else {
             throw URLError(.badURL)
         }
-        let request = makeRequest(
+        let request = try makeRequest(
             url: url,
             method: "POST",
             body: try encoder.encode(RedefinirSenhaRequest(email: email, codigo: codigo, novaSenha: novaSenha)),

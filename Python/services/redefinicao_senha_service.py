@@ -23,7 +23,9 @@ import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.exc import ObjectDeletedError
 
 import models
 from repositories import auth_repository
@@ -90,16 +92,24 @@ def pedir_codigo(db: Session, email: str, agora: datetime | None = None) -> Envi
         db.flush()
 
     codigo = f"{secrets.randbelow(10**6):06d}"
-    db.add(
-        models.CodigoRedefinicaoSenha(
-            user_id=usuario.id,
-            codigo_hash=_hash_codigo(usuario.id, codigo),
-            expires_at=agora + timedelta(minutes=VALIDADE_MINUTOS),
-            tentativas=herdadas,
-            created_at=agora,
-        )
-    )
-    db.flush()
+    try:
+        # Dois pedidos juntos para o mesmo e-mail passam pelo SELECT sem achar
+        # linha e correm para o insert; o que perde esbarra no unique de
+        # `user_id`. O savepoint desfaz so este insert e a resposta fica igual
+        # a de um reenvio cedo demais (None = sem e-mail novo).
+        with db.begin_nested():
+            db.add(
+                models.CodigoRedefinicaoSenha(
+                    user_id=usuario.id,
+                    codigo_hash=_hash_codigo(usuario.id, codigo),
+                    expires_at=agora + timedelta(minutes=VALIDADE_MINUTOS),
+                    tentativas=herdadas,
+                    created_at=agora,
+                )
+            )
+            db.flush()
+    except IntegrityError:
+        return None
     return EnvioCodigo(email=usuario.email, nome=usuario.nome, codigo=codigo)
 
 
@@ -126,19 +136,27 @@ def redefinir(
     # Conta a tentativa ANTES de comparar, num UPDATE so: dois pedidos ao mesmo
     # tempo nao leem o mesmo `tentativas` e nao passam do limite.
     Codigo = models.CodigoRedefinicaoSenha
-    contou = (
-        db.query(Codigo)
-        .filter(Codigo.id == registro.id, Codigo.tentativas < MAX_TENTATIVAS)
-        .update({Codigo.tentativas: Codigo.tentativas + 1}, synchronize_session=False)
-    )
-    db.commit()  # idem: a tentativa precisa contar mesmo com a rota lancando
-    if not contou:
-        raise CodigoInvalido()
+    try:
+        # `codigo_hash` antes do commit: depois dele `registro` e `usuario`
+        # expiram e qualquer leitura vira SELECT de refresh — que levanta
+        # ObjectDeletedError se outra transacao apagou a linha (pedido novo
+        # de codigo, troca de senha) ou a conta no meio do caminho.
+        esperado = registro.codigo_hash
+        contou = (
+            db.query(Codigo)
+            .filter(Codigo.id == registro.id, Codigo.tentativas < MAX_TENTATIVAS)
+            .update({Codigo.tentativas: Codigo.tentativas + 1}, synchronize_session=False)
+        )
+        db.commit()  # idem: a tentativa precisa contar mesmo com a rota lancando
+        if not contou:
+            raise CodigoInvalido()
 
-    if not hmac.compare_digest(registro.codigo_hash, _hash_codigo(usuario.id, codigo)):
-        raise CodigoInvalido()
+        if not hmac.compare_digest(esperado, _hash_codigo(usuario.id, codigo)):
+            raise CodigoInvalido()
 
-    usuario.senha_hash = auth_service._hash_senha(nova_senha)
-    db.delete(registro)
-    # Senha nova derruba todas as sessoes (e o access token delas, pelo `sid`).
-    auth_repository.revogar_todos_refresh_tokens_por_usuario(db, usuario.id)
+        usuario.senha_hash = auth_service._hash_senha(nova_senha)
+        db.delete(registro)
+        # Senha nova derruba todas as sessoes (e o access token delas, pelo `sid`).
+        auth_repository.revogar_todos_refresh_tokens_por_usuario(db, usuario.id)
+    except ObjectDeletedError:
+        raise CodigoInvalido()
