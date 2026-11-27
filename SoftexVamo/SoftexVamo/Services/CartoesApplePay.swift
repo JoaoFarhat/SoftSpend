@@ -31,7 +31,7 @@ nonisolated struct CartaoApplePay: Codable, Identifiable, Equatable, Sendable {
 /// Mesmas regras de arquivo da fila: proteção padrão do iOS (a ação roda com o
 /// aparelho trancado), escrita atômica e ler+regravar serializado por `trava`.
 /// Arquivo ausente lê como lista vazia; corrompido vai para
-/// `.corrompido-<data>` (os cartões dos outros usuários não se perdem num
+/// `.corrompido-<data>-<uuid>` (os cartões dos outros usuários não se perdem num
 /// arquivo que dá para recuperar). Arquivo que existe mas não lê faz
 /// `registrarChegada` **lançar**: ler como vazio deixaria a gravação apagar a
 /// lista inteira — e sem a lista não dá para saber se o cartão está
@@ -183,7 +183,7 @@ final class CartoesApplePay {
     // MARK: - Arquivo (sempre chamado sob `trava`) — mesmas regras da fila
 
     /// Lê o arquivo. Ausente lê como lista vazia. Corrompido (JSON que não
-    /// decodifica) é movido para `….corrompido-<data>` e lê como lista vazia.
+    /// decodifica) é movido para `….corrompido-<data>-<uuid>` e lê como lista vazia.
     /// Arquivo que existe mas não lê (permissão, I/O) **lança**.
     private func todosTrancado() throws -> [CartaoApplePay] {
         let dados: Data
@@ -202,11 +202,13 @@ final class CartoesApplePay {
         return lista
     }
 
-    /// Move o arquivo ilegível para `<nome>.corrompido-<yyyyMMdd-HHmmss>`
-    /// (nome único). Se o move falha, lança — o arquivo ruim não pode ficar
-    /// para ser sobrescrito na próxima gravação.
+    /// Move o arquivo ilegível para
+    /// `<nome>.corrompido-<yyyyMMdd-HHmmss>-<uuid>` (`QuarentenaArquivo` —
+    /// nome único mesmo no mesmo segundo) e poda as cópias além das mais
+    /// novas. Se o move falha, lança — o arquivo ruim não pode ficar para
+    /// ser sobrescrito na próxima gravação.
     private func quarentenar() throws {
-        let copia = arquivo.appendingPathExtension("corrompido-\(Self.carimbo.string(from: .now))")
+        let copia = QuarentenaArquivo.destino(para: arquivo, em: .now)
         do {
             try FileManager.default.moveItem(at: arquivo, to: copia)
             Self.logger.error("Lista de cartões corrompida movida para \(copia.lastPathComponent, privacy: .public)")
@@ -214,14 +216,8 @@ final class CartoesApplePay {
             Self.logger.error("Lista de cartões corrompida; não deu para mover: \(error.localizedDescription, privacy: .public)")
             throw error
         }
+        QuarentenaArquivo.podar(de: arquivo)
     }
-
-    private static let carimbo: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyyMMdd-HHmmss"
-        return f
-    }()
 
     private func gravar(_ lista: [CartaoApplePay]) throws {
         let dados = try JSONEncoder().encode(lista)

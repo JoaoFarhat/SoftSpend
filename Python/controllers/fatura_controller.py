@@ -75,11 +75,11 @@ async def ler_fatura(
             dia_contado = limite_ia.contar(user_id, limite_ia.FATURA)
             bruta = await run_in_threadpool(fatura_ia_service.ler_fatura_pdf, pdf_aberto)
         elif tipo == "ofx":
-            bruta = fatura_arquivo_service.ler_ofx(conteudo)
+            bruta = await run_in_threadpool(fatura_arquivo_service.ler_ofx, conteudo)
         else:
-            bruta = fatura_arquivo_service.ler_csv(conteudo)
+            bruta = await run_in_threadpool(fatura_arquivo_service.ler_csv, conteudo)
 
-        lida = fatura_arquivo_service.montar_fatura_lida(bruta)
+        lida = await run_in_threadpool(fatura_arquivo_service.montar_fatura_lida, bruta)
         if ciclo_id is not None:
             await run_in_threadpool(
                 fatura_service.marcar_previa, db, user_id, ciclo_id, lida

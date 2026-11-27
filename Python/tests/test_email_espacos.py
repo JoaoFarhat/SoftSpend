@@ -111,4 +111,15 @@ def test_cadastro_com_espacos_nao_duplica_conta(client):
 
     # O mesmo e-mail com espacos em volta e o mesmo cadastro: recusa, nao duplica.
     segundo = _cadastrar(client, " joao@exemplo.com ", username="outro_username")
-    assert segundo.status_code == 400
+    # 409 com codigo proprio: o app avisa que o e-mail ja tem conta e oferece "Entrar".
+    assert segundo.status_code == 409, segundo.text
+    assert "email_in_use" in segundo.text
+
+
+def test_cadastro_com_username_em_uso_continua_400(client):
+    primeiro = _cadastrar(client, "joao@exemplo.com", username="mesmo_username")
+    assert primeiro.status_code == 200, primeiro.text
+
+    segundo = _cadastrar(client, "maria@exemplo.com", username="mesmo_username")
+    assert segundo.status_code == 400, segundo.text
+    assert "email_in_use" not in segundo.text

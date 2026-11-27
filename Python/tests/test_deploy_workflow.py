@@ -67,6 +67,14 @@ def test_job_deploy_tem_environment_producao():
     assert "url: https://softspend.com.br/health" in job
 
 
+def test_job_deploy_tem_teto_de_15_minutos():
+    """A migration roda dentro do SSH: um MySQL que não responde não pode
+    prender o deploy pelas 6h padrão do Actions."""
+    assert re.search(
+        r"^    timeout-minutes:\s*15\s*$", _job_deploy(), re.MULTILINE
+    )
+
+
 def test_apt_get_so_dentro_do_bloco_condicional():
     linhas = _TEXTO.splitlines()
     dpkg = next(

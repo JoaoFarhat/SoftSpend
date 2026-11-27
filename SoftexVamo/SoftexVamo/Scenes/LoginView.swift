@@ -14,6 +14,9 @@ struct LoginView: View {
     @State private var email: String = ""
     @State private var senha: String = ""
     @State private var showRegister: Bool = false
+    @State private var showRedefinir: Bool = false
+    /// Pedido de "Esqueci minha senha" vindo do cadastro: abre depois que ele fechar.
+    @State private var redefinirAoFecharCadastro: Bool = false
 
     /// E-mail pré-preenchido (modo de demonstração, DEBUG).
     var emailInicial: String = ""
@@ -52,6 +55,13 @@ struct LoginView: View {
                 }
                 .padding(.top, 48)
 
+                Button("Esqueceu a senha?") { abrirRedefinicao() }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Tema.marcaTexto)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+                    .padding(.top, Espaco.m)
+                    .padding(.horizontal, Espaco.g + 4)
+
                 if let error = authService.errorMessage {
                     Text(error)
                         .font(.footnote)
@@ -70,6 +80,8 @@ struct LoginView: View {
                 .padding(.top, Espaco.g + 4)
 
                 Button {
+                    // O `errorMessage` é um só para as duas telas: o erro do login não vai junto.
+                    authService.errorMessage = nil
                     showRegister = true
                 } label: {
                     Text("Não tem conta? \(Text("Criar conta").foregroundStyle(Tema.marcaTexto).fontWeight(.semibold))")
@@ -92,9 +104,39 @@ struct LoginView: View {
             if email.isEmpty { email = emailInicial }
             if senha.isEmpty { senha = senhaInicial }
         }
-        .fullScreenCover(isPresented: $showRegister) {
-            RegisterView()
+        .fullScreenCover(isPresented: $showRegister, onDismiss: {
+            // Nem o erro do cadastro volta para o login.
+            authService.errorMessage = nil
+            if redefinirAoFecharCadastro {
+                redefinirAoFecharCadastro = false
+                showRedefinir = true
+            }
+        }) {
+            RegisterView(
+                entrarComEmail: { emailDaConta in
+                    email = emailDaConta
+                    senha = ""
+                    showRegister = false
+                },
+                esqueciSenha: { emailDaConta in
+                    email = emailDaConta
+                    senha = ""
+                    redefinirAoFecharCadastro = true
+                    showRegister = false
+                }
+            )
         }
+        .fullScreenCover(isPresented: $showRedefinir, onDismiss: {
+            authService.errorMessage = nil
+        }) {
+            RedefinirSenhaView(email: email)
+        }
+    }
+
+    private func abrirRedefinicao() {
+        authService.errorMessage = nil
+        senha = ""
+        showRedefinir = true
     }
 }
 
