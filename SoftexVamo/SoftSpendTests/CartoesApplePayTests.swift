@@ -108,6 +108,48 @@ struct CartoesApplePayTests {
         #expect(cartoes.ler(userId: userId).count == 1)
     }
 
+    /// Duas corrupções seguidas geram dois `.corrompido-*` e a lista segue
+    /// gravando — sem o sufixo único no nome, a segunda quarentena no mesmo
+    /// segundo do carimbo caía em destino já existente: o arquivo ruim ficava
+    /// e o `registrarChegada` lançava ("lance no app") sem motivo.
+    @Test func duasQuarentenasSeguidasGeramDoisArquivosESegueGravando() throws {
+        try Data("lixo 1".utf8).write(to: arquivo)
+        #expect(cartoes.todos().isEmpty)
+
+        try Data("lixo 2".utf8).write(to: arquivo)
+        #expect(cartoes.todos().isEmpty)
+
+        let backups = try FileManager.default.contentsOfDirectory(
+            at: arquivo.deletingLastPathComponent(),
+            includingPropertiesForKeys: nil
+        ).filter {
+            $0.lastPathComponent.hasPrefix("\(arquivo.lastPathComponent).corrompido-")
+        }
+        #expect(backups.count == 2)
+        let conteudos = try Set(backups.map { try String(contentsOf: $0, encoding: .utf8) })
+        #expect(conteudos == ["lixo 1", "lixo 2"])
+
+        try cartoes.registrarChegada(nome: "Nubank", userId: userId)
+        #expect(cartoes.ler(userId: userId).count == 1)
+    }
+
+    /// A quarentena guarda só as `QuarentenaArquivo.maximoGuardadas` cópias
+    /// mais novas — um arquivo que corrompe sempre não pode encher o disco.
+    @Test func quarentenaGuardaSoAsCincoMaisNovas() throws {
+        for i in 0..<7 {
+            try Data("lixo \(i)".utf8).write(to: arquivo)
+            #expect(cartoes.todos().isEmpty)
+        }
+
+        let backups = try FileManager.default.contentsOfDirectory(
+            at: arquivo.deletingLastPathComponent(),
+            includingPropertiesForKeys: nil
+        ).filter {
+            $0.lastPathComponent.hasPrefix("\(arquivo.lastPathComponent).corrompido-")
+        }
+        #expect(backups.count == QuarentenaArquivo.maximoGuardadas)
+    }
+
     /// Arquivo que existe mas não lê (permissão) não pode virar lista vazia:
     /// `registrarChegada` lança em vez de sobrescrever os cartões de todos os
     /// usuários, e `ler` segue devolvendo vazio sem derrubar o app.

@@ -107,7 +107,8 @@ nonisolated struct CompraLida: Sendable, Identifiable {
     }
 }
 
-extension CompraLida: Codable {
+// `nonisolated`: o NetworkManager decodifica/codifica fora do MainActor.
+nonisolated extension CompraLida: Codable {
     enum CodingKeys: String, CodingKey {
         case indice, data, descricao, valor, categoria, match, tipo
         case parcelaAtual = "parcela_atual"
@@ -198,7 +199,7 @@ nonisolated struct FaturaLida: Sendable {
     }
 }
 
-extension FaturaLida: Codable {
+nonisolated extension FaturaLida: Codable {
     enum CodingKeys: String, CodingKey {
         case emissor, moeda, avisos, compras
         case finalCartao = "final_cartao"
