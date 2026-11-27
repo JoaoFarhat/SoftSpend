@@ -1,0 +1,57 @@
+# Build e testes do app iOS no Azure DevOps (Mac hospedado), mesmos passos do
+# .github/workflows/ios.yml. Roda à mão, enquanto o GitHub Actions está sem minutos.
+trigger: none
+pr: none
+
+pool:
+  vmImage: macOS-15
+
+steps:
+  - checkout: self
+
+  - script: |
+      set -e
+      ls -d /Applications/Xcode*.app
+      XCODE=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+      echo "Usando $XCODE"
+      sudo xcode-select -s "$XCODE"
+      xcodebuild -version
+    displayName: Escolher o Xcode
+
+  - script: cp SoftexVamo/Config.example.xcconfig SoftexVamo/Config.xcconfig
+    workingDirectory: SoftexVamo
+    displayName: Configuração
+
+  - script: |
+      set -e
+      ID=$(xcrun simctl list devices available -j | python3 -c '
+      import json, sys
+      d = json.load(sys.stdin)["devices"]
+      ids = [x["udid"] for r, xs in sorted(d.items(), reverse=True) if "iOS-26" in r
+             for x in xs if x["name"].startswith("iPhone")]
+      print(ids[0])')
+      echo "Simulador $ID"
+      echo "##vso[task.setvariable variable=SIMULADOR]$ID"
+    displayName: Escolher o simulador
+
+  - script: |
+      set -o pipefail
+      xcodebuild test \
+        -project SoftSpend.xcodeproj -scheme SoftSpend \
+        -destination "id=$(SIMULADOR)" \
+        -configuration Debug CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
+        | grep -E "error:|warning: .*FaturaDTO|Test Case .* failed|Executed|\*\* (TEST|BUILD)" || true
+      exit ${PIPESTATUS[0]}
+    workingDirectory: SoftexVamo
+    displayName: Compilar e testar
+    timeoutInMinutes: 50
+
+  - script: |
+      set -o pipefail
+      xcodebuild build \
+        -project SoftSpend.xcodeproj -scheme SoftSpend \
+        -destination 'generic/platform=iOS Simulator' \
+        -configuration Release CODE_SIGNING_ALLOWED=NO | grep -E "error:|\*\* BUILD" || true
+      exit ${PIPESTATUS[0]}
+    workingDirectory: SoftexVamo
+    displayName: Compilar em Release
