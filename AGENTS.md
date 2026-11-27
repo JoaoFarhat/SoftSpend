@@ -519,19 +519,23 @@ Spec: `docs/cartao-sem-open-finance.md` §1 (partes A e B implementadas).
 - `Services/ComprasAguardandoViagem.swift` — fila "sem viagem" em JSON
   (`Application Support/compras-apple-pay.json`, escrita atômica, teto de 50
   por usuário, fora do SwiftData de propósito: nenhum `@Model` novo, sem V2).
-  Ler+regravar é serializado por `NSLock`; arquivo corrompido vai para
-  `.corrompido-<data>` (nome único, backups se acumulam) em vez de ser
-  sobrescrito — e se o move falhar, lança para não gravar por cima. Arquivo
-  que existe mas não lê (permissão, I/O) também lança: ler como vazio
-  deixaria a próxima gravação apagar os itens de todos. `adicionar`
-  **lança** quando a leitura ou a gravação falha (o `registrar` propaga e
-  a ação responde "lance no app"), enquanto `remover` só loga e deixa o
-  item.
+  Ler+regravar é serializado por `NSLock`. A regra de arquivo é a
+  `ArquivoJSONGuardado` (`Services/ArquivoJSONGuardado.swift`), a mesma da
+  lista de cartões: ausente lê como lista vazia; corrompido vai para
+  `.corrompido-<data>-<uuid>` (o uuid curto no nome deixa único o destino de
+  dois corrompidos no mesmo segundo — só o carimbo dava `moveItem` em
+  destino existente; backups se acumulam) em vez de ser sobrescrito — e se
+  o move falhar, lança para não gravar por cima. Arquivo que existe mas não
+  lê (permissão, I/O) também lança: ler como vazio deixaria a próxima
+  gravação apagar os itens de todos. `adicionar` **lança** quando a leitura
+  ou a gravação falha (o `registrar` propaga e a ação responde "lance no
+  app"), enquanto `remover` só loga e deixa o item. Testes do helper em
+  `SoftSpendTests/ArquivoJSONGuardadoTests.swift`.
 - `Services/CartoesApplePay.swift` — cartões que já chegaram pela ação, em
-  JSON (`Application Support/cartoes-apple-pay.json`, por usuário, mesmas
-  regras de arquivo da fila: fora do SwiftData, escrita atômica, `NSLock`,
-  corrompido para quarentena). O nome é o `cartao` do intent aparado; sem
-  nome vira `"Cartão sem nome"` (`nomePadrao`). `registrarChegada` cria o
+  JSON (`Application Support/cartoes-apple-pay.json`, por usuário, mesma
+  `ArquivoJSONGuardado` da fila: fora do SwiftData, escrita atômica,
+  `NSLock`, corrompido para quarentena). O nome é o `cartao` do intent
+  aparado; sem nome vira `"Cartão sem nome"` (`nomePadrao`). `registrarChegada` cria o
   cartão **ligado**, atualiza `vistoEm` e devolve `ligado`; **lança** em
   falha de leitura/gravação (sem a lista não dá para saber se está ligado).
   `definirLigado` só loga em falha. No Perfil, a seção "Cartões do Apple

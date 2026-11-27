@@ -28,14 +28,14 @@ nonisolated struct CartaoApplePay: Codable, Identifiable, Equatable, Sendable {
 /// — fora do SwiftData pelo mesmo motivo da `ComprasAguardandoViagem`: uma
 /// lista pequena não justifica congelar o schema V1 e criar o V2.
 ///
-/// Mesmas regras de arquivo da fila: proteção padrão do iOS (a ação roda com o
-/// aparelho trancado), escrita atômica e ler+regravar serializado por `trava`.
-/// Arquivo ausente lê como lista vazia; corrompido vai para
-/// `.corrompido-<data>` (os cartões dos outros usuários não se perdem num
-/// arquivo que dá para recuperar). Arquivo que existe mas não lê faz
-/// `registrarChegada` **lançar**: ler como vazio deixaria a gravação apagar a
-/// lista inteira — e sem a lista não dá para saber se o cartão está
-/// desligado.
+/// Mesmas regras de arquivo da fila (a `ArquivoJSONGuardado` das duas):
+/// proteção padrão do iOS (a ação roda com o aparelho trancado), escrita
+/// atômica e ler+regravar serializado por `trava`. Arquivo ausente lê como
+/// lista vazia; corrompido vai para `.corrompido-<data>-<uuid>` (os cartões
+/// dos outros usuários não se perdem num arquivo que dá para recuperar).
+/// Arquivo que existe mas não lê faz `registrarChegada` **lançar**: ler como
+/// vazio deixaria a gravação apagar a lista inteira — e sem a lista não dá
+/// para saber se o cartão está desligado.
 final class CartoesApplePay {
     /// Nome guardado quando a automação não manda o cartão (ou manda vazio).
     static let nomePadrao = "Cartão sem nome"
@@ -59,10 +59,14 @@ final class CartoesApplePay {
 
     let arquivo: URL
 
+    /// Regra de ler/gravar/quarentenar o JSON (sempre chamada sob `trava`).
+    private let guarda: ArquivoJSONGuardado<CartaoApplePay>
+
     init(arquivo: URL? = nil) {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         self.arquivo = arquivo ?? dir.appendingPathComponent("cartoes-apple-pay.json")
+        self.guarda = ArquivoJSONGuardado(arquivo: self.arquivo, nomeNoLog: "Lista de cartões")
     }
 
     /// `cartao` do `RegistrarGastoIntent` vira o nome guardado: aparado,
@@ -87,7 +91,7 @@ final class CartoesApplePay {
         trava.lock()
         defer { trava.unlock() }
         do {
-            return try todosTrancado()
+            return try guarda.ler()
         } catch {
             Self.logger.error("Não leu os cartões: \(error.localizedDescription, privacy: .public)")
             return []
@@ -106,12 +110,12 @@ final class CartoesApplePay {
     func registrarChegada(nome: String, userId: String, vistoEm: Date = .now) throws -> Bool {
         trava.lock()
         defer { trava.unlock() }
-        var lista = try todosTrancado()
+        var lista = try guarda.ler()
         if let i = lista.firstIndex(where: { $0.userId == userId && $0.nome == nome }) {
             let ligado = lista[i].ligado
             lista[i].vistoEm = vistoEm
             do {
-                try gravar(lista)
+                try guarda.gravar(lista)
             } catch {
                 Self.logger.error("Não gravou o vistoEm do cartão: \(error.localizedDescription, privacy: .public)")
             }
@@ -121,7 +125,7 @@ final class CartoesApplePay {
             lista.remove(at: vitima)
         }
         lista.append(CartaoApplePay(userId: userId, nome: nome, ligado: true, vistoEm: vistoEm))
-        try gravar(lista)
+        try guarda.gravar(lista)
         return true
     }
 
@@ -143,7 +147,7 @@ final class CartoesApplePay {
         defer { trava.unlock() }
         var lista: [CartaoApplePay]
         do {
-            lista = try todosTrancado()
+            lista = try guarda.ler()
         } catch {
             Self.logger.error("Não leu os cartões para ligar/desligar: \(error.localizedDescription, privacy: .public)")
             return
@@ -151,7 +155,7 @@ final class CartoesApplePay {
         guard let i = lista.firstIndex(where: { $0.userId == userId && $0.nome == nome }) else { return }
         lista[i].ligado = ligado
         do {
-            try gravar(lista)
+            try guarda.gravar(lista)
         } catch {
             Self.logger.error("Não gravou os cartões depois de ligar/desligar: \(error.localizedDescription, privacy: .public)")
         }
@@ -166,7 +170,7 @@ final class CartoesApplePay {
         defer { trava.unlock() }
         var lista: [CartaoApplePay]
         do {
-            lista = try todosTrancado()
+            lista = try guarda.ler()
         } catch {
             Self.logger.error("Não leu os cartões para remover todos: \(error.localizedDescription, privacy: .public)")
             return
@@ -174,57 +178,9 @@ final class CartoesApplePay {
         let restantes = lista.filter { $0.userId != userId }
         guard restantes.count != lista.count else { return }
         do {
-            try gravar(restantes)
+            try guarda.gravar(restantes)
         } catch {
             Self.logger.error("Não gravou os cartões depois de remover todos: \(error.localizedDescription, privacy: .public)")
         }
-    }
-
-    // MARK: - Arquivo (sempre chamado sob `trava`) — mesmas regras da fila
-
-    /// Lê o arquivo. Ausente lê como lista vazia. Corrompido (JSON que não
-    /// decodifica) é movido para `….corrompido-<data>` e lê como lista vazia.
-    /// Arquivo que existe mas não lê (permissão, I/O) **lança**.
-    private func todosTrancado() throws -> [CartaoApplePay] {
-        let dados: Data
-        do {
-            dados = try Data(contentsOf: arquivo)
-        } catch {
-            guard FileManager.default.fileExists(atPath: arquivo.path) else {
-                return []
-            }
-            throw error
-        }
-        guard let lista = try? JSONDecoder().decode([CartaoApplePay].self, from: dados) else {
-            try quarentenar()
-            return []
-        }
-        return lista
-    }
-
-    /// Move o arquivo ilegível para `<nome>.corrompido-<yyyyMMdd-HHmmss>`
-    /// (nome único). Se o move falha, lança — o arquivo ruim não pode ficar
-    /// para ser sobrescrito na próxima gravação.
-    private func quarentenar() throws {
-        let copia = arquivo.appendingPathExtension("corrompido-\(Self.carimbo.string(from: .now))")
-        do {
-            try FileManager.default.moveItem(at: arquivo, to: copia)
-            Self.logger.error("Lista de cartões corrompida movida para \(copia.lastPathComponent, privacy: .public)")
-        } catch {
-            Self.logger.error("Lista de cartões corrompida; não deu para mover: \(error.localizedDescription, privacy: .public)")
-            throw error
-        }
-    }
-
-    private static let carimbo: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyyMMdd-HHmmss"
-        return f
-    }()
-
-    private func gravar(_ lista: [CartaoApplePay]) throws {
-        let dados = try JSONEncoder().encode(lista)
-        try dados.write(to: arquivo, options: .atomic)
     }
 }

@@ -29,10 +29,12 @@ nonisolated struct CompraAguardandoViagem: Codable, Identifiable, Equatable, Sen
 /// O arquivo usa a proteção padrão do iOS (disponível depois do primeiro
 /// desbloqueio), para a ação "Registrar gasto" rodar com o aparelho trancado.
 /// Arquivo ausente lê como lista vazia, sem derrubar o app. Arquivo corrompido
-/// é movido para `compras-apple-pay.json.corrompido-<data>` e lê como lista
-/// vazia — sobrescrever direto perderia os itens de todos os usuários. Arquivo
-/// que existe mas não lê (permissão, I/O) faz `adicionar`/`remover` abortarem:
-/// ler como vazio deixaria a próxima gravação apagar a fila inteira.
+/// é movido para `compras-apple-pay.json.corrompido-<data>-<uuid>` e lê como
+/// lista vazia — sobrescrever direto perderia os itens de todos os usuários.
+/// Arquivo que existe mas não lê (permissão, I/O) faz `adicionar`/`remover`
+/// abortarem: ler como vazio deixaria a próxima gravação apagar a fila
+/// inteira. A regra de arquivo é a `ArquivoJSONGuardado`, a mesma da lista
+/// de cartões.
 ///
 /// Toda leitura e gravação passa por `trava`: `adicionar`/`remover` leem e
 /// regravam o arquivo inteiro e, sem serializar, ação e folha mexendo juntas
@@ -50,10 +52,14 @@ final class ComprasAguardandoViagem {
 
     let arquivo: URL
 
+    /// Regra de ler/gravar/quarentenar o JSON (sempre chamada sob `trava`).
+    private let guarda: ArquivoJSONGuardado<CompraAguardandoViagem>
+
     init(arquivo: URL? = nil) {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         self.arquivo = arquivo ?? dir.appendingPathComponent("compras-apple-pay.json")
+        self.guarda = ArquivoJSONGuardado(arquivo: self.arquivo, nomeNoLog: "Fila")
     }
 
     /// Itens do usuário. Os de outros usuários ficam no arquivo, intocados e
@@ -66,7 +72,7 @@ final class ComprasAguardandoViagem {
         trava.lock()
         defer { trava.unlock() }
         do {
-            return try todasTrancado()
+            return try guarda.ler()
         } catch {
             Self.logger.error("Não leu a fila: \(error.localizedDescription, privacy: .public)")
             return []
@@ -80,7 +86,7 @@ final class ComprasAguardandoViagem {
     func contem(id: UUID) -> Bool {
         trava.lock()
         defer { trava.unlock() }
-        return ((try? todasTrancado()) ?? []).contains { $0.id == id }
+        return ((try? guarda.ler()) ?? []).contains { $0.id == id }
     }
 
     /// Guarda a compra e **lança** quando a gravação falha — `registrar`
@@ -88,7 +94,7 @@ final class ComprasAguardandoViagem {
     func adicionar(_ compra: CompraAguardandoViagem) throws {
         trava.lock()
         defer { trava.unlock() }
-        var lista = try todasTrancado()
+        var lista = try guarda.ler()
         lista.append(compra)
 
         let doUsuario = lista.filter { $0.userId == compra.userId }
@@ -101,7 +107,7 @@ final class ComprasAguardandoViagem {
             lista.removeAll { maisAntigas.contains($0.id) }
         }
 
-        try gravar(lista)
+        try guarda.gravar(lista)
     }
 
     /// Tira o item da fila. Falha na leitura ou na gravação só sai no log e
@@ -112,14 +118,14 @@ final class ComprasAguardandoViagem {
         defer { trava.unlock() }
         var lista: [CompraAguardandoViagem]
         do {
-            lista = try todasTrancado()
+            lista = try guarda.ler()
         } catch {
             Self.logger.error("Não leu a fila para remover: \(error.localizedDescription, privacy: .public)")
             return
         }
         lista.removeAll { $0.id == id }
         do {
-            try gravar(lista)
+            try guarda.gravar(lista)
         } catch {
             Self.logger.error("Não gravou a fila depois de remover: \(error.localizedDescription, privacy: .public)")
         }
@@ -134,7 +140,7 @@ final class ComprasAguardandoViagem {
         defer { trava.unlock() }
         var lista: [CompraAguardandoViagem]
         do {
-            lista = try todasTrancado()
+            lista = try guarda.ler()
         } catch {
             Self.logger.error("Não leu a fila para remover todos: \(error.localizedDescription, privacy: .public)")
             return
@@ -142,61 +148,9 @@ final class ComprasAguardandoViagem {
         let restantes = lista.filter { $0.userId != userId }
         guard restantes.count != lista.count else { return }
         do {
-            try gravar(restantes)
+            try guarda.gravar(restantes)
         } catch {
             Self.logger.error("Não gravou a fila depois de remover todos: \(error.localizedDescription, privacy: .public)")
         }
-    }
-
-    // MARK: - Arquivo (sempre chamado sob `trava`)
-
-    /// Lê o arquivo. Ausente lê como lista vazia. Corrompido (JSON que não
-    /// decodifica) é movido para `….corrompido-<data>` — guarda os itens dos
-    /// outros usuários em vez de sobrescrever — e lê como lista vazia.
-    /// Arquivo que existe mas não lê (permissão, I/O) **lança**: tratar como
-    /// vazio deixaria `adicionar`/`remover` regravarem `[]` por cima e a fila
-    /// inteira se perderia.
-    private func todasTrancado() throws -> [CompraAguardandoViagem] {
-        let dados: Data
-        do {
-            dados = try Data(contentsOf: arquivo)
-        } catch {
-            guard FileManager.default.fileExists(atPath: arquivo.path) else {
-                return []
-            }
-            throw error
-        }
-        guard let lista = try? JSONDecoder().decode([CompraAguardandoViagem].self, from: dados) else {
-            try quarentenar()
-            return []
-        }
-        return lista
-    }
-
-    /// Move o arquivo ilegível para `<nome>.corrompido-<yyyyMMdd-HHmmss>`
-    /// (nome único: um corrompido anterior fica guardado). Se o move falha,
-    /// lança — o arquivo ruim não pode ficar para ser sobrescrito na próxima
-    /// gravação.
-    private func quarentenar() throws {
-        let copia = arquivo.appendingPathExtension("corrompido-\(Self.carimbo.string(from: .now))")
-        do {
-            try FileManager.default.moveItem(at: arquivo, to: copia)
-            Self.logger.error("Fila corrompida movida para \(copia.lastPathComponent, privacy: .public)")
-        } catch {
-            Self.logger.error("Fila corrompida; não deu para mover: \(error.localizedDescription, privacy: .public)")
-            throw error
-        }
-    }
-
-    private static let carimbo: DateFormatter = {
-        let f = DateFormatter()
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.dateFormat = "yyyyMMdd-HHmmss"
-        return f
-    }()
-
-    private func gravar(_ lista: [CompraAguardandoViagem]) throws {
-        let dados = try JSONEncoder().encode(lista)
-        try dados.write(to: arquivo, options: .atomic)
     }
 }

@@ -172,7 +172,7 @@ Pronto quando o CI (`.github/workflows/ios.yml`) compilar e todos os testes pass
 A pessoa pode ter mais de um cartão no Apple Pay. Dois filtros, que se completam:
 
 - **Na automação** (§1.6, passo 2): em **Cartões**, marca só os cartões que devem ir para o SoftSpend. Com **Qualquer cartão**, todas as compras entram — inclusive dos cartões que a pessoa não quer no app.
-- **No app**: todo nome de cartão que chega pela ação entra numa lista por usuário — `cartoes-apple-pay.json` em `Application Support` (`Services/CartoesApplePay.swift`, mesmas regras de arquivo da fila do §1.5: escrita atômica, `NSLock`, corrompido vai para quarentena, fora do SwiftData de propósito). O nome é o `cartao` do `RegistrarGastoIntent` aparado; sem nome, entra como **"Cartão sem nome"**.
+- **No app**: todo nome de cartão que chega pela ação entra numa lista por usuário — `cartoes-apple-pay.json` em `Application Support` (`Services/CartoesApplePay.swift`, mesmas regras de arquivo da fila do §1.5 — a `Services/ArquivoJSONGuardado.swift` das duas: escrita atômica, `NSLock`, corrompido vai para quarentena, fora do SwiftData de propósito). O nome é o `cartao` do `RegistrarGastoIntent` aparado; sem nome, entra como **"Cartão sem nome"**.
 
 No Perfil, a seção **"Cartões do Apple Pay"** lista esses cartões com uma chave liga/desliga cada; cartão novo nasce **ligado**. Em `RegistroApplePay.registrar`, compra de cartão desligado é ignorada **antes de gravar ou ir para a fila** (resultado `.ignoradoCartaoDesligado`, resposta do atalho `Compra do cartão X ignorada (desligado no SoftSpend)`). **Desligar não apaga os gastos já lançados.**
 
