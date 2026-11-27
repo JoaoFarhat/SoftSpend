@@ -233,3 +233,65 @@ def test_corpo_do_email_tem_o_codigo_e_a_validade():
     assert "042917" in texto and "042917" in html
     assert "15 minutos" in texto
     assert texto.startswith("Olá, João!")
+
+
+def test_codigo_novo_herda_as_tentativas_erradas(ambiente):
+    """Pedir outro codigo a cada minuto nao zera a contagem: depois de 5
+    erradas, nao sai codigo novo ate passar a janela de 24 h."""
+    client, SessionLocal, enviados = ambiente
+    _cadastrar(client)
+    import models
+
+    def passar(segundos):
+        with SessionLocal() as db:
+            registro = db.query(models.CodigoRedefinicaoSenha).one()
+            registro.created_at = registro.created_at - timedelta(seconds=segundos)
+            db.commit()
+
+    def errado(c):
+        return "000000" if c != "000000" else "111111"
+
+    _pedir(client)
+    for _ in range(3):
+        assert _redefinir(client, errado(enviados[-1][2])).status_code == 400
+    passar(61)
+    _pedir(client)
+    assert len(enviados) == 2
+    for _ in range(2):
+        assert _redefinir(client, errado(enviados[-1][2])).status_code == 400
+
+    # 5 erradas na conta: o codigo certo nao entra e nao sai codigo novo.
+    assert _redefinir(client, enviados[-1][2]).status_code == 400
+    passar(61)
+    assert _pedir(client).status_code == 202
+    assert len(enviados) == 2
+
+    # Passada a janela, sai codigo novo com a contagem zerada.
+    passar(24 * 3600)
+    _pedir(client)
+    assert len(enviados) == 3
+    assert _redefinir(client, enviados[-1][2]).status_code == 204
+
+
+def test_tentativa_alem_do_limite_nao_conta_nem_entra(ambiente):
+    """O UPDATE atomico so conta enquanto `tentativas < 5`: no limite, nem o
+    codigo certo entra e a contagem nao passa de 5."""
+    client, SessionLocal, enviados = ambiente
+    _cadastrar(client)
+    _pedir(client)
+    import models
+
+    with SessionLocal() as db:
+        db.query(models.CodigoRedefinicaoSenha).update({"tentativas": 5})
+        db.commit()
+    assert _redefinir(client, enviados[0][2]).status_code == 400
+    with SessionLocal() as db:
+        assert db.query(models.CodigoRedefinicaoSenha).one().tentativas == 5
+
+
+def test_nome_no_email_html_e_escapado():
+    from services import email_service
+
+    _, html = email_service._corpo_codigo("<b>Mal</b> Intencionado", "042917", 15)
+    assert "<b>" not in html
+    assert "&lt;b&gt;Mal&lt;/b&gt;" in html

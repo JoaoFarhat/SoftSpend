@@ -8,9 +8,10 @@ import uuid
 class CodigoRedefinicaoSenha(Base):
     """Codigo de 6 digitos do "Esqueci minha senha" (`services/redefinicao_senha_service.py`).
 
-    So existe um por usuario: pedir de novo troca o anterior. O codigo nunca e
-    gravado, so o HMAC dele (`codigo_hash`). Usado, expirado ou com as
-    tentativas esgotadas, a linha e apagada.
+    So existe um por usuario: pedir de novo troca o anterior, herdando as
+    tentativas erradas das ultimas 24 h. O codigo nunca e gravado, so o HMAC
+    dele (`codigo_hash`). A linha e apagada quando a senha e trocada, ou
+    quando vence sem nenhuma tentativa errada.
     """
 
     __tablename__ = "codigos_redefinicao_senha"

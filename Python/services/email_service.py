@@ -15,6 +15,7 @@ O envio roda em background (BackgroundTasks) e nunca lanca: falha so vai para o
 log, sem o e-mail do destinatario nem o codigo.
 """
 import logging
+from html import escape as html_escape
 import os
 
 import boto3
@@ -49,7 +50,7 @@ def _corpo_codigo(nome: str, codigo: str, minutos: int) -> tuple[str, str]:
         "e-mail: sua senha continua a mesma.\n"
     )
     html = (
-        f"<p>{saudacao}!</p>"
+        f"<p>{html_escape(saudacao)}!</p>"
         "<p>Seu código para criar uma senha nova no SoftSpend é:</p>"
         f'<p style="font-size:28px;font-weight:bold;letter-spacing:6px">{codigo}</p>'
         f"<p>Ele vale por {minutos} minutos. Se não foi você que pediu, ignore este "

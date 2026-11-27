@@ -8,7 +8,14 @@
    Qualquer falha (sem conta, sem pedido, expirado, errado, tentativas
    esgotadas) e o mesmo `CodigoInvalido`.
 
-Guarda so o HMAC do codigo, uma linha por usuario.
+As tentativas sao da CONTA, nao do codigo: um codigo novo herda as erradas
+das ultimas `JANELA_TENTATIVAS` (pedir outro a cada minuto nao zera a conta), e
+com `MAX_TENTATIVAS` erradas nao sai codigo novo ate a janela passar. A
+tentativa e contada num UPDATE atomico antes de comparar, entao pedidos em
+paralelo nao passam do limite.
+
+Guarda so o HMAC do codigo, uma linha por usuario; a linha so some quando a
+senha e trocada (ou o codigo vence sem nenhuma tentativa errada).
 """
 import hashlib
 import hmac
@@ -25,6 +32,7 @@ from services import auth_service
 VALIDADE_MINUTOS = 15
 REENVIO_SEGUNDOS = 60
 MAX_TENTATIVAS = 5
+JANELA_TENTATIVAS = timedelta(hours=24)
 
 ERRO_CODIGO_INVALIDO = "invalid_reset_code"
 
@@ -69,9 +77,14 @@ def pedir_codigo(db: Session, email: str, agora: datetime | None = None) -> Envi
     if usuario is None:
         return None
 
+    herdadas = 0
     anterior = _registro(db, usuario.id)
     if anterior is not None:
         if anterior.created_at and agora - anterior.created_at < timedelta(seconds=REENVIO_SEGUNDOS):
+            return None
+        if anterior.created_at and agora - anterior.created_at < JANELA_TENTATIVAS:
+            herdadas = anterior.tentativas or 0
+        if herdadas >= MAX_TENTATIVAS:
             return None
         db.delete(anterior)
         db.flush()
@@ -82,7 +95,7 @@ def pedir_codigo(db: Session, email: str, agora: datetime | None = None) -> Envi
             user_id=usuario.id,
             codigo_hash=_hash_codigo(usuario.id, codigo),
             expires_at=agora + timedelta(minutes=VALIDADE_MINUTOS),
-            tentativas=0,
+            tentativas=herdadas,
             created_at=agora,
         )
     )
@@ -103,15 +116,26 @@ def redefinir(
         raise CodigoInvalido()
 
     if registro.expires_at <= agora:
-        db.delete(registro)
-        db.commit()  # a rota lanca depois, e o get_db desfaria a limpeza
+        # Sem erro nenhum, a linha vencida some; com erros, fica para o proximo
+        # codigo herdar a contagem.
+        if not registro.tentativas:
+            db.delete(registro)
+            db.commit()  # a rota lanca depois, e o get_db desfaria a limpeza
+        raise CodigoInvalido()
+
+    # Conta a tentativa ANTES de comparar, num UPDATE so: dois pedidos ao mesmo
+    # tempo nao leem o mesmo `tentativas` e nao passam do limite.
+    Codigo = models.CodigoRedefinicaoSenha
+    contou = (
+        db.query(Codigo)
+        .filter(Codigo.id == registro.id, Codigo.tentativas < MAX_TENTATIVAS)
+        .update({Codigo.tentativas: Codigo.tentativas + 1}, synchronize_session=False)
+    )
+    db.commit()  # idem: a tentativa precisa contar mesmo com a rota lancando
+    if not contou:
         raise CodigoInvalido()
 
     if not hmac.compare_digest(registro.codigo_hash, _hash_codigo(usuario.id, codigo)):
-        registro.tentativas = (registro.tentativas or 0) + 1
-        if registro.tentativas >= MAX_TENTATIVAS:
-            db.delete(registro)
-        db.commit()  # idem: a tentativa errada precisa contar
         raise CodigoInvalido()
 
     usuario.senha_hash = auth_service._hash_senha(nova_senha)
