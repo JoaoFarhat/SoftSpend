@@ -520,7 +520,8 @@ Spec: `docs/cartao-sem-open-finance.md` §1 (partes A e B implementadas).
   (`Application Support/compras-apple-pay.json`, escrita atômica, teto de 50
   por usuário, fora do SwiftData de propósito: nenhum `@Model` novo, sem V2).
   Ler+regravar é serializado por `NSLock`; arquivo corrompido vai para
-  `.corrompido-<data>` (nome único, backups se acumulam) em vez de ser
+  `.corrompido-<data>-<uuid>` (`QuarentenaArquivo`, nome único mesmo no
+  mesmo segundo; a poda deixa só as 5 cópias mais novas) em vez de ser
   sobrescrito — e se o move falhar, lança para não gravar por cima. Arquivo
   que existe mas não lê (permissão, I/O) também lança: ler como vazio
   deixaria a próxima gravação apagar os itens de todos. `adicionar`
