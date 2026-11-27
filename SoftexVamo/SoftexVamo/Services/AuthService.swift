@@ -18,7 +18,14 @@ final class AuthService: ObservableObject {
     @Published var currentUser: UserModel?
     @Published var isAuthenticated: Bool = false
     @Published var isLoading: Bool = false
-    @Published var errorMessage: String?
+    @Published var errorMessage: String? {
+        didSet { if errorMessage == nil { emailJaCadastrado = false } }
+    }
+    /// O último cadastro foi recusado porque o e-mail já tem conta: a `RegisterView`
+    /// mostra "Entrar com este e-mail". Volta a `false` junto com o `errorMessage`.
+    @Published private(set) var emailJaCadastrado: Bool = false
+
+    static let mensagemEmailJaCadastrado = "Já existe uma conta com este e-mail."
 
     var errorManager: ErrorManager?
 
@@ -152,8 +159,12 @@ final class AuthService: ObservableObject {
                 mensagemSeNaoGravar: "Sua conta foi criada, mas não foi possível guardar o login neste iPhone. Reinicie o iPhone e entre com seu e-mail e senha."
             )
         } catch {
+            let jaCadastrado = (error as? APIError)?.emailJaCadastrado == true
             // Só no formulário (RegisterView mostra `errorMessage`): sem alerta em dobro.
-            errorMessage = Self.mensagemDeErroDeEntrada(error)
+            errorMessage = jaCadastrado
+                ? Self.mensagemEmailJaCadastrado
+                : Self.mensagemDeErroDeEntrada(error)
+            emailJaCadastrado = jaCadastrado
         }
 
         isLoading = false

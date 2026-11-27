@@ -68,6 +68,17 @@ nonisolated enum APIError: LocalizedError, Sendable {
         return false
     }
 
+    /// Código do `409` do `POST /auth/register` quando o e-mail já tem conta.
+    static let codigoEmailJaCadastrado = "email_in_use"
+
+    /// O cadastro foi recusado porque o e-mail já tem conta (`409 email_in_use`).
+    var emailJaCadastrado: Bool {
+        if case .serverError(let message, _, let statusCode) = self {
+            return statusCode == 409 && message == Self.codigoEmailJaCadastrado
+        }
+        return false
+    }
+
     /// Código que o servidor manda no corpo do 429 quando acaba a cota
     /// diária de leituras por IA (`{"error": "daily_ai_limit"}`,
     /// `services/limite_ia.py`). O outro 429 (por minuto, slowapi) chega

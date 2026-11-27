@@ -3,8 +3,9 @@
 O app exibe o `error` do corpo sem traduzir, então a frase sai do
 servidor já em português correto: o 401 de login diz "E-mail ou senha
 incorretos." (o mesmo para senha errada e e-mail inexistente, sem
-revelar qual dos dois falhou) e o cadastro repetido explica que o
-e-mail ou o nome de usuário já está cadastrado.
+revelar qual dos dois falhou). No cadastro, o e-mail repetido responde
+409 `email_in_use` (o app oferece "Entrar" e "Esqueci minha senha") e o
+nome de usuário repetido explica que já está cadastrado.
 
 Passa pela camada de auth real (rotas /auth/*), como test_email_espacos.py:
 SQLite em `tmp_path` e um `get_db` que faz commit/rollback como o de produção.
@@ -104,10 +105,21 @@ def test_login_com_email_inexistente_diz_email_ou_senha_incorretos(client):
     assert corpo["request_id"]
 
 
-def test_cadastro_com_email_repetido_explica_o_que_ja_esta_em_uso(client):
+def test_cadastro_com_email_repetido_responde_409_email_in_use(client):
     assert _cadastrar(client).status_code == 200
 
     repetido = _cadastrar(client, username="outro_username")
+
+    assert repetido.status_code == 409, repetido.text
+    corpo = repetido.json()
+    assert corpo["error"] == "email_in_use"
+    assert corpo["request_id"]
+
+
+def test_cadastro_com_username_repetido_explica_o_que_ja_esta_em_uso(client):
+    assert _cadastrar(client).status_code == 200
+
+    repetido = _cadastrar(client, email="outro@exemplo.com")
 
     assert repetido.status_code == 400, repetido.text
     corpo = repetido.json()
