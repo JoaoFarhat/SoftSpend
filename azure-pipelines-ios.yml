@@ -35,23 +35,23 @@ steps:
     displayName: Escolher o simulador
 
   - script: |
-      set -o pipefail
       xcodebuild test \
         -project SoftSpend.xcodeproj -scheme SoftSpend \
         -destination "id=$(SIMULADOR)" \
         -configuration Debug CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=- DEVELOPMENT_TEAM= PROVISIONING_PROFILE_SPECIFIER= \
-        | grep -E "error:|warning: .*FaturaDTO|Test Case .* failed|Executed|\*\* (TEST|BUILD)" || true
-      exit ${PIPESTATUS[0]}
+        > build.log 2>&1; st=$?
+      grep -E "error:|Test Case .* failed|Executed|\*\* (TEST|BUILD)" build.log | tail -200
+      exit $st
     workingDirectory: SoftexVamo
     displayName: Compilar e testar
     timeoutInMinutes: 50
 
   - script: |
-      set -o pipefail
       xcodebuild build \
         -project SoftSpend.xcodeproj -scheme SoftSpend \
         -destination 'generic/platform=iOS Simulator' \
-        -configuration Release CODE_SIGNING_ALLOWED=NO | grep -E "error:|\*\* BUILD" || true
-      exit ${PIPESTATUS[0]}
+        -configuration Release CODE_SIGNING_ALLOWED=NO > release.log 2>&1; st=$?
+      grep -E "error:|\*\* BUILD" release.log | tail -100
+      exit $st
     workingDirectory: SoftexVamo
     displayName: Compilar em Release
