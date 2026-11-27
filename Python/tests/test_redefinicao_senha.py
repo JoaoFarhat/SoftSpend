@@ -366,3 +366,35 @@ def test_conta_apagada_no_meio_da_redefinicao_vira_codigo_invalido(ambiente, mon
     finally:
         db.close()
         outra.close()
+
+
+def test_linha_apagada_no_commit_da_tentativa_vira_codigo_invalido(ambiente, monkeypatch):
+    """A linha do codigo some entre o UPDATE que conta a tentativa e o fim
+    do commit dela (outra transacao pediu codigo novo ou apagou a conta):
+    depois do commit `registro` esta expirado e qualquer releitura vira
+    SELECT de refresh — ObjectDeletedError, que sem o tratamento virava
+    500; agora vale o mesmo codigo invalido de sempre."""
+    client, SessionLocal, enviados = ambiente
+    _cadastrar(client)
+    _pedir(client)
+    codigo = enviados[0][2]
+
+    import models
+    from services import redefinicao_senha_service as srv
+
+    db = SessionLocal()
+    commit_real = db.commit
+
+    def apagar_linha_no_commit(*args, **kwargs):
+        # Sem `synchronize_session=False` o delete em lote marcaria
+        # `registro` apagado na sessao e a releitura devolveria o valor
+        # velho de memoria, sem chegar ao banco.
+        db.query(models.CodigoRedefinicaoSenha).delete(synchronize_session=False)
+        return commit_real(*args, **kwargs)
+
+    monkeypatch.setattr(db, "commit", apagar_linha_no_commit)
+    try:
+        with pytest.raises(srv.CodigoInvalido):
+            srv.redefinir(db, EMAIL, codigo, NOVA)
+    finally:
+        db.close()
