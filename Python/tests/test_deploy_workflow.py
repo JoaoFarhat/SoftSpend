@@ -11,6 +11,13 @@ _TEXTO = (
 def _job_test() -> str:
     """Trecho do job `test` (do `  test:` até o próximo job)."""
     inicio = _TEXTO.index("\n  test:")
+    fim = _TEXTO.index("\n  migrations-mysql:")
+    return _TEXTO[inicio:fim]
+
+
+def _job_migrations_mysql() -> str:
+    """Trecho do job `migrations-mysql` (até o job `deploy`)."""
+    inicio = _TEXTO.index("\n  migrations-mysql:")
     fim = _TEXTO.index("\n  deploy:")
     return _TEXTO[inicio:fim]
 
@@ -30,9 +37,27 @@ def test_job_test_roda_no_python_312_e_314():
     assert "python-version: ${{ matrix.python-version }}" in job
 
 
-def test_job_deploy_espera_o_job_test():
+def test_job_migrations_mysql_vem_antes_do_deploy():
+    """O job novo fica entre `test` e `deploy` no arquivo."""
+    assert _TEXTO.index("\n  test:") < _TEXTO.index("\n  migrations-mysql:")
+    assert _TEXTO.index("\n  migrations-mysql:") < _TEXTO.index("\n  deploy:")
+
+
+def test_job_migrations_mysql_sobe_mysql_8_e_roda_as_migrations():
+    job = _job_migrations_mysql()
+    assert "image: mysql:8.0" in job
+    assert 'python-version: "3.12"' in job
+    assert re.search(
+        r"MYSQL_TESTE_URL:\s*mysql\+pymysql://", job
+    )
+    assert "pytest -q tests/test_migrations_mysql.py" in job
+
+
+def test_job_deploy_espera_test_e_migrations_mysql():
     job = _job_deploy()
-    assert re.search(r"^    needs:\s*test\s*$", job, re.MULTILINE)
+    assert re.search(
+        r"^    needs:\s*\[test, migrations-mysql\]\s*$", job, re.MULTILINE
+    )
 
 
 def test_job_deploy_tem_environment_producao():
