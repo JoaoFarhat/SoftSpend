@@ -44,6 +44,9 @@ def mysql(monkeypatch):
     monkeypatch.syspath_prepend(str(_PASTA))
     monkeypatch.setenv("DATABASE_URL", _URL)
     import database
+    # Sem importar os models o `Base.metadata` fica vazio (quando este teste
+    # roda sozinho) e o `create_all` não cria tabela nenhuma.
+    import models  # noqa: F401
 
     monkeypatch.setattr(database, "DATABASE_URL", _URL)
 
