@@ -23,12 +23,27 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.engine import make_url
 
 _PASTA = Path(__file__).resolve().parents[1]
 _INI = _PASTA / "alembic" / "alembic.ini"
 _URL = os.getenv("MYSQL_TESTE_URL")
 
 _HEAD = "b8e4d2f6a1c3"
+
+
+def _banco_e_de_teste(url: str) -> bool:
+    """Só deixa rodar num banco com "teste" no nome.
+
+    O teste faz `create_all` e `downgrade`, que apagariam as tabelas de um
+    banco de verdade se alguém apontar a `MYSQL_TESTE_URL` para ele por
+    engano.
+    """
+    try:
+        banco = make_url(url).database
+    except Exception:
+        return False
+    return bool(banco) and "teste" in banco
 
 
 @pytest.fixture
@@ -41,6 +56,12 @@ def mysql(monkeypatch):
     """
     if not _URL:
         pytest.skip("MYSQL_TESTE_URL não definida (só roda no CI)")
+    if not _banco_e_de_teste(_URL):
+        pytest.fail(
+            "MYSQL_TESTE_URL aponta para um banco sem 'teste' no nome "
+            f"({make_url(_URL).database!r}) — o teste apagaria as tabelas "
+            "dele (create_all + downgrade)"
+        )
     monkeypatch.syspath_prepend(str(_PASTA))
     monkeypatch.setenv("DATABASE_URL", _URL)
     import database
@@ -143,3 +164,17 @@ def test_migrations_num_mysql_de_verdade(mysql):
             text("SELECT version_num FROM alembic_version")
         ).scalar()
     assert versao == _HEAD
+
+
+def test_banco_sem_teste_no_nome_e_recusado():
+    assert not _banco_e_de_teste("mysql+pymysql://u:s@127.0.0.1:3306/softspend")
+
+
+def test_banco_com_teste_no_nome_e_aceito():
+    assert _banco_e_de_teste(
+        "mysql+pymysql://u:s@127.0.0.1:3306/softspend_teste"
+    )
+
+
+def test_url_sem_banco_e_recusada():
+    assert not _banco_e_de_teste("mysql+pymysql://u:s@127.0.0.1:3306")
