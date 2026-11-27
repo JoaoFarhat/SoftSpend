@@ -52,6 +52,12 @@ def mysql(monkeypatch):
 
     engine = create_engine(_URL)
     database.Base.metadata.create_all(engine)
+    # Na produção a tabela `dias` nasceu antes do índice composto, então a FK
+    # `ciclo_id` tem o índice próprio que o MySQL cria para ela. O `create_all`
+    # já nasce com o índice composto e o MySQL o usa para a FK — sem este
+    # índice o downgrade (que derruba o composto) falharia só aqui (1553).
+    with engine.begin() as conexao:
+        conexao.execute(text("CREATE INDEX ciclo_id ON dias (ciclo_id)"))
     yield engine
     engine.dispose()
 
