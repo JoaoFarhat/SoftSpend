@@ -38,6 +38,8 @@ def _ambiente_ok() -> dict:
         "REFRESH_TOKEN_SECRET_KEY": SEGREDO_REFRESH,
         "S3_BUCKET": "softspend-comprovantes",
         "GEMINI_API_KEY": "gemini-chave",
+        "EMAIL_REMETENTE": "SoftSpend <nao-responda@softspend.com.br>",
+        "SES_REGION": "sa-east-1",
         "APPLE_BUNDLE_ID": "br.com.softspend.app",
         "APPLE_APP_ID": "123456789",
         "APPLE_ISSUER_ID": "issuer-id",
@@ -142,6 +144,54 @@ def test_integracoes_ausentes_dao_falta(ambiente, capsys, ausentes):
     assert len(falta) == 1
     for nome in ausentes:
         assert nome in falta[0]
+
+
+# `conferir_email`: sem EMAIL_REMETENTE o "Esqueci minha senha" responde 503;
+# sem SES_REGION o email_service cai em us-east-1 (o domínio está verificado
+# em sa-east-1), o envio falha em background e a rota segue devolvendo 202.
+# O FALTA diz o nome da variável, nunca o valor.
+
+
+def test_email_configurado_da_ok(ambiente, capsys):
+    assert _rodar(ambiente) == 0
+    assert any(
+        l.startswith("OK e-mail SES")
+        for l in _linhas(capsys).splitlines()
+    )
+
+
+@pytest.mark.parametrize("vazio", [None, "", "   "])
+def test_sem_email_remetente_da_falta(ambiente, capsys, vazio):
+    env = dict(ambiente["env"])
+    if vazio is None:
+        del env["EMAIL_REMETENTE"]
+    else:
+        env["EMAIL_REMETENTE"] = vazio
+    assert cs.main(
+        ambiente=env, sessao=ambiente["session"], pasta=ambiente["pasta"]
+    ) == 1
+    falta = [l for l in _linhas(capsys).splitlines() if l.startswith("FALTA")]
+    assert len(falta) == 1
+    assert "EMAIL_REMETENTE" in falta[0]
+    assert "503" in falta[0]
+    assert "nao-responda@softspend.com.br" not in falta[0]
+
+
+@pytest.mark.parametrize("vazio", [None, "", "   "])
+def test_sem_ses_region_da_falta(ambiente, capsys, vazio):
+    env = dict(ambiente["env"])
+    if vazio is None:
+        del env["SES_REGION"]
+    else:
+        env["SES_REGION"] = vazio
+    assert cs.main(
+        ambiente=env, sessao=ambiente["session"], pasta=ambiente["pasta"]
+    ) == 1
+    falta = [l for l in _linhas(capsys).splitlines() if l.startswith("FALTA")]
+    assert len(falta) == 1
+    assert "SES_REGION" in falta[0]
+    assert "us-east-1" in falta[0]
+    assert "sa-east-1" not in falta[0]
 
 
 def test_main_sem_sessao_sai_1_sem_traceback(ambiente, capsys, monkeypatch):
