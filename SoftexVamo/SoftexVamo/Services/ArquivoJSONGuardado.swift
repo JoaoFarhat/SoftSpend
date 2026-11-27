@@ -37,8 +37,6 @@ nonisolated struct ArquivoJSONGuardado<Item: Codable>: Sendable {
     /// mensagem continuar dizendo de qual arquivo se trata.
     let nomeNoLog: String
 
-    private static let logger = Logger(subsystem: "br.com.softspend", category: "ArquivoJSONGuardado")
-
     init(arquivo: URL, nomeNoLog: String) {
         self.arquivo = arquivo
         self.nomeNoLog = nomeNoLog
@@ -77,11 +75,14 @@ nonisolated struct ArquivoJSONGuardado<Item: Codable>: Sendable {
         let copia = QuarentenaArquivo.destino(para: arquivo, em: .now)
         do {
             try FileManager.default.moveItem(at: arquivo, to: copia)
-            Self.logger.error("\(self.nomeNoLog, privacy: .public) corrompida movida para \(copia.lastPathComponent, privacy: .public)")
+            arquivoJSONGuardadoLogger.error("\(self.nomeNoLog, privacy: .public) corrompida movida para \(copia.lastPathComponent, privacy: .public)")
         } catch {
-            Self.logger.error("\(self.nomeNoLog, privacy: .public) corrompida; não deu para mover: \(error.localizedDescription, privacy: .public)")
+            arquivoJSONGuardadoLogger.error("\(self.nomeNoLog, privacy: .public) corrompida; não deu para mover: \(error.localizedDescription, privacy: .public)")
             throw error
         }
         QuarentenaArquivo.podar(de: arquivo)
     }
 }
+
+/// Fora do tipo: propriedade estática não é permitida em tipo genérico.
+nonisolated private let arquivoJSONGuardadoLogger = Logger(subsystem: "br.com.softspend", category: "ArquivoJSONGuardado")
