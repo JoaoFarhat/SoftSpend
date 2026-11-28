@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import uuid
 from collections.abc import Iterable
 from io import BytesIO
@@ -38,6 +39,16 @@ PDF_ESCALA_RENDER = float(os.getenv("S3_PDF_ESCALA_RENDER", "2.0"))
 # miniatura e o OCR, entao a pagina grande nao e recusada — a escala e
 # reduzida para o bitmap caber no teto.
 PDF_MAX_LADO_PX = int(os.getenv("S3_PDF_MAX_LADO_PX", "5000"))
+
+# Uma foto de 48 Mpx (JPEG de ate 9 MB, a resolucao original que o app manda)
+# ocupa ~150 MB decodificada e passa de 400 MB durante o giro EXIF e a
+# reducao. Na t3.small (2 GB, que tambem roda o MySQL) poucas decodificacoes
+# simultaneas — varias contas enviando comprovantes ao voltar da viagem sem
+# internet — faziam o sistema matar o processo e derrubar a API. O semaforo
+# limita quantas imagens sao decodificadas ao mesmo tempo; quem nao consegue
+# a vaga espera a proxima em vez de disputar memoria.
+MAX_DECODIFICACOES = int(os.getenv("S3_MAX_DECODIFICACOES", "2"))
+_semaforo_decodificacao = threading.BoundedSemaphore(MAX_DECODIFICACOES)
 
 SUFIXO_THUMB = "-thumb.jpg"
 
@@ -90,24 +101,28 @@ def _conteudo_para_jpeg(conteudo: bytes) -> tuple[bytes, str]:
     # O Image.open so le o cabecalho: um JPEG com inicio bom e dados cortados
     # (upload interrompido) abre, mas falha na decodificacao dos pixels. Sem
     # este try o OSError vazava e a rota respondia 500 em vez de 422.
-    try:
-        # A foto do app chega com a marca de orientacao (EXIF); girar os pixels
-        # antes de medir evita a nota deitada no relatorio e no link.
-        img = ImageOps.exif_transpose(img)
+    #
+    # A decodificacao fica dentro do semaforo: e o trecho que aloca os ~400 MB
+    # da foto de 48 Mpx (ver `_semaforo_decodificacao`).
+    with _semaforo_decodificacao:
+        try:
+            # A foto do app chega com a marca de orientacao (EXIF); girar os pixels
+            # antes de medir evita a nota deitada no relatorio e no link.
+            img = ImageOps.exif_transpose(img)
 
-        # A camera atual tira fotos maiores que o teto (5712x4284 no iPhone 15/16):
-        # reduzir mantendo a proporcao em vez de recusar — antes a foto nunca subia.
-        if img.width > MAX_IMAGEM_LARGURA or img.height > MAX_IMAGEM_ALTURA:
-            img.thumbnail((MAX_IMAGEM_LARGURA, MAX_IMAGEM_ALTURA), Image.LANCZOS)
+            # A camera atual tira fotos maiores que o teto (5712x4284 no iPhone 15/16):
+            # reduzir mantendo a proporcao em vez de recusar — antes a foto nunca subia.
+            if img.width > MAX_IMAGEM_LARGURA or img.height > MAX_IMAGEM_ALTURA:
+                img.thumbnail((MAX_IMAGEM_LARGURA, MAX_IMAGEM_ALTURA), Image.LANCZOS)
 
-        if img.mode != "RGB":
-            img = img.convert("RGB")
+            if img.mode != "RGB":
+                img = img.convert("RGB")
 
-        buffer = BytesIO()
-        img.save(buffer, format="JPEG", quality=90)
-    except Exception as e:
-        logger.warning("Falha ao decodificar imagem de comprovante: %s", type(e).__name__)
-        raise ValueError("Não foi possível abrir esta imagem; anexe outra foto")
+            buffer = BytesIO()
+            img.save(buffer, format="JPEG", quality=90)
+        except Exception as e:
+            logger.warning("Falha ao decodificar imagem de comprovante: %s", type(e).__name__)
+            raise ValueError("Não foi possível abrir esta imagem; anexe outra foto")
     return buffer.getvalue(), "image/jpeg"
 
 
@@ -196,14 +211,17 @@ def _gerar_thumb(conteudo_jpeg: bytes) -> bytes:
     reduzida, em vez de decodificar em resolucao cheia e so depois redimensionar
     — bem mais rapido e com pico de memoria muito menor.
     """
-    imagem = Image.open(BytesIO(conteudo_jpeg))
-    imagem.draft("RGB", (THUMB_LADO_MAIOR, THUMB_LADO_MAIOR))
-    imagem = imagem.convert("RGB")
-    imagem.thumbnail((THUMB_LADO_MAIOR, THUMB_LADO_MAIOR), Image.LANCZOS)
+    # Mesmo com o `draft` a decodificacao aloca dezenas de MB; fica dentro do
+    # mesmo semaforo do `_conteudo_para_jpeg` para o pico total ficar no teto.
+    with _semaforo_decodificacao:
+        imagem = Image.open(BytesIO(conteudo_jpeg))
+        imagem.draft("RGB", (THUMB_LADO_MAIOR, THUMB_LADO_MAIOR))
+        imagem = imagem.convert("RGB")
+        imagem.thumbnail((THUMB_LADO_MAIOR, THUMB_LADO_MAIOR), Image.LANCZOS)
 
-    buffer = BytesIO()
-    imagem.save(buffer, format="JPEG", quality=THUMB_QUALIDADE, optimize=True)
-    return buffer.getvalue()
+        buffer = BytesIO()
+        imagem.save(buffer, format="JPEG", quality=THUMB_QUALIDADE, optimize=True)
+        return buffer.getvalue()
 
 
 def salvar_comprovante(user_id: str, gasto_id: int, conteudo: bytes, content_type: str) -> str:
