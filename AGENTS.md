@@ -73,6 +73,16 @@ Spec completa: `docs/migracao-banco-local-ios.md`.
   (`BancoLocal.avisoSemEspaco`). Reabrindo com espaço, o banco real volta
   com o que ainda não tinha subido. Testes em
   `SoftSpendTests/FaltaDeEspacoBancoTests.swift`.
+- Nesse modo, a gravação é recusada em todas as entradas: o atalho do
+  Apple Pay (`RegistrarGastoIntent.respostaSemEspaco`), o "Lançar" da fila
+  de compras (`RegistroApplePay.lancar`, `ErroRegistro.semEspaco`) e as
+  escritas manuais do `CiclosViewModel` (`createNewCiclo`, `createNewGasto`,
+  `editGasto`). As manuais só recusam quando também não há internet — com
+  internet o envio sobe o item e ele não se perde — e lançam
+  `ErroSemEspaco` antes de mexer no `modelContext`; a tela mostra o
+  `localizedDescription` sem fechar o formulário. O `semEspaco` entra pelo
+  `init` do ViewModel, como o `estaConectado`. Testes em
+  `SoftSpendTests/SemEspacoSemInternetTests.swift`.
 
 ### Isolamento de actor (Swift 6 / `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`)
 

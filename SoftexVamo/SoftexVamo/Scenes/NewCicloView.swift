@@ -352,7 +352,11 @@ struct NewCicloView: View {
                     salvando = false
                     // Aviso no próprio formulário: o alerta da raiz não aparece
                     // sobre esta tela (fullScreenCover) e seria um aviso em dobro.
-                    erroSalvar = "Não foi possível criar a viagem. Tente novamente."
+                    // ErroSemEspaco (sem espaço + sem internet) já traz a frase
+                    // exata do motivo; o formulário fica aberto.
+                    erroSalvar = error is ErroSemEspaco
+                        ? error.localizedDescription
+                        : "Não foi possível criar a viagem. Tente novamente."
                     return
                 }
             }

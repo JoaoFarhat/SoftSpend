@@ -44,6 +44,12 @@ final class CiclosViewModel: ObservableObject {
     /// offline quando o CI rodasse sem rede.
     private let estaConectado: @MainActor () -> Bool
 
+    /// `true` quando o iPhone está sem espaço e o banco abriu só em memória
+    /// (`BancoLocal.semEspacoNoDisco`); injetável para os testes — produção
+    /// usa o `BancoLocal` (padrão do `init`). Junto com `estaConectado`,
+    /// decide se a escrita manual pode acontecer (`garantirGravavel`).
+    private let semEspaco: @MainActor () -> Bool
+
     /// Pedido de envio disparado depois de cada alteração local (criar,
     /// editar ou apagar viagem, gasto ou comprovante); injetável para os
     /// testes — produção usa `SyncManager.shared` (padrão, como o
@@ -78,9 +84,11 @@ final class CiclosViewModel: ObservableObject {
     private let viewModelLogger = Logger(subsystem: "br.com.softspend", category: "CiclosViewModel")
 
     init(api: ListasAPI = NetworkManager.shared,
-         estaConectado: @escaping @MainActor () -> Bool = { NetworkMonitor.shared.isConnected }) {
+         estaConectado: @escaping @MainActor () -> Bool = { NetworkMonitor.shared.isConnected },
+         semEspaco: @escaping @MainActor () -> Bool = { BancoLocal.semEspacoNoDisco }) {
         self.api = api
         self.estaConectado = estaConectado
+        self.semEspaco = semEspaco
         observeNetwork()
     }
 
@@ -101,6 +109,16 @@ final class CiclosViewModel: ObservableObject {
     private func showError(_ error: Error) {
         viewModelLogger.error("CiclosViewModel error: \(error.localizedDescription, privacy: .public)")
         errorManager?.show(error: error)
+    }
+
+    /// Porta das escritas manuais (viagem nova, gasto novo, edição de
+    /// gasto), chamada no começo de cada uma, antes de mexer no
+    /// `modelContext`: sem espaço no iPhone o banco é só memória e, sem
+    /// internet para o envio subir o item, ele apareceria como salvo e
+    /// sumiria ao fechar o app. Com internet ou com espaço, grava como
+    /// sempre — com internet, o envio garante que nada se perde.
+    private func garantirGravavel() throws {
+        if semEspaco() && !estaConectado() { throw ErroSemEspaco() }
     }
 
     private func salvarLocal() {
@@ -881,6 +899,7 @@ final class CiclosViewModel: ObservableObject {
     }
     
     func createNewCiclo(startDate: Date, endDate: Date, totalValue: Decimal, titulo: String) async throws {
+        try garantirGravavel()
         let dayCount = Calendar.current.datesBetween(startDate, and: endDate)
         let safeDayCount = max(dayCount, 1)
 
@@ -1064,6 +1083,7 @@ final class CiclosViewModel: ObservableObject {
     }
     
     func createNewGasto(title: String, value: Decimal, dia: DiaSoftex, categoria: Categoria, comprovante: Data? = nil, comprovanteMime: String = "image/jpeg") async throws {
+        try garantirGravavel()
         guard let modelContext else {
             throw APIError.serverError(message: "Contexto do banco de dados não configurado", requestId: "-", statusCode: 500)
         }
@@ -1185,6 +1205,7 @@ final class CiclosViewModel: ObservableObject {
     }
     
     func editGasto(gastoId: UUID, novoDia: DiaSoftex, titulo: String, value: Decimal, categoria: Categoria) async throws {
+        try garantirGravavel()
         guard let modelContext else {
             throw APIError.serverError(message: "Contexto do banco de dados não configurado", requestId: "-", statusCode: 500)
         }
@@ -1329,6 +1350,17 @@ final class CiclosViewModel: ObservableObject {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(nome)
         try data.write(to: url, options: .atomic)
         return .arquivo(url)
+    }
+}
+
+/// Sem espaço no iPhone (`BancoLocal.semEspacoNoDisco`, banco só em
+/// memória) e sem internet: gravar agora mostraria o item como salvo e ele
+/// sumiria ao fechar o app, sem nunca subir. O `CiclosViewModel` lança
+/// isto antes de mexer no `modelContext` (`garantirGravavel`); a tela
+/// mostra o `localizedDescription` e o formulário continua aberto.
+nonisolated struct ErroSemEspaco: LocalizedError, Equatable, Sendable {
+    var errorDescription: String? {
+        "Sem espaço no iPhone e sem internet: o gasto se perderia ao fechar o app. Libere espaço ou conecte à internet."
     }
 }
 
