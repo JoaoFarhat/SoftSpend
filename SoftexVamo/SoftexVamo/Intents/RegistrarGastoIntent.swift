@@ -54,8 +54,22 @@ nonisolated struct RegistrarGastoIntent: AppIntent {
 
     private static let logger = Logger(subsystem: "br.com.softspend", category: "RegistrarGastoIntent")
 
+    /// Com o iPhone sem espaço o banco abriu só em memória
+    /// (`BancoLocal.semEspacoNoDisco`): o gasto gravado agora sumiria ao
+    /// fechar o app e a resposta "registrado" faria a pessoa achar que
+    /// entrou. Neste caso a ação responde a verdade e não grava nada — nem
+    /// na fila `ComprasAguardandoViagem`. Decisão pura para teste
+    /// (`SoftSpendTests/FaltaDeEspacoBancoTests.swift`): `nil` segue o
+    /// fluxo normal.
+    static func respostaSemEspaco(semEspaco: Bool) -> String? {
+        semEspaco ? "Sem espaço no iPhone; libere espaço e lance no app." : nil
+    }
+
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
+        if let resposta = Self.respostaSemEspaco(semEspaco: BancoLocal.semEspacoNoDisco) {
+            return .result(dialog: IntentDialog(stringLiteral: resposta))
+        }
         let resultado: ResultadoRegistro
         do {
             resultado = try RegistroApplePay.registrar(

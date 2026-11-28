@@ -95,21 +95,22 @@ struct SoftexVamoApp: App {
     }
 
     private var raiz: some View {
-        VStack(spacing: 0) {
+        Group {
+            if authService.isAuthenticated {
+                MainView()
+                    .environmentObject(listViewModel)
+                    .id(authService.currentUser?.id)
+            } else {
+                LoginView()
+
+            }
+        }
+        // Faixa só quando o banco abriu em memória por falta de espaço; na
+        // abertura normal a raiz fica como antes do #251.
+        .safeAreaInset(edge: .top) {
             if BancoLocal.semEspacoNoDisco {
                 avisoSemEspaco
             }
-            Group {
-                if authService.isAuthenticated {
-                    MainView()
-                        .environmentObject(listViewModel)
-                        .id(authService.currentUser?.id)
-                } else {
-                    LoginView()
-
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .environmentObject(authService)
         .environmentObject(errorManager)
