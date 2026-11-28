@@ -181,16 +181,21 @@ def _preprocessar_imagem(image_bytes: bytes) -> bytes:
             raise SemRespostaGemini(
                 "Imagem grande demais; tire outra foto ou anexe um PDF"
             )
-        img = ImageOps.exif_transpose(img)
 
-        if img.mode != "RGB":
-            img = img.convert("RGB")
+        # O giro EXIF, a conversao e a reducao decodificam os pixels — na foto
+        # de 48 Mpx sao centenas de MB. Ficam dentro do mesmo semaforo do
+        # storage para o POST /gastos/extrair nao furar o teto de memoria.
+        with storage_service._semaforo_decodificacao:
+            img = ImageOps.exif_transpose(img)
 
-        if max(img.size) > MAX_IMAGE_SIZE:
-            img.thumbnail((MAX_IMAGE_SIZE, MAX_IMAGE_SIZE), Image.LANCZOS)
+            if img.mode != "RGB":
+                img = img.convert("RGB")
 
-        buffer = BytesIO()
-        img.save(buffer, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+            if max(img.size) > MAX_IMAGE_SIZE:
+                img.thumbnail((MAX_IMAGE_SIZE, MAX_IMAGE_SIZE), Image.LANCZOS)
+
+            buffer = BytesIO()
+            img.save(buffer, format="JPEG", quality=JPEG_QUALITY, optimize=True)
         return buffer.getvalue()
     except SemRespostaGemini:
         raise
