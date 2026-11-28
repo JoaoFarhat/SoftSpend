@@ -747,6 +747,84 @@ def test_conciliar_sem_compra_sem_vinculo_nao_consulta_gastos(ambiente):
         event.remove(engine, "before_cursor_execute", contar)
 
 
+def test_existe_transacao_sem_match(ambiente):
+    """A checagem da saída cedo responde só se existe compra do usuário
+    aguardando vínculo — mesmo filtro da `listar_transacoes_sem_match`,
+    sem trazer a lista."""
+    import models
+
+    from repositories import open_finance_repository
+
+    session = ambiente.session
+    assert (
+        open_finance_repository.existe_transacao_sem_match(session, USER_A)
+        is False
+    )
+
+    # Compra sem vínculo de OUTRO usuário não liga a checagem.
+    cartao_b = models.CreditCardAccount(
+        user_id=USER_B, origem="FATURA", account_id="fatura:b"
+    )
+    session.add(cartao_b)
+    session.flush()
+    session.add(
+        models.CreditCardTransaction(
+            cartao_id=cartao_b.id,
+            user_id=USER_B,
+            transaction_id="fatura:b",
+            description="LOJA Z",
+            amount=Decimal("100.00"),
+            date=_dt(INICIO),
+            type="DEBIT",
+        )
+    )
+    session.commit()
+    assert (
+        open_finance_repository.existe_transacao_sem_match(session, USER_A)
+        is False
+    )
+
+    # Uma compra do usuário aguardando vínculo liga.
+    cartao = models.CreditCardAccount(
+        user_id=USER_A, origem="FATURA", account_id="fatura:a"
+    )
+    session.add(cartao)
+    session.flush()
+    transacao = models.CreditCardTransaction(
+        cartao_id=cartao.id,
+        user_id=USER_A,
+        transaction_id="fatura:a",
+        description="LOJA Z",
+        amount=Decimal("100.00"),
+        date=_dt(INICIO),
+        type="DEBIT",
+    )
+    session.add(transacao)
+    session.commit()
+    assert (
+        open_finance_repository.existe_transacao_sem_match(session, USER_A)
+        is True
+    )
+
+    # Todas com vínculo: volta a False.
+    _, dias = _ciclo(session)
+    gasto = _gasto(session, dias[0], "LOJA Z", "100.00")
+    session.add(
+        models.ExpenseTransactionMatch(
+            gasto_id=gasto.id,
+            cartao_transacao_id=transacao.id,
+            status="AUTO_MATCHED",
+            score=100,
+            method="RULES",
+        )
+    )
+    session.commit()
+    assert (
+        open_finance_repository.existe_transacao_sem_match(session, USER_A)
+        is False
+    )
+
+
 # --------------------------------------------------------------- migration
 
 
