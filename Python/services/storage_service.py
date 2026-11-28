@@ -40,6 +40,22 @@ PDF_ESCALA_RENDER = float(os.getenv("S3_PDF_ESCALA_RENDER", "2.0"))
 # reduzida para o bitmap caber no teto.
 PDF_MAX_LADO_PX = int(os.getenv("S3_PDF_MAX_LADO_PX", "5000"))
 
+
+def _int_do_env(nome: str, padrao: int) -> int:
+    """Inteiro de ambiente com piso de 1: texto invalido cai no padrao.
+
+    O `int(os.getenv(...))` direto na constante quebraria o `import` com um
+    texto invalido (a API nem subiria) e um `0` criaria um `BoundedSemaphore`
+    sem vaga — todo uso travaria na espera por uma liberacao que nunca vem.
+    """
+    try:
+        valor = int(os.getenv(nome, str(padrao)))
+    except ValueError:
+        logger.warning("%s invalido; usando %d", nome, padrao)
+        valor = padrao
+    return max(1, valor)
+
+
 # Uma foto de 48 Mpx (JPEG de ate 9 MB, a resolucao original que o app manda)
 # ocupa ~150 MB decodificada e passa de 400 MB durante o giro EXIF e a
 # reducao. Na t3.small (2 GB, que tambem roda o MySQL) poucas decodificacoes
@@ -47,7 +63,7 @@ PDF_MAX_LADO_PX = int(os.getenv("S3_PDF_MAX_LADO_PX", "5000"))
 # internet — faziam o sistema matar o processo e derrubar a API. O semaforo
 # limita quantas imagens sao decodificadas ao mesmo tempo; quem nao consegue
 # a vaga espera a proxima em vez de disputar memoria.
-MAX_DECODIFICACOES = int(os.getenv("S3_MAX_DECODIFICACOES", "2"))
+MAX_DECODIFICACOES = _int_do_env("S3_MAX_DECODIFICACOES", 2)
 _semaforo_decodificacao = threading.BoundedSemaphore(MAX_DECODIFICACOES)
 
 SUFIXO_THUMB = "-thumb.jpg"
