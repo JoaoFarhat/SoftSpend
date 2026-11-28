@@ -32,6 +32,11 @@ nonisolated enum ResultadoRegistro: Equatable {
 nonisolated enum ErroRegistro: Error, Equatable {
     /// `lancar` num dia sem viagem ligada (não há `gasto_total` a atualizar).
     case diaSemViagem
+    /// iPhone sem espaço (`BancoLocal.semEspacoNoDisco`): o banco abriu só em
+    /// memória — gravar agora perderia o gasto ao fechar o app, e a compra
+    /// sairia da fila para sempre. A recusa vem antes de gravar e sem tirar
+    /// da fila: liberado o espaço, a compra ainda está lá para lançar.
+    case semEspaco
 }
 
 /// Valor da compra, como texto: "R$ 12,34", "12,34", "12.34", "1.234,56",
@@ -205,9 +210,16 @@ enum RegistroApplePay {
     /// falhou o save, o item fica. E só grava se o `id` ainda estiver na fila —
     /// a `compras` da folha é uma cópia e um toque duplo em "Lançar" não pode
     /// criar o gasto duas vezes (o segundo toque vira no-op).
+    ///
+    /// `semEspaco` espelha `BancoLocal.semEspacoNoDisco` e entra por parâmetro
+    /// para o teste: `true` recusa com `ErroRegistro.semEspaco` **antes** de
+    /// gravar e sem tirar da fila — com o banco só em memória, o gasto e a
+    /// compra se perderiam ao fechar o app.
     static func lancar(_ compra: CompraAguardandoViagem, em dia: DiaSoftex,
                        contexto: ModelContext,
-                       fila: ComprasAguardandoViagem = .shared) throws {
+                       fila: ComprasAguardandoViagem = .shared,
+                       semEspaco: Bool = BancoLocal.semEspacoNoDisco) throws {
+        guard !semEspaco else { throw ErroRegistro.semEspaco }
         guard dia.ciclo != nil else { throw ErroRegistro.diaSemViagem }
         guard fila.contem(id: compra.id) else {
             logger.info("Lançar ignorado: a compra \(compra.id, privacy: .public) já saiu da fila")

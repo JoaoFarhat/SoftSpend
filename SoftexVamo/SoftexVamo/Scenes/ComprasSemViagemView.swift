@@ -163,12 +163,15 @@ struct ComprasSemViagemView: View {
 
     /// "Lançar": grava o gasto no dia da compra (o item sai da fila só depois
     /// do `save`, dentro de `RegistroApplePay.lancar`) e sobe para o servidor
-    /// como qualquer gasto.
+    /// como qualquer gasto. Com o iPhone sem espaço (`ErroRegistro.semEspaco`)
+    /// a compra fica na fila e o aviso pede para liberar espaço e tentar de novo.
     private func lancar(_ compra: CompraAguardandoViagem, em dia: DiaSoftex) {
         do {
             try RegistroApplePay.lancar(compra, em: dia, contexto: contexto)
             Task { await SyncManager.shared.sync(forcar: true) }
             aoMudar()
+        } catch ErroRegistro.semEspaco {
+            viewModel.errorManager?.show(message: "Sem espaço no iPhone; libere espaço e lance de novo.")
         } catch {
             viewModel.errorManager?.show(error: error)
         }
