@@ -71,10 +71,11 @@ final class RedefinirSenhaViewModel: ObservableObject {
     private let api: RedefinicaoSenhaAPI
     private let entrar: @MainActor (String, String) async -> Bool
     private var contagem: Task<Void, Never>?
-    /// Recusas `400 invalid_reset_code` do `redefinir` por e-mail aparado,
-    /// desde que a tela abriu. `reenviarCodigo()` não zera: o código novo
-    /// herda as erradas no servidor. `usarOutroEmail()` mantém a contagem de
-    /// cada e-mail — trocar de e-mail recomeça, voltar ao mesmo retoma.
+    /// Recusas `400 invalid_reset_code` do `redefinir` por e-mail (aparado e
+    /// em minúsculas — o MySQL casa o e-mail sem caixa), desde que a tela
+    /// abriu. `reenviarCodigo()` não zera: o código novo herda as erradas no
+    /// servidor. `usarOutroEmail()` mantém a contagem de cada e-mail — trocar
+    /// de e-mail recomeça, voltar ao mesmo retoma.
     private var recusasDeCodigoPorEmail: [String: Int] = [:]
 
     init(
@@ -176,7 +177,7 @@ final class RedefinirSenhaViewModel: ObservableObject {
         // Com `maxTentativas` recusas neste e-mail, o servidor não mandaria um
         // código novo — mas responderia 202 do mesmo jeito. Bloqueia aqui em
         // vez de prometer um e-mail que não chega.
-        if (recusasDeCodigoPorEmail[emailAparado] ?? 0) >= Self.maxTentativas {
+        if (recusasDeCodigoPorEmail[emailAparado.lowercased()] ?? 0) >= Self.maxTentativas {
             erro = Texto.bloqueado
             bloqueado = true
             return
@@ -184,6 +185,7 @@ final class RedefinirSenhaViewModel: ObservableObject {
         carregando = true
         erro = nil
         codigoRecusado = false
+        bloqueado = false
         do {
             let resposta = try await api.pedirCodigoRedefinicao(email: emailAparado)
             minutosValidade = max(1, resposta.expiresInSeconds / 60)
@@ -218,8 +220,9 @@ final class RedefinirSenhaViewModel: ObservableObject {
     private func contarRecusaDeCodigo(_ error: Error) -> Bool {
         guard case let APIError.serverError(mensagem, _, status) = error,
               status == 400, mensagem == Self.codigoInvalidoServidor else { return false }
-        let recusas = (recusasDeCodigoPorEmail[emailAparado] ?? 0) + 1
-        recusasDeCodigoPorEmail[emailAparado] = recusas
+        let chave = emailAparado.lowercased()
+        let recusas = (recusasDeCodigoPorEmail[chave] ?? 0) + 1
+        recusasDeCodigoPorEmail[chave] = recusas
         return recusas >= Self.maxTentativas
     }
 

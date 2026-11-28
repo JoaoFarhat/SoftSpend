@@ -297,6 +297,46 @@ struct RedefinirSenhaTests {
         #expect(vm.etapa == .email)
     }
 
+    @Test func trocarOEmailDepoisDoBloqueioNaEtapaDoEmailDesbloqueia() async {
+        let vm = await telaDeCodigoRecusado()
+
+        for _ in 1...5 { await vm.redefinir() }
+        #expect(vm.bloqueado)
+
+        vm.usarOutroEmail()
+        await vm.enviarCodigo()     // mesmo e-mail: bloqueia na etapa do e-mail
+        #expect(vm.bloqueado)
+        #expect(vm.etapa == .email)
+
+        vm.email = "maria@empresa.com"
+        await vm.enviarCodigo()
+
+        #expect(!vm.bloqueado)
+        #expect(vm.etapa == .codigo)
+        vm.codigo = "123456"
+        vm.novaSenha = senhaBoa
+        vm.confirmarSenha = senhaBoa
+        #expect(vm.podeRedefinir)
+    }
+
+    @Test func recusasSeguemOEmailSemCaixa() async {
+        let vm = await telaDeCodigoRecusado()
+
+        for _ in 1...4 { await vm.redefinir() }
+
+        vm.usarOutroEmail()
+        vm.email = "JOAO@empresa.com"   // o MySQL casa o e-mail sem caixa
+        await vm.enviarCodigo()
+        vm.codigo = "000000"
+        vm.novaSenha = senhaBoa
+        vm.confirmarSenha = senhaBoa
+
+        await vm.redefinir()            // 5ª recusa da conta, não 1ª da caixa nova
+
+        #expect(vm.bloqueado)
+        #expect(vm.erro == RedefinirSenhaViewModel.Texto.bloqueado)
+    }
+
     @Test func bloqueadoNaoSaiChamadaNovaParaAAPI() async {
         let vm = await telaDeCodigoRecusado()
 

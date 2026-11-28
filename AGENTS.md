@@ -1167,12 +1167,16 @@ dígitos, mesmo contrato do Safeel):
   `RedefinicaoSenhaAPI`, fake em `SoftSpendTests/FakeRedefinicaoSenhaAPI.swift`);
   depois da troca, entra direto com a senha nova. O ViewModel espelha a janela
   do servidor (`maxTentativas`/`horasBloqueio` acompanham `MAX_TENTATIVAS`/
-  `JANELA_TENTATIVAS`): conta os `400 invalid_reset_code` por e-mail aparado —
-  `reenviarCodigo()` não zera, porque o código novo herda as erradas no
-  servidor — e na 5ª liga `bloqueado`: o erro vira "peça um novo código daqui
-  a 24 horas" e a tela esconde o reenvio (senão o 202 do `esqueci` prometeria
-  um e-mail que o servidor se recusa a mandar). `usarOutroEmail()` é a saída;
-  a contagem do e-mail trocado recomeça e a do antigo fica guardada.
+  `JANELA_TENTATIVAS`): conta os `400 invalid_reset_code` por e-mail aparado e
+  em minúsculas (o MySQL casa o e-mail sem caixa) — `reenviarCodigo()` não
+  zera, porque o código novo herda as erradas no servidor — e na 5ª liga
+  `bloqueado`: o erro vira "peça um novo código daqui a 24 horas" e a tela
+  esconde o reenvio (senão o 202 do `esqueci` prometeria um e-mail que o
+  servidor se recusa a mandar). `usarOutroEmail()` é a saída; a contagem do
+  e-mail trocado recomeça e a do antigo fica guardada. O `pedir()` fecha e
+  abre o `bloqueado` pela contagem do e-mail atual: pedir código de novo para
+  o e-mail já no teto bloqueia sem chamar a API; um e-mail novo passa e
+  desbloqueia.
 
 E-mail (`services/email_service.py`, AWS SES v2 via boto3):
 
