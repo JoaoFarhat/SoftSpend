@@ -111,9 +111,9 @@ final class CiclosViewModel: ObservableObject {
         errorManager?.show(error: error)
     }
 
-    /// Porta das escritas manuais (viagem nova, gasto novo, edição de
-    /// gasto), chamada no começo de cada uma, antes de mexer no
-    /// `modelContext`: sem espaço no iPhone o banco é só memória e, sem
+    /// Porta das escritas manuais (viagem nova ou editada, gasto novo ou
+    /// editado, nota anexada), chamada no começo de cada uma, antes de mexer
+    /// no `modelContext`: sem espaço no iPhone o banco é só memória e, sem
     /// internet para o envio subir o item, ele apareceria como salvo e
     /// sumiria ao fechar o app. Com internet ou com espaço, grava como
     /// sempre — com internet, o envio garante que nada se perde.
@@ -915,7 +915,8 @@ final class CiclosViewModel: ObservableObject {
         try await postToNetwork(newCiclo: newCiclo, dias: dias)
     }
     
-    func editCiclo(cicloId: Int, ciclo: CicloSoftex, dias: [DiaLoteRequest]? = nil) async {
+    func editCiclo(cicloId: Int, ciclo: CicloSoftex, dias: [DiaLoteRequest]? = nil) async throws {
+        try garantirGravavel()
         guard let cicloLocal = self.allCiclos.first(where: { $0.backendId == cicloId }) else {
             viewModelLogger.warning("editCiclo: ciclo nao encontrado allCiclos backendId=\(cicloId, privacy: .public)")
             return
@@ -1123,6 +1124,7 @@ final class CiclosViewModel: ObservableObject {
     }
 
     func anexarComprovante(gastoId: UUID, imageData: Data, mime: String = "image/jpeg") async throws {
+        try garantirGravavel()
         guard let modelContext else {
             throw APIError.serverError(message: "Contexto do banco de dados não configurado", requestId: "-", statusCode: 500)
         }

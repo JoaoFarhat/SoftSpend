@@ -163,7 +163,7 @@ struct ApagarSemBackendIdTests {
         // A edição mantém só o primeiro dia.
         let (vm, aberto) = try viewModel()
         let cicloId = try #require(aberto.backendId)
-        await vm.editCiclo(cicloId: cicloId, ciclo: aberto, dias: [DiaLoteRequest(clientId: UUID().uuidString, data: hoje())])
+        try await vm.editCiclo(cicloId: cicloId, ciclo: aberto, dias: [DiaLoteRequest(clientId: UUID().uuidString, data: hoje())])
 
         api.limparChamadas()
         #expect(await sync() == 0)

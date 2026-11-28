@@ -76,8 +76,10 @@ Spec completa: `docs/migracao-banco-local-ios.md`.
 - Nesse modo, a gravação é recusada em todas as entradas: o atalho do
   Apple Pay (`RegistrarGastoIntent.respostaSemEspaco`), o "Lançar" da fila
   de compras (`RegistroApplePay.lancar`, `ErroRegistro.semEspaco`) e as
-  escritas manuais do `CiclosViewModel` (`createNewCiclo`, `createNewGasto`,
-  `editGasto`). As manuais só recusam quando também não há internet — com
+  escritas manuais do `CiclosViewModel` (`createNewCiclo`, `editCiclo`,
+  `createNewGasto`, `editGasto`, `anexarComprovante`; apagar gasto, viagem
+  ou nota fica de fora — no pior caso o item reaparece, nada se perde).
+  As manuais só recusam quando também não há internet — com
   internet o envio sobe o item e ele não se perde — e lançam
   `ErroSemEspaco` antes de mexer no `modelContext`; a tela mostra o
   `localizedDescription` sem fechar o formulário. O `semEspaco` entra pelo
