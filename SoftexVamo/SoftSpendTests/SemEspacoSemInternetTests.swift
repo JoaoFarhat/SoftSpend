@@ -7,11 +7,13 @@ import SwiftData
 /// memória) **e** sem internet: o lançamento à mão gravava num banco que
 /// some ao fechar o app e a tela mostrava o item como salvo. O atalho do
 /// Apple Pay e o "Lançar" da fila já recusam nesse caso (ver
-/// `FaltaDeEspacoBancoTests`); agora `createNewGasto`, `editGasto` e
-/// `createNewCiclo` também recusam com `ErroSemEspaco`, antes de mexer no
-/// `modelContext`. Com internet (o envio sobe o item) ou com espaço (o
-/// banco grava de verdade), tudo segue como antes. `semEspaco` e
-/// `estaConectado` entram pelo `init`, como no `PedidoDeEnvioTests`.
+/// `FaltaDeEspacoBancoTests`); agora `createNewGasto`, `editGasto`,
+/// `createNewCiclo`, `editCiclo` e `anexarComprovante` também recusam com
+/// `ErroSemEspaco`, antes de mexer no `modelContext` (apagar gasto, viagem
+/// ou nota fica de fora: no pior caso o item reaparece, nada se perde).
+/// Com internet (o envio sobe o item) ou com espaço (o banco grava de
+/// verdade), tudo segue como antes. `semEspaco` e `estaConectado` entram
+/// pelo `init`, como no `PedidoDeEnvioTests`.
 @MainActor
 struct SemEspacoSemInternetTests {
     let container: ModelContainer
@@ -107,6 +109,40 @@ struct SemEspacoSemInternetTests {
         #expect(vm.allCiclos.isEmpty)
     }
 
+    @Test func editarViagemSemEspacoSemInternetRecusa() async throws {
+        let vm = viewModel(semEspaco: true, conectado: false)
+        let (ciclo, dia) = try viagemAberta(no: vm)
+        ciclo.backendId = 7
+        ciclo.syncStatus = .synced
+        let edicao = CicloSoftex(valor_total: 600, gasto_total: 0,
+                                 periodo: "01/09 - 03/09", diaria: 200,
+                                 titulo: "Recife, PE", dias: nil)
+
+        await #expect(throws: ErroSemEspaco.self) {
+            try await vm.editCiclo(cicloId: 7, ciclo: edicao,
+                                   dias: [DiaLoteRequest(clientId: UUID().uuidString, data: hoje(mais: 1))])
+        }
+        #expect(ciclo.titulo == "Cuiabá, MT")
+        #expect(ciclo.valor_total == 300)
+        #expect(ciclo.diaria == 100)
+        #expect(ciclo.syncStatus == .synced)
+        #expect(dia.deletadoEm == nil)
+        #expect(try ctx.fetch(FetchDescriptor<DiaSoftex>()).count == 1)
+    }
+
+    @Test func anexarNotaSemEspacoSemInternetRecusa() async throws {
+        let vm = viewModel(semEspaco: true, conectado: false)
+        let (ciclo, dia) = try viagemAberta(no: vm)
+        let gasto = try gasto(em: dia, no: ciclo)
+        gasto.syncStatus = .synced
+
+        await #expect(throws: ErroSemEspaco.self) {
+            try await vm.anexarComprovante(gastoId: gasto.id, imageData: Data([1, 2, 3]))
+        }
+        #expect(gasto.comprovanteDataCriptografado == nil)
+        #expect(gasto.syncStatus == .synced)
+    }
+
     // MARK: Sem espaço com internet: o envio garante, grava como sempre
 
     @Test func criarGastoSemEspacoComInternetGrava() async throws {
@@ -146,6 +182,38 @@ struct SemEspacoSemInternetTests {
         #expect(try ctx.fetch(FetchDescriptor<DiaSoftex>()).count == 3)
     }
 
+    @Test func editarViagemSemEspacoComInternetGrava() async throws {
+        let vm = viewModel(semEspaco: true, conectado: true)
+        let (ciclo, _) = try viagemAberta(no: vm)
+        ciclo.backendId = 7
+        ciclo.syncStatus = .synced
+        let edicao = CicloSoftex(valor_total: 600, gasto_total: 0,
+                                 periodo: "01/09 - 03/09", diaria: 200,
+                                 titulo: "Recife, PE", dias: nil)
+
+        try await vm.editCiclo(cicloId: 7, ciclo: edicao,
+                               dias: [DiaLoteRequest(clientId: UUID().uuidString, data: hoje()),
+                                      DiaLoteRequest(clientId: UUID().uuidString, data: hoje(mais: 1))])
+
+        #expect(ciclo.titulo == "Recife, PE")
+        #expect(ciclo.valor_total == 600)
+        #expect(ciclo.diaria == 200)
+        #expect(ciclo.syncStatus == .pending)
+        // O dia de hoje ficou e o de amanhã entrou.
+        #expect(try ctx.fetch(FetchDescriptor<DiaSoftex>()).count == 2)
+    }
+
+    @Test func anexarNotaSemEspacoComInternetGrava() async throws {
+        let vm = viewModel(semEspaco: true, conectado: true)
+        let (ciclo, dia) = try viagemAberta(no: vm)
+        let gasto = try gasto(em: dia, no: ciclo)
+
+        try await vm.anexarComprovante(gastoId: gasto.id, imageData: Data([1, 2, 3]))
+
+        #expect(gasto.comprovanteDataCriptografado != nil)
+        #expect(gasto.comprovanteMime == "image/jpeg")
+    }
+
     // MARK: Com espaço e sem internet: o banco grava de verdade, como sempre
 
     @Test func criarGastoComEspacoSemInternetGrava() async throws {
@@ -183,6 +251,34 @@ struct SemEspacoSemInternetTests {
         try #require(ciclos.count == 1)
         #expect(ciclos[0].titulo == "Cuiabá, MT")
         #expect(try ctx.fetch(FetchDescriptor<DiaSoftex>()).count == 3)
+    }
+
+    @Test func editarViagemComEspacoSemInternetGrava() async throws {
+        let vm = viewModel(semEspaco: false, conectado: false)
+        let (ciclo, _) = try viagemAberta(no: vm)
+        ciclo.backendId = 7
+        ciclo.syncStatus = .synced
+        let edicao = CicloSoftex(valor_total: 600, gasto_total: 0,
+                                 periodo: "01/09 - 03/09", diaria: 200,
+                                 titulo: "Recife, PE", dias: nil)
+
+        try await vm.editCiclo(cicloId: 7, ciclo: edicao,
+                               dias: [DiaLoteRequest(clientId: UUID().uuidString, data: hoje()),
+                                      DiaLoteRequest(clientId: UUID().uuidString, data: hoje(mais: 1))])
+
+        #expect(ciclo.titulo == "Recife, PE")
+        #expect(ciclo.valor_total == 600)
+        #expect(try ctx.fetch(FetchDescriptor<DiaSoftex>()).count == 2)
+    }
+
+    @Test func anexarNotaComEspacoSemInternetGrava() async throws {
+        let vm = viewModel(semEspaco: false, conectado: false)
+        let (ciclo, dia) = try viagemAberta(no: vm)
+        let gasto = try gasto(em: dia, no: ciclo)
+
+        try await vm.anexarComprovante(gastoId: gasto.id, imageData: Data([1, 2, 3]))
+
+        #expect(gasto.comprovanteDataCriptografado != nil)
     }
 
     // MARK: Aviso na tela

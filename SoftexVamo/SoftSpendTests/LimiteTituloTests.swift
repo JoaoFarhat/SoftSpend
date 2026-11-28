@@ -128,7 +128,7 @@ struct LimiteTituloTests {
         vm.atualCiclo = ciclo
         let edicao = CicloSoftex(valor_total: 300, gasto_total: 0, periodo: "01/09 - 03/09",
                                  diaria: 100, titulo: Self.t150, dias: nil)
-        await vm.editCiclo(cicloId: 7, ciclo: edicao)
+        try await vm.editCiclo(cicloId: 7, ciclo: edicao)
 
         #expect(ciclo.titulo.count == 100)
     }

@@ -337,13 +337,26 @@ struct NewCicloView: View {
                     return
                 }
                 let dias = Calendar.current.datesBetween(ida, and: volta)
-                let cicloEditado = ciclo
-                cicloEditado.titulo = titulo
-                cicloEditado.valor_total = total
-                cicloEditado.periodo = periodoCurto(ida, volta)
-                cicloEditado.diaria = ValoresViagem.diaria(total: total, dias: max(dias, 1))
+                // Portador fora do contexto (o `editCiclo` só lê os campos):
+                // mexer no `ciclo` antes da chamada deixaria a viagem alterada
+                // em memória quando o envio é recusado (ErroSemEspaco).
+                let cicloEditado = CicloSoftex(userId: ciclo.userId, valor_total: total,
+                                             gasto_total: ciclo.gasto_total,
+                                             periodo: periodoCurto(ida, volta),
+                                             diaria: ValoresViagem.diaria(total: total, dias: max(dias, 1)),
+                                             titulo: titulo, dias: nil)
                 let novosDias = cicloViewModel.createAllDiasLoteRequest(dayCount: dias, startDate: ida)
-                await cicloViewModel.editCiclo(cicloId: cicloId, ciclo: cicloEditado, dias: novosDias)
+                do {
+                    try await cicloViewModel.editCiclo(cicloId: cicloId, ciclo: cicloEditado, dias: novosDias)
+                } catch {
+                    salvando = false
+                    // Mesmo aviso do ramo de criação: ErroSemEspaco já traz a
+                    // frase exata; o formulário fica aberto.
+                    erroSalvar = error is ErroSemEspaco
+                        ? error.localizedDescription
+                        : "Não foi possível salvar a viagem. Tente novamente."
+                    return
+                }
             } else {
                 do {
                     try await cicloViewModel.createNewCiclo(startDate: ida, endDate: volta,

@@ -372,7 +372,11 @@ struct DetalheGastoView: View {
             do {
                 try await viewModel.anexarComprovante(gastoId: id, imageData: dados, mime: mime)
             } catch {
-                erro = "Não foi possível anexar o comprovante. Tente novamente."
+                // ErroSemEspaco (sem espaço + sem internet) já traz a frase
+                // exata do motivo; os outros erros seguem com o texto de hoje.
+                erro = error is ErroSemEspaco
+                    ? error.localizedDescription
+                    : "Não foi possível anexar o comprovante. Tente novamente."
             }
         }
     }

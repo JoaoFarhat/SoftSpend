@@ -98,7 +98,7 @@ struct PedidoDeEnvioTests {
         let edicao = CicloSoftex(valor_total: 300, gasto_total: 0, periodo: "01/09 - 03/09",
                                  diaria: 100, titulo: "Recife, PE", dias: nil)
 
-        await vm.editCiclo(cicloId: 7, ciclo: edicao)
+        try await vm.editCiclo(cicloId: 7, ciclo: edicao)
 
         await envios.aguardarUm()
         #expect(envios.chamadas == 1)
