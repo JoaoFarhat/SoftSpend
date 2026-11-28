@@ -264,22 +264,6 @@ def listar_gastos_sem_match(db: Session, user_id: str):
     )
 
 
-def listar_transacoes_sem_match(db: Session, user_id: str):
-    return (
-        db.query(models.CreditCardTransaction)
-        .outerjoin(
-            models.ExpenseTransactionMatch,
-            models.ExpenseTransactionMatch.cartao_transacao_id
-            == models.CreditCardTransaction.id,
-        )
-        .filter(
-            models.CreditCardTransaction.user_id == user_id,
-            models.ExpenseTransactionMatch.id.is_(None),
-        )
-        .all()
-    )
-
-
 def existe_transacao_sem_match(db: Session, user_id: str) -> bool:
     return (
         db.query(models.CreditCardTransaction.id)
