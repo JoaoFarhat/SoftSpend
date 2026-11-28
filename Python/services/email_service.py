@@ -12,13 +12,17 @@ Variaveis (lidas a cada envio, para os testes poderem trocar):
   cadeia padrao do boto3 (role da EC2, `~/.aws`).
 
 O envio roda em background (BackgroundTasks) e nunca lanca: falha so vai para o
-log, sem o e-mail do destinatario nem o codigo.
+log, sem o e-mail do destinatario nem o codigo. Quando o SES recusa, o log traz
+o `Error.Code` do `ClientError` (ex.: `MessageRejected`, `AccessDeniedException`)
+para distinguir sandbox, dominio nao verificado e falta de permissao — nunca a
+mensagem do erro, que pode repetir dados do envio.
 """
 import logging
 from html import escape as html_escape
 import os
 
 import boto3
+from botocore.exceptions import ClientError
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +82,12 @@ def enviar_codigo_redefinicao(para: str, nome: str, codigo: str, minutos: int) -
                     },
                 }
             },
+        )
+    except ClientError as exc:
+        logger.error(
+            "Falha ao enviar e-mail de redefinicao: %s, codigo SES %s",
+            type(exc).__name__,
+            exc.response.get("Error", {}).get("Code", "-"),
         )
     except Exception as exc:  # noqa: BLE001 — background: so registra.
         logger.error("Falha ao enviar e-mail de redefinicao: %s", type(exc).__name__)
