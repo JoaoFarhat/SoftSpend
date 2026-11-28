@@ -162,6 +162,12 @@ def conciliar_usuario(db: Session, user_id: str) -> int:
                 match.transacao.open_finance_match = None
             open_finance_repository.remover_match(db, match)
 
+    # Sem compra aguardando vínculo nenhum gasto pode casar: sai antes da
+    # segunda volta, que consultaria cada gasto sem vínculo (e o `dia` de
+    # cada um) só para não achar candidato.
+    if not open_finance_repository.listar_transacoes_sem_match(db, user_id):
+        return 0
+
     total = 0
     for gasto in open_finance_repository.listar_gastos_sem_match(db, user_id):
         if conciliar_gasto(db, gasto, user_id):
