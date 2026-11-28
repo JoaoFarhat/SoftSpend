@@ -1092,7 +1092,8 @@ Para conferir se o servidor está pronto para a loja (banco conecta,
 `alembic_version` igual ao head, segredos e `APPLE_*` presentes,
 `EMAIL_REMETENTE` e `SES_REGION` definidas para o "Esqueci minha senha",
 `.cer` em `certificados_apple/`, conta de demonstração liberada, timers da
-conferência das assinaturas e do backup ligados), rode na EC2, de
+conferência das assinaturas e do backup ligados, nginx instalado igual ao
+`deploy/ec2/nginx-softspend.conf` do repositório), rode na EC2, de
 dentro de `Python/`: `python -m scripts.conferir_servidor`. Imprime uma
 linha `OK`/`FALTA` por item — nunca o valor de segredos — e sai 1 se faltar
 algo. Testes em `tests/test_conferir_servidor.py`.
