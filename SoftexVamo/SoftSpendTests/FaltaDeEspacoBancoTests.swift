@@ -57,4 +57,17 @@ struct FaltaDeEspacoBancoTests {
     @Test func textoDoAviso() {
         #expect(BancoLocal.avisoSemEspaco == "Sem espaço no iPhone; libere espaço e abra de novo")
     }
+
+    /// O atalho do Apple Pay não grava nada com o banco só em memória (o
+    /// gasto sumiria ao fechar o app e a resposta "registrado" enganaria a
+    /// pessoa): `true` devolve a resposta honesta, `false` segue o fluxo
+    /// normal.
+    @Test func atalhoRecusaQuandoSemEspaco() {
+        #expect(RegistrarGastoIntent.respostaSemEspaco(semEspaco: true)
+            == "Sem espaço no iPhone; libere espaço e lance no app.")
+    }
+
+    @Test func atalhoSegueNormalComEspaco() {
+        #expect(RegistrarGastoIntent.respostaSemEspaco(semEspaco: false) == nil)
+    }
 }
