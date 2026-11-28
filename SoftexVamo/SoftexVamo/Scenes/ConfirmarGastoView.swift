@@ -494,10 +494,10 @@ struct ConfirmarGastoView: View {
                 aoSalvar()
             } catch is FalhaComprovante {
                 rascunho.aviso = "O gasto foi salvo, mas o comprovante não. Tente anexar de novo."
-            } catch is ErroSemEspaco {
+            } catch let erro as ErroSemEspaco {
                 // Sem espaço + sem internet: o gasto não foi gravado e a
                 // frase do erro explica o porquê; o formulário fica aberto.
-                rascunho.aviso = error.localizedDescription
+                rascunho.aviso = erro.localizedDescription
             } catch {
                 // A tela não tem o alerta do ErrorManager: o aviso aparece no próprio formulário.
                 rascunho.aviso = "Não foi possível salvar o gasto. Tente novamente."
