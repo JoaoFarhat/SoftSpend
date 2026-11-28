@@ -123,15 +123,17 @@ struct RedefinirSenhaView: View {
             .padding(.top, Espaco.p)
 
             VStack(spacing: Espaco.m) {
-                Button {
-                    Task { await vm.reenviarCodigo() }
-                } label: {
-                    Text(vm.segundosParaReenviar > 0
-                         ? "Reenviar código (\(vm.segundosParaReenviar) s)"
-                         : (vm.codigoRecusado ? "Pedir novo código" : "Reenviar código"))
-                        .fontWeight(.semibold)
+                if !vm.bloqueado {
+                    Button {
+                        Task { await vm.reenviarCodigo() }
+                    } label: {
+                        Text(vm.segundosParaReenviar > 0
+                             ? "Reenviar código (\(vm.segundosParaReenviar) s)"
+                             : (vm.codigoRecusado ? "Pedir novo código" : "Reenviar código"))
+                            .fontWeight(.semibold)
+                    }
+                    .disabled(!vm.podeReenviar)
                 }
-                .disabled(!vm.podeReenviar)
 
                 Button("Usar outro e-mail") { vm.usarOutroEmail() }
                     .foregroundStyle(Tema.textoFraco)
