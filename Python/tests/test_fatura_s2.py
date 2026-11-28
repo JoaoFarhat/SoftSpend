@@ -685,6 +685,68 @@ def test_matches_confirmar_e_desvincular(ambiente):
     assert client.post("/api/faturas/matches/9999/confirm").status_code == 404
 
 
+def test_conciliar_sem_compra_sem_vinculo_nao_consulta_gastos(ambiente):
+    """Sem compra de fatura aguardando vínculo, `conciliar_usuario` sai
+    antes da segunda volta: nenhuma consulta toca `gastos_dia`. Com
+    milhares de gastos a volta seriam milhares de consultas num só
+    pedido (`listar_gastos_sem_match` + o `dia` de cada um +
+    `_candidatos` por gasto). A primeira volta, que desfaz vínculo que
+    deixou de valer, continua rodando."""
+    import models
+    from sqlalchemy import event
+
+    from services import open_finance_reconciliation_service
+
+    session = ambiente.session
+    _, dias = _ciclo(session)
+    _gasto(session, dias[0], "LOJA Z", "100.00")
+    session.commit()
+
+    consultas = []
+
+    def contar(conn, cursor, statement, parameters, context, executemany):
+        consultas.append(statement)
+
+    engine = session.get_bind()
+    event.listen(engine, "before_cursor_execute", contar)
+    try:
+        total = open_finance_reconciliation_service.conciliar_usuario(
+            session, USER_A
+        )
+        assert total == 0
+        assert consultas  # a primeira volta e a checagem rodaram
+        assert not any("gastos_dia" in s for s in consultas)
+
+        # Controle: com uma compra sem vínculo a segunda volta volta a
+        # consultar os gastos — senão o contador mediria só o vazio.
+        cartao = models.CreditCardAccount(
+            user_id=USER_A, origem="FATURA", account_id="fatura:controle"
+        )
+        session.add(cartao)
+        session.flush()
+        session.add(
+            models.CreditCardTransaction(
+                cartao_id=cartao.id,
+                user_id=USER_A,
+                transaction_id="fatura:controle",
+                description="LOJA Z",
+                amount=Decimal("100.00"),
+                date=_dt(INICIO),
+                type="DEBIT",
+            )
+        )
+        session.commit()
+
+        consultas.clear()
+        total = open_finance_reconciliation_service.conciliar_usuario(
+            session, USER_A
+        )
+        assert total == 1
+        assert any("gastos_dia" in s for s in consultas)
+    finally:
+        event.remove(engine, "before_cursor_execute", contar)
+
+
 # --------------------------------------------------------------- migration
 
 
