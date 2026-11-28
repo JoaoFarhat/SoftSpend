@@ -6,6 +6,10 @@
 //  nova. O servidor responde igual com ou sem conta, então os textos dizem
 //  "se houver uma conta". Depois de trocar a senha, entra direto com ela.
 //
+//  Depois de 5 códigos errados o servidor não manda código novo por 24 h e
+//  responde 202 do mesmo jeito — a tela conta as recusas por e-mail e bloqueia
+//  em vez de prometer um e-mail que não chega.
+//
 
 import Foundation
 import Combine
@@ -30,10 +34,17 @@ final class RedefinirSenhaViewModel: ObservableObject {
         static let muitasTentativas = "Muitas tentativas. Tente de novo em instantes."
         static let semConexao = "Sem conexão com o servidor. Confira a internet e tente de novo."
         static let inesperado = "Não foi possível concluir agora. Tente de novo."
+        static let bloqueado = "Muitas tentativas erradas. Por segurança, peça um novo código daqui a \(RedefinirSenhaViewModel.horasBloqueio) horas."
     }
 
     static let codigoInvalidoServidor = "invalid_reset_code"
     static let emailIndisponivelServidor = "email_unavailable"
+
+    // Acompanhar `MAX_TENTATIVAS` e `JANELA_TENTATIVAS` do servidor
+    // (`services/redefinicao_senha_service.py`): com tantas recusas o servidor
+    // não manda código novo nesse período.
+    static let maxTentativas = 5
+    static let horasBloqueio = 24
 
     @Published var email: String
     @Published var codigo: String = "" {
@@ -51,12 +62,21 @@ final class RedefinirSenhaViewModel: ObservableObject {
     @Published private(set) var erro: String?
     /// Último erro foi o código recusado: a tela oferece "Pedir novo código".
     @Published private(set) var codigoRecusado = false
+    /// Chegou em `maxTentativas` recusas: o servidor não manda código novo por
+    /// `horasBloqueio` horas, então a tela não oferece mais reenvio.
+    @Published private(set) var bloqueado = false
     @Published private(set) var minutosValidade = 15
     @Published private(set) var segundosParaReenviar = 0
 
     private let api: RedefinicaoSenhaAPI
     private let entrar: @MainActor (String, String) async -> Bool
     private var contagem: Task<Void, Never>?
+    /// Recusas `400 invalid_reset_code` do `redefinir` por e-mail (aparado e
+    /// em minúsculas — o MySQL casa o e-mail sem caixa), desde que a tela
+    /// abriu. `reenviarCodigo()` não zera: o código novo herda as erradas no
+    /// servidor. `usarOutroEmail()` mantém a contagem de cada e-mail — trocar
+    /// de e-mail recomeça, voltar ao mesmo retoma.
+    private var recusasDeCodigoPorEmail: [String: Int] = [:]
 
     init(
         email: String = "",
@@ -76,9 +96,9 @@ final class RedefinirSenhaViewModel: ObservableObject {
     var emailAparado: String { email.trimmingCharacters(in: .whitespacesAndNewlines) }
     var regra: RegraSenha { RegraSenha(senha: novaSenha) }
     var podeEnviarCodigo: Bool { !carregando && emailPareceValido }
-    var podeReenviar: Bool { !carregando && segundosParaReenviar == 0 }
+    var podeReenviar: Bool { !carregando && !bloqueado && segundosParaReenviar == 0 }
     var podeRedefinir: Bool {
-        !carregando && codigo.count == 6 && regra.valida && novaSenha == confirmarSenha
+        !carregando && !bloqueado && codigo.count == 6 && regra.valida && novaSenha == confirmarSenha
     }
 
     private var emailPareceValido: Bool {
@@ -110,10 +130,12 @@ final class RedefinirSenhaViewModel: ObservableObject {
         confirmarSenha = ""
         erro = nil
         codigoRecusado = false
+        bloqueado = false
         etapa = .email
     }
 
     func redefinir() async {
+        guard !bloqueado else { return }
         guard codigo.count == 6 else { erro = Texto.codigoFormato; return }
         guard regra.valida else { erro = Texto.senhaFraca; return }
         guard novaSenha == confirmarSenha else { erro = Texto.senhasDiferentes; return }
@@ -125,7 +147,12 @@ final class RedefinirSenhaViewModel: ObservableObject {
             try await api.redefinirSenha(email: emailAparado, codigo: codigo, novaSenha: novaSenha)
         } catch {
             carregando = false
-            mostrar(error)
+            if contarRecusaDeCodigo(error) {
+                erro = Texto.bloqueado
+                bloqueado = true
+            } else {
+                mostrar(error)
+            }
             return
         }
 
@@ -147,9 +174,18 @@ final class RedefinirSenhaViewModel: ObservableObject {
     // MARK: Apoio
 
     private func pedir() async {
+        // Com `maxTentativas` recusas neste e-mail, o servidor não mandaria um
+        // código novo — mas responderia 202 do mesmo jeito. Bloqueia aqui em
+        // vez de prometer um e-mail que não chega.
+        if (recusasDeCodigoPorEmail[emailAparado.lowercased()] ?? 0) >= Self.maxTentativas {
+            erro = Texto.bloqueado
+            bloqueado = true
+            return
+        }
         carregando = true
         erro = nil
         codigoRecusado = false
+        bloqueado = false
         do {
             let resposta = try await api.pedirCodigoRedefinicao(email: emailAparado)
             minutosValidade = max(1, resposta.expiresInSeconds / 60)
@@ -176,6 +212,18 @@ final class RedefinirSenhaViewModel: ObservableObject {
                 self.segundosParaReenviar -= 1
             }
         }
+    }
+
+    /// Conta uma recusa `400 invalid_reset_code` do `redefinir` no e-mail
+    /// aparado e diz se ela fechou a janela. Só o `redefinir` recebe esse
+    /// código — e conta igual com ou sem conta, como o servidor responde.
+    private func contarRecusaDeCodigo(_ error: Error) -> Bool {
+        guard case let APIError.serverError(mensagem, _, status) = error,
+              status == 400, mensagem == Self.codigoInvalidoServidor else { return false }
+        let chave = emailAparado.lowercased()
+        let recusas = (recusasDeCodigoPorEmail[chave] ?? 0) + 1
+        recusasDeCodigoPorEmail[chave] = recusas
+        return recusas >= Self.maxTentativas
     }
 
     private func mostrar(_ error: Error) {

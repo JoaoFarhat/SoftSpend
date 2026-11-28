@@ -184,6 +184,173 @@ struct RedefinirSenhaTests {
         #expect(vm.codigo.isEmpty)
     }
 
+    // MARK: Bloqueio depois de 5 códigos errados
+
+    /// Deixa a tela na etapa do código com senha válida e o servidor
+    /// respondendo `invalid_reset_code`; sem espera para reenviar.
+    func telaDeCodigoRecusado() async -> RedefinirSenhaViewModel {
+        api.resposta = EsqueciSenhaResponse(expiresInSeconds: 900, resendAfterSeconds: 0)
+        api.erroAoRedefinir = falhaServidor("invalid_reset_code", 400)
+        let vm = viewModel()
+        await vm.enviarCodigo()
+        vm.codigo = "000000"
+        vm.novaSenha = senhaBoa
+        vm.confirmarSenha = senhaBoa
+        return vm
+    }
+
+    @Test func quatroRecusasSeguemOferecendoPedirOutro() async {
+        let vm = await telaDeCodigoRecusado()
+
+        for _ in 1...4 { await vm.redefinir() }
+
+        #expect(!vm.bloqueado)
+        #expect(vm.erro == RedefinirSenhaViewModel.Texto.codigoInvalido)
+        #expect(vm.codigoRecusado)
+        #expect(vm.podeReenviar)
+        #expect(vm.podeRedefinir)
+    }
+
+    @Test func quintaRecusaBloqueia() async {
+        let vm = await telaDeCodigoRecusado()
+
+        for _ in 1...5 { await vm.redefinir() }
+
+        #expect(vm.bloqueado)
+        #expect(vm.erro == "Muitas tentativas erradas. Por segurança, peça um novo código daqui a 24 horas.")
+        #expect(vm.erro == RedefinirSenhaViewModel.Texto.bloqueado)
+        #expect(!vm.codigoRecusado)
+        #expect(!vm.podeReenviar)
+        #expect(!vm.podeRedefinir)
+    }
+
+    @Test func reenviarCodigoNaoZeraAsRecusas() async {
+        let vm = await telaDeCodigoRecusado()
+
+        for _ in 1...4 { await vm.redefinir() }
+        #expect(!vm.bloqueado)
+
+        await vm.reenviarCodigo()   // o servidor herda as erradas no código novo
+        #expect(vm.codigo.isEmpty)
+        #expect(!vm.bloqueado)
+
+        vm.codigo = "111111"
+        await vm.redefinir()        // 5ª recusa do mesmo e-mail
+
+        #expect(vm.bloqueado)
+        #expect(vm.erro == RedefinirSenhaViewModel.Texto.bloqueado)
+    }
+
+    @Test func trocarOEmailZeraAsRecusas() async {
+        let vm = await telaDeCodigoRecusado()
+
+        for _ in 1...5 { await vm.redefinir() }
+        #expect(vm.bloqueado)
+
+        vm.usarOutroEmail()
+        #expect(!vm.bloqueado)
+        #expect(vm.etapa == .email)
+
+        vm.email = "maria@empresa.com"
+        await vm.enviarCodigo()
+        vm.codigo = "000000"
+        vm.novaSenha = senhaBoa
+        vm.confirmarSenha = senhaBoa
+
+        for _ in 1...4 { await vm.redefinir() }
+
+        #expect(!vm.bloqueado)
+        #expect(vm.erro == RedefinirSenhaViewModel.Texto.codigoInvalido)
+        #expect(vm.codigoRecusado)
+    }
+
+    @Test func mesmoEmailMantemAsRecusasDepoisDeUsarOutroEmail() async {
+        let vm = await telaDeCodigoRecusado()
+
+        for _ in 1...4 { await vm.redefinir() }
+
+        vm.usarOutroEmail()         // volta à etapa do e-mail sem trocá-lo
+        await vm.enviarCodigo()
+        vm.codigo = "000000"
+        vm.novaSenha = senhaBoa
+        vm.confirmarSenha = senhaBoa
+
+        await vm.redefinir()        // 5ª recusa do mesmo e-mail
+
+        #expect(vm.bloqueado)
+        #expect(vm.erro == RedefinirSenhaViewModel.Texto.bloqueado)
+    }
+
+    @Test func usarOutroEmailComOMesmoEmailMantemOBloqueio() async {
+        let vm = await telaDeCodigoRecusado()
+
+        for _ in 1...5 { await vm.redefinir() }
+        #expect(vm.bloqueado)
+        let chamadasAteAqui = api.chamadas.count
+
+        vm.usarOutroEmail()         // volta à etapa do e-mail sem trocá-lo
+        await vm.enviarCodigo()     // o servidor responderia 202 sem mandar e-mail
+
+        #expect(api.chamadas.count == chamadasAteAqui)
+        #expect(vm.bloqueado)
+        #expect(vm.erro == RedefinirSenhaViewModel.Texto.bloqueado)
+        #expect(vm.etapa == .email)
+    }
+
+    @Test func trocarOEmailDepoisDoBloqueioNaEtapaDoEmailDesbloqueia() async {
+        let vm = await telaDeCodigoRecusado()
+
+        for _ in 1...5 { await vm.redefinir() }
+        #expect(vm.bloqueado)
+
+        vm.usarOutroEmail()
+        await vm.enviarCodigo()     // mesmo e-mail: bloqueia na etapa do e-mail
+        #expect(vm.bloqueado)
+        #expect(vm.etapa == .email)
+
+        vm.email = "maria@empresa.com"
+        await vm.enviarCodigo()
+
+        #expect(!vm.bloqueado)
+        #expect(vm.etapa == .codigo)
+        vm.codigo = "123456"
+        vm.novaSenha = senhaBoa
+        vm.confirmarSenha = senhaBoa
+        #expect(vm.podeRedefinir)
+    }
+
+    @Test func recusasSeguemOEmailSemCaixa() async {
+        let vm = await telaDeCodigoRecusado()
+
+        for _ in 1...4 { await vm.redefinir() }
+
+        vm.usarOutroEmail()
+        vm.email = "JOAO@empresa.com"   // o MySQL casa o e-mail sem caixa
+        await vm.enviarCodigo()
+        vm.codigo = "000000"
+        vm.novaSenha = senhaBoa
+        vm.confirmarSenha = senhaBoa
+
+        await vm.redefinir()            // 5ª recusa da conta, não 1ª da caixa nova
+
+        #expect(vm.bloqueado)
+        #expect(vm.erro == RedefinirSenhaViewModel.Texto.bloqueado)
+    }
+
+    @Test func bloqueadoNaoSaiChamadaNovaParaAAPI() async {
+        let vm = await telaDeCodigoRecusado()
+
+        for _ in 1...5 { await vm.redefinir() }
+        #expect(vm.bloqueado)
+        let chamadasAteAqui = api.chamadas.count
+
+        await vm.redefinir()
+        await vm.reenviarCodigo()
+        await vm.enviarCodigo()
+
+        #expect(api.chamadas.count == chamadasAteAqui)
+    }
+
     // MARK: Cadastro com e-mail já usado
 
     @Test func emailJaCadastradoSoNo409ComOCodigo() {
