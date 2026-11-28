@@ -95,15 +95,21 @@ struct SoftexVamoApp: App {
     }
 
     private var raiz: some View {
-        Group {
-            if authService.isAuthenticated {
-                MainView()
-                    .environmentObject(listViewModel)
-                    .id(authService.currentUser?.id)
-            } else {
-                LoginView()
-
+        VStack(spacing: 0) {
+            if BancoLocal.semEspacoNoDisco {
+                avisoSemEspaco
             }
+            Group {
+                if authService.isAuthenticated {
+                    MainView()
+                        .environmentObject(listViewModel)
+                        .id(authService.currentUser?.id)
+                } else {
+                    LoginView()
+
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .environmentObject(authService)
         .environmentObject(errorManager)
@@ -124,6 +130,23 @@ struct SoftexVamoApp: App {
             // as compras pendentes com o token desta conta.
             Task { await AssinaturaViewModel.shared.trocouUsuario() }
         }
+    }
+
+    /// Faixa fixa no topo quando o banco só abriu em memória por falta de
+    /// espaço (`BancoLocal.semEspacoNoDisco`): nada é gravado até o usuário
+    /// liberar espaço e reabrir o app. Aparece logado ou não.
+    private var avisoSemEspaco: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "internaldrive")
+                .accessibilityHidden(true)
+            Text(BancoLocal.avisoSemEspaco)
+        }
+        .font(.caption)
+        .foregroundStyle(Tema.alertaTexto)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 6)
+        .padding(.horizontal, Espaco.p)
+        .background(Tema.superficie)
     }
 
 }

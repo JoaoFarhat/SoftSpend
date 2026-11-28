@@ -62,6 +62,17 @@ Spec completa: `docs/migracao-banco-local-ios.md`.
   `Application Support/softspend-backup-<yyyyMMdd-HHmmss>/`; depois um banco
   novo é criado. Nunca `removeItem`. Abertura normal não loga "backup" nem
   "quarentena".
+- **Exceção à quarentena — falta de espaço no iPhone**: se o erro for
+  `NSCocoaErrorDomain` 640 (`NSFileWriteOutOfSpaceError`),
+  `NSSQLiteErrorDomain` 13 (`SQLITE_FULL`) ou `NSPOSIXErrorDomain` 28
+  (`ENOSPC`), também via `NSUnderlyingErrorKey` — ver
+  `BancoLocal.acaoAposFalhaDeAbertura` — **nenhum arquivo é movido**. O app
+  abre um `ModelContainer` só em memória (`BancoLocal.semEspacoNoDisco`,
+  nada é gravado) e uma faixa fixa no topo do `SoftexVamoApp.raiz` avisa
+  "Sem espaço no iPhone; libere espaço e abra de novo"
+  (`BancoLocal.avisoSemEspaco`). Reabrindo com espaço, o banco real volta
+  com o que ainda não tinha subido. Testes em
+  `SoftSpendTests/FaltaDeEspacoBancoTests.swift`.
 
 ### Isolamento de actor (Swift 6 / `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`)
 
