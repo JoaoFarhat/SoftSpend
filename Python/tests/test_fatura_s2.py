@@ -748,9 +748,8 @@ def test_conciliar_sem_compra_sem_vinculo_nao_consulta_gastos(ambiente):
 
 
 def test_existe_transacao_sem_match(ambiente):
-    """A checagem da saída cedo responde só se existe compra do usuário
-    aguardando vínculo — mesmo filtro da `listar_transacoes_sem_match`,
-    sem trazer a lista."""
+    """A checagem da saída cedo responde só se existe compra sem gasto
+    vinculado, só do usuário — sem trazer a lista."""
     import models
 
     from repositories import open_finance_repository
