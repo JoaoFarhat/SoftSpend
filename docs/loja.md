@@ -108,13 +108,15 @@ Igual ao `SoftexVamo/SoftexVamo/PrivacyInfo.xcprivacy`. Rastreamento: **não** (
 | Informações de contato > Nome | `Name` | Conta e identificação |
 | Identificadores > ID do usuário | `UserID` | Identificar a conta no servidor |
 | Conteúdo do usuário > Outro conteúdo do usuário | `OtherUserContent` | Gastos, viagens e notas anexadas |
+| Conteúdo do usuário > Fotos ou vídeos | `PhotosorVideos` | Foto do comprovante enviada ao servidor e à leitura por IA (Google Gemini) |
+| Dados financeiros > Outras informações financeiras | `OtherFinancialInfo` | Valores dos gastos e compras da fatura importada e do Apple Pay |
 | Compras > Histórico de compras | `PurchaseHistory` | Saber se a assinatura está ativa |
 
-Não declarados (o app não coleta): localização, contatos, dados de saúde, navegação, diagnóstico, publicidade, dados financeiros de cartão. API de motivo obrigatório: `UserDefaults` com o motivo `CA92.1`.
+Não declarados (o app não coleta): localização, contatos, dados de saúde, navegação, diagnóstico, publicidade e número de cartão de pagamento. API de motivo obrigatório: `UserDefaults` com o motivo `CA92.1`.
 
-Pontos a decidir (o rótulo acima segue o manifesto, como combinado):
-- A foto do comprovante vai ao servidor e ao Google (Gemini). Ela está contada como "Outro conteúdo do usuário". Alguns revisores esperam "Fotos ou vídeos"; se a Apple pedir, acrescentar esse tipo aqui **e** no manifesto, juntos.
-- O valor, o estabelecimento e o nome do cartão do Apple Pay entram como gasto (também "Outro conteúdo do usuário").
+Decidido (o rótulo acima segue o manifesto, como combinado):
+- A foto do comprovante vai ao servidor e ao Google (Gemini) e é declarada como "Fotos ou vídeos" — a alternativa "Outro conteúdo do usuário" sozinha ficou para trás, porque `docs/cartao-sem-open-finance.md` §2.8 pede "dados financeiros: compras" e a foto é o item que mais chama atenção na revisão.
+- O valor, o estabelecimento e o nome do cartão do Apple Pay, e as compras da fatura importada, são "Outras informações financeiras"; o lançamento em si (descrição, categoria, data) continua em "Outro conteúdo do usuário".
 - Qualquer mudança no manifesto exige mudar este quadro no mesmo PR.
 
 ## 7. Capturas de tela (modo `-demo`)
