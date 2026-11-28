@@ -381,6 +381,52 @@ def conferir_alertas(
     return Resultado(True, nome, "ALERTA_SNS_TOPICO com ARN do SNS")
 
 
+ARQUIVO_NGINX = Path("/etc/nginx/sites-available/softspend")
+
+
+def conferir_nginx(
+    ambiente: dict, sessao, pasta: Path, arquivo: Path | None = None
+) -> Resultado:
+    """O deploy não copia nem recarrega o nginx: esquecido o passo manual,
+    o servidor fica com o tempo-limite antigo, a leitura de fatura em PDF
+    volta 504 para quem usa e este script dizia tudo OK. Aqui o arquivo
+    instalado é comparado byte a byte com o do repositório. O conteúdo dos
+    arquivos nunca aparece na saída."""
+    nome = "nginx"
+    instalado = ARQUIVO_NGINX if arquivo is None else arquivo
+    repositorio = pasta.parent / "deploy" / "ec2" / "nginx-softspend.conf"
+    try:
+        conteudo_instalado = instalado.read_bytes()
+    except FileNotFoundError:
+        return Resultado(
+            False, nome, "nginx do SoftSpend não instalado — rodar o setup.sh"
+        )
+    except OSError as exc:
+        return Resultado(
+            False, nome, f"arquivo ilegível ({type(exc).__name__})"
+        )
+    try:
+        conteudo_repositorio = repositorio.read_bytes()
+    except FileNotFoundError:
+        return Resultado(
+            False, nome, "nginx-softspend.conf não encontrado no repositório"
+        )
+    except OSError as exc:
+        return Resultado(
+            False, nome, f"arquivo ilegível ({type(exc).__name__})"
+        )
+    if conteudo_instalado == conteudo_repositorio:
+        return Resultado(True, nome, "nginx igual ao do repositório")
+    return Resultado(
+        False,
+        nome,
+        "nginx diferente do repositório — "
+        "sudo cp ~/SoftSpend/deploy/ec2/nginx-softspend.conf "
+        "/etc/nginx/sites-available/softspend "
+        "&& sudo nginx -t && sudo systemctl reload nginx",
+    )
+
+
 def conferir_reinicio(ambiente: dict, sessao, pasta: Path) -> Resultado:
     """O `softspend.service` lê o `.env` só ao iniciar (`EnvironmentFile`),
     mas este script lê o `.env` direto do arquivo: quem edita as `APPLE_*`
@@ -425,6 +471,7 @@ CHECAGENS = (
     conferir_liberacao,
     conferir_timers,
     conferir_alertas,
+    conferir_nginx,
     conferir_reinicio,
 )
 

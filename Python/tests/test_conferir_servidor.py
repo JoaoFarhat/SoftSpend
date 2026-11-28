@@ -64,6 +64,14 @@ def ambiente(tmp_path, monkeypatch):
     alerta = tmp_path / "alerta.env"
     alerta.write_text(f"ALERTA_SNS_TOPICO={ARN_SNS}\n", encoding="utf-8")
     monkeypatch.setattr(cs, "ARQUIVO_ALERTA", alerta)
+    # O nginx instalado é do root na EC2; nos testes, uma cópia igual à do
+    # repositório falso (`pasta.parent`/deploy/ec2/nginx-softspend.conf).
+    nginx_repo = tmp_path / "deploy" / "ec2" / "nginx-softspend.conf"
+    nginx_repo.parent.mkdir(parents=True)
+    nginx_repo.write_bytes(b"server { listen 443; }\n")
+    nginx_instalado = tmp_path / "nginx-instalado.conf"
+    nginx_instalado.write_bytes(b"server { listen 443; }\n")
+    monkeypatch.setattr(cs, "ARQUIVO_NGINX", nginx_instalado)
     pasta = tmp_path / "Python"
     (pasta / "alembic" / "versions").mkdir(parents=True)
     (pasta / "alembic" / "versions" / f"{HEAD}_rev.py").write_text(
@@ -469,6 +477,77 @@ def test_alerta_valor_nao_arn_da_falta(tmp_path):
     assert "ARN do SNS" in linha
     assert "email@exemplo.com" not in linha
     assert ARN_SNS not in linha
+
+
+# `conferir_nginx`: o deploy não copia nem recarrega o nginx; esquecido o
+# passo manual, o servidor fica com o tempo-limite antigo e a leitura de
+# fatura em PDF volta 504 — antes a conferência dizia tudo OK.
+
+
+def _pasta_com_nginx(tmp_path, conteudo: bytes):
+    pasta = tmp_path / "Python"
+    conf = pasta.parent / "deploy" / "ec2" / "nginx-softspend.conf"
+    conf.parent.mkdir(parents=True)
+    conf.write_bytes(conteudo)
+    return pasta
+
+
+def test_nginx_igual_da_ok(tmp_path):
+    pasta = _pasta_com_nginx(tmp_path, b"CONTEUDO-NGINX\n")
+    instalado = tmp_path / "instalado.conf"
+    instalado.write_bytes(b"CONTEUDO-NGINX\n")
+    linha = cs._linha(cs.conferir_nginx({}, None, pasta, instalado))
+    assert linha.startswith("OK")
+    assert "nginx igual ao do repositório" in linha
+    assert "CONTEUDO-NGINX" not in linha
+
+
+def test_nginx_diferente_da_falta_com_comando_de_copia(tmp_path):
+    pasta = _pasta_com_nginx(tmp_path, b"CONTEUDO-NGINX-NOVO\n")
+    instalado = tmp_path / "instalado.conf"
+    instalado.write_bytes(b"CONTEUDO-NGINX-VELHO\n")
+    linha = cs._linha(cs.conferir_nginx({}, None, pasta, instalado))
+    assert linha.startswith("FALTA")
+    assert "nginx diferente do repositório" in linha
+    assert "sudo cp" in linha
+    assert "systemctl reload nginx" in linha
+    assert "CONTEUDO-NGINX" not in linha
+
+
+def test_nginx_instalado_inexistente_da_falta(tmp_path):
+    pasta = _pasta_com_nginx(tmp_path, b"CONTEUDO-NGINX\n")
+    linha = cs._linha(
+        cs.conferir_nginx({}, None, pasta, tmp_path / "sem-nginx.conf")
+    )
+    assert linha.startswith("FALTA")
+    assert "não instalado" in linha
+    assert "setup.sh" in linha
+
+
+def test_nginx_do_repositorio_inexistente_da_falta(tmp_path):
+    pasta = tmp_path / "Python"  # sem deploy/ec2/nginx-softspend.conf
+    instalado = tmp_path / "instalado.conf"
+    instalado.write_bytes(b"CONTEUDO-NGINX\n")
+    linha = cs._linha(cs.conferir_nginx({}, None, pasta, instalado))
+    assert linha.startswith("FALTA")
+    assert "não encontrado no repositório" in linha
+
+
+def test_nginx_oserror_da_falta(tmp_path, monkeypatch):
+    """OSError (PermissionError incluída) vira FALTA com o nome da exceção
+    — sem esse ramo, um arquivo ilegível derrubava o script e o servidor
+    parecia conferido."""
+    pasta = _pasta_com_nginx(tmp_path, b"CONTEUDO-NGINX\n")
+    instalado = tmp_path / "instalado.conf"
+    instalado.write_bytes(b"CONTEUDO-NGINX\n")
+
+    def _read_bytes(*args, **kwargs):
+        raise PermissionError("acesso negado")
+
+    monkeypatch.setattr(Path, "read_bytes", _read_bytes)
+    resultado = cs.conferir_nginx({}, None, pasta, arquivo=instalado)
+    assert resultado.ok is False
+    assert resultado.motivo == "arquivo ilegível (PermissionError)"
 
 
 # `_estado_timer` de verdade (o que roda na EC2), com `subprocess.run`
